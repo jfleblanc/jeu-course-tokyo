@@ -44,7 +44,7 @@ for (const m of CAR_MODELS) {
   reset(100 / 3.6); step(20); input.steer = 1; input.throttle = 0.35;
   let yaw = 0, slip = 0, maxRoll = 0; let prev = car.yaw;
   step(60 * 3, () => { maxRoll = Math.max(maxRoll, roll()); });
-  prev = car.yaw; step(60); yaw = Math.abs(car.yaw - prev) * 57.3; slip = Math.abs(car.bodySlip) * 57.3;
+  prev = car.yaw; step(60); yaw = Math.abs(((car.yaw - prev + Math.PI * 3) % (Math.PI * 2)) - Math.PI) * 57.3; slip = Math.abs(car.bodySlip) * 57.3;
   // Plein gaz en virage depuis 50 km/h (survirage de puissance ? sous-virage ?)
   reset(50 / 3.6); step(20); input.steer = 1; input.throttle = 1; let powerSlip = 0;
   step(60 * 3, () => { powerSlip = Math.max(powerSlip, Math.abs(car.bodySlip) * 57.3); maxRoll = Math.max(maxRoll, roll()); });

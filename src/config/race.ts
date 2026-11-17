@@ -1,5 +1,7 @@
 /** Réglages des courses (phase 2). */
 export const RACE = {
+  /** Masse des adversaires par rapport à leur modèle (moins de 1 = plus faciles à pousser). */
+  aiMassFactor: 0.75,
   /** Longueur visée d'un tracé (m) : environ 1 min 30 à 2 min. */
   targetLength: 2700,
   /** Circuit à plusieurs tours (épreuve plus difficile, pensée pour les changements de palier). */

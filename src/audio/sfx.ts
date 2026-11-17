@@ -6,6 +6,8 @@
  * d'allumage d'un quatre-cylindres et son octave inférieure) passés dans une saturation douce
  * et un filtre qui s'ouvre avec l'accélérateur.
  */
+import type { EngineSound } from '../config/cars';
+
 export interface SfxState {
   rpm: number;
   redline: number;
@@ -19,12 +21,14 @@ export interface SfxState {
   nos: boolean;
   /** Faux : tout est coupé (menus, pause). */
   active: boolean;
+  /** Caractère du moteur de la voiture conduite. */
+  engine: EngineSound;
 }
 
 export class Sfx {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
-  private engine: { a: OscillatorNode; b: OscillatorNode; c: OscillatorNode; filter: BiquadFilterNode; gain: GainNode } | null = null;
+  private engine: { a: OscillatorNode; b: OscillatorNode; c: OscillatorNode; filter: BiquadFilterNode; gain: GainNode; levels: GainNode[]; rumble: GainNode; whistle: OscillatorNode; whistleGain: GainNode } | null = null;
   private tire: { filter: BiquadFilterNode; gain: GainNode } | null = null;
   private wind: { filter: BiquadFilterNode; gain: GainNode } | null = null;
   private nos: { gain: GainNode } | null = null;
@@ -96,12 +100,14 @@ export class Sfx {
       filter.frequency.value = 400;
       const gain = ctx.createGain();
       gain.gain.value = 0;
+      const levels: GainNode[] = [];
       const mk = (type: OscillatorType, level: number): OscillatorNode => {
         const o = ctx.createOscillator();
         o.type = type;
         o.frequency.value = 30;
         const g = ctx.createGain();
         g.gain.value = level;
+        levels.push(g);
         o.connect(g).connect(shaper);
         o.start();
         return o;
@@ -111,7 +117,22 @@ export class Sfx {
       const c = mk('sawtooth', 0.25);
       c.detune.value = 9;
       shaper.connect(filter).connect(gain).connect(this.master);
-      this.engine = { a, b, c, filter, gain };
+      // Grondement irrégulier (moteurs rauques, diesel) : bruit grave ajouté avant la saturation.
+      const rumbleFilter = ctx.createBiquadFilter();
+      rumbleFilter.type = 'lowpass';
+      rumbleFilter.frequency.value = 180;
+      const rumble = ctx.createGain();
+      rumble.gain.value = 0;
+      noiseSrc().connect(rumbleFilter).connect(rumble).connect(shaper);
+      // Sifflement de turbo : une note aiguë qui monte avec la charge.
+      const whistle = ctx.createOscillator();
+      whistle.type = 'sine';
+      whistle.frequency.value = 2000;
+      const whistleGain = ctx.createGain();
+      whistleGain.gain.value = 0;
+      whistle.connect(whistleGain).connect(this.master);
+      whistle.start();
+      this.engine = { a, b, c, filter, gain, levels, rumble, whistle, whistleGain };
 
       // — Pneus qui crissent —
       const tf = ctx.createBiquadFilter();
@@ -157,14 +178,25 @@ export class Sfx {
     if (!ctx || !this.engine || !this.tire || !this.wind || !this.nos) return;
     const t = ctx.currentTime;
     const on = s.active && this.enabled ? 1 : 0;
-    // Fréquence d'allumage d'un quatre-cylindres : deux explosions par tour.
-    const f = Math.max(18, (s.rpm / 60) * 2);
+    // Fréquence d'allumage : une explosion tous les deux tours par cylindre (4 cylindres = 2 par tour).
+    const en = s.engine;
+    const f = Math.max(14, (s.rpm / 60) * (en.cylinders / 2) * en.pitch);
     const e = this.engine;
     e.a.frequency.setTargetAtTime(f, t, 0.03);
     e.b.frequency.setTargetAtTime(f / 2, t, 0.03);
     e.c.frequency.setTargetAtTime(f * 1.5, t, 0.03);
     const rev = Math.min(1, s.rpm / s.redline);
-    e.filter.frequency.setTargetAtTime(260 + rev * 900 + s.throttle * (900 + rev * 1600), t, 0.05);
+    const bright = 0.45 + en.bright;
+    e.filter.frequency.setTargetAtTime((260 + rev * 900 + s.throttle * (900 + rev * 1600)) * bright, t, 0.05);
+    // Timbre : beaucoup de cylindres = son plus lisse (moins de sous-octave), moteur rauque = plus de carré et de grondement.
+    const smooth = Math.min(1, en.cylinders / 8);
+    (e.levels[0] as GainNode).gain.setTargetAtTime(0.5, t, 0.1);
+    (e.levels[1] as GainNode).gain.setTargetAtTime(0.12 + en.rough * 0.45 * (1 - smooth * 0.6), t, 0.1);
+    (e.levels[2] as GainNode).gain.setTargetAtTime(0.12 + en.bright * 0.3, t, 0.1);
+    e.rumble.gain.setTargetAtTime(on * en.rough * (0.25 + s.throttle * 0.5), t, 0.08);
+    const boost = en.turbo * s.throttle * Math.max(0, rev - 0.3);
+    e.whistle.frequency.setTargetAtTime(1800 + rev * 2600, t, 0.15);
+    e.whistleGain.gain.setTargetAtTime(on * boost * 0.035, t, 0.12);
     e.gain.gain.setTargetAtTime(on * (0.05 + s.throttle * 0.1 + rev * 0.05), t, 0.06);
 
     const kmh = s.speed * 3.6;

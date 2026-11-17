@@ -144,6 +144,11 @@ pour les adversaires. Le chargement est dans `src/vehicle/glbCar.ts`.
   `?direct` le saute (essais automatiques).
 - **Tutoriel** au premier lancement (`src/ui/tutorial.ts`), sept consignes validées en les
   réalisant ; `Retour arrière` le passe.
+- **Bruit du moteur propre à chaque voiture** (`sound` dans `src/config/cars.ts`) : nombre de
+  cylindres, grave ou aigu, rauque ou lisse, sifflement de turbo.
+- **Circulation (essai)** : quatorze voitures ordinaires roulent dans les rues en balade
+  (`src/world/traffic.ts`, réglages dans `src/config/traffic.ts`). Percutées, elles deviennent
+  poussables. `?trafic=non` les retire. Banc d'essai : `sh scripts/run-sim.sh traffic`.
 - **Code secret** : taper `K` `I` `K` `I` au clavier donne 1 000 000 ¥ (autant de fois qu'on veut).
 - **Paramètres** (`Échap` en balade, `src/ui/settingsMenu.ts`) : volumes, boîte de vitesses,
   qualité d'image, touches du clavier modifiables (`src/input/bindings.ts`), test de manette.

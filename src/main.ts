@@ -18,6 +18,8 @@ import { RaceCard } from './ui/raceCard';
 import { SettingsMenu } from './ui/settingsMenu';
 import { Tutorial } from './ui/tutorial';
 import { Sfx } from './audio/sfx';
+import { Traffic, type TrafficActor } from './world/traffic';
+import { TrafficVisuals } from './render/trafficVisuals';
 import { emptyDriveInput } from './input/actions';
 import { bindings } from './input/bindings';
 import { PICKUPS } from './config/race';
@@ -197,6 +199,11 @@ async function boot(): Promise<void> {
     document.body.append(titleEl);
     document.body.classList.add('titre');
   }
+  // Circulation (essai) : en balade seulement. ?trafic=non la coupe.
+  const traffic = new Traffic(phys, city.graph, seed);
+  const trafficVisuals = new TrafficVisuals(scene, traffic);
+  const trafficOn = params.get('trafic') !== 'non';
+  const actors: TrafficActor[] = [{ x: 0, z: 0, vx: 0, vz: 0 }];
   const tutorial = new Tutorial();
   let cheat = '';
   let cameraChanged = false;
@@ -480,6 +487,12 @@ async function boot(): Promise<void> {
       player.applyTo(store.current, tuned);
       car.update(dt, race.playerInput(input.drive), tuned);
       race.beforeStep(dt, store.current);
+      // Circulation : absente pendant les courses.
+      traffic.enabled = trafficOn && race.phase === 'idle';
+      const me = actors[0] as TrafficActor;
+      const lv = car.body.linvel();
+      me.x = car.pos.x; me.z = car.pos.z; me.vx = lv.x; me.vz = lv.z;
+      traffic.beforeStep(dt, actors);
       phys.world.step();
       car.afterStep();
       race.afterStep(dt);
@@ -530,6 +543,7 @@ async function boot(): Promise<void> {
         drifting: input.drive.drift,
         nos: car.powerBoost > 1,
         active: !garage.open && !settings.open,
+        engine: player.modelOf(player.car).sound,
       });
       // Décompte : un bip par seconde, un plus aigu au départ.
       if (race.phase === 'countdown') {
@@ -566,6 +580,7 @@ async function boot(): Promise<void> {
       hud.setNos(player.car.nos, nosCharge / NOS.seconds);
       sky.position.copy(camera.position);
       raceVisuals.update(race, alpha, frameDt);
+      trafficVisuals.update(traffic);
       // Mallettes et téléporteur ramassés
       while (race.events.length) {
         const ev = race.events.shift();
@@ -612,7 +627,7 @@ async function boot(): Promise<void> {
   });
 
   // Accès console pour le débogage : window.__jeu
-  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks,
+  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks, traffic,
     /** Éclairage de studio pour les planches de contrôle. */
     studio: (): void => {
       scene.add(new THREE.HemisphereLight(0xffffff, 0x8888aa, 3.2));

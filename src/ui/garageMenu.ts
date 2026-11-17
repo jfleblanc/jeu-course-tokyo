@@ -110,7 +110,7 @@ export class GarageMenu {
       .map((m) => {
         const state = p.canBuy(m);
         const label = state === 'possédée' ? '<span class="g-tag">dans le garage</span>' : state === 'garage plein' ? '<span class="g-tag">garage plein</span>' : `<button data-act="buy" data-id="${m.id}" ${state === 'ok' ? '' : 'disabled'}>${yen(m.price)}</button>`;
-        return `<div class="g-row"><div><b>${m.name}</b><small>${m.blurb} ${m.drive}, ${m.traits.mass.toLocaleString('fr-CA')} kg. Puissance ×${m.power.toFixed(2)}, adhérence ×${m.grip.toFixed(2)}.</small></div>${label}</div>`;
+        return `<div class="g-row"><div><b>${m.name}</b><small>${m.blurb} ${m.engine}, ${m.drive.toLowerCase()}, ${m.traits.mass.toLocaleString('fr-CA')} kg. Puissance ×${m.power.toFixed(2)}, adhérence ×${m.grip.toFixed(2)}.</small></div>${label}</div>`;
       })
       .join('');
 
