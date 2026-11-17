@@ -64,6 +64,16 @@ try {
 
 if (ok) {
   await page.waitForTimeout(3000);
+  // Écran titre → choix du joueur → nouveau joueur → en jeu.
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(2500);
+  if (!(await page.locator('#profils').count())) fail('le choix du joueur ne s’affiche pas après le titre');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(1500);
+  await page.keyboard.type('Essai');
+  await page.keyboard.press('Enter');
+  await page.waitForTimeout(3000);
+  if (await page.locator('#profils').count()) fail('le choix du joueur ne se ferme pas après la création');
   await page.keyboard.down('KeyW');
   await page.waitForTimeout(8000);
   await page.keyboard.up('KeyW');
