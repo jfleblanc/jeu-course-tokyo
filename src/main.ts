@@ -21,6 +21,10 @@ import { Sfx } from './audio/sfx';
 import { Traffic, type TrafficActor } from './world/traffic';
 import { TrafficVisuals } from './render/trafficVisuals';
 import { LampVisuals } from './render/lampVisuals';
+import { GarageScene, type GarageCar } from './world/garageScene';
+import { ProfileSelect } from './ui/profileSelect';
+import { profileSummary, setActiveProfile, type Profile } from './progression/profiles';
+import { CAR_MODELS } from './config/cars';
 import { testSpots } from './debug/spots';
 import { LampField, type LampStriker } from './world/lampField';
 import { DistrictGates } from './world/districtGates';
@@ -192,7 +196,7 @@ async function boot(): Promise<void> {
 
   // ——— Écran titre, tutoriel, paramètres ———
   const direct = params.has('direct') || params.has('lieu'); // ?direct : sans écran titre ni tutoriel (essais automatiques)
-  let titlePhase: 'attente' | 'glisse' | 'fini' = direct ? 'fini' : 'attente';
+  let titlePhase: 'attente' | 'profils' | 'glisse' | 'fini' = direct ? 'fini' : 'attente';
   let titleTime = 0;
   let glide = 0;
   const glideFrom = new THREE.Vector3();
@@ -231,20 +235,64 @@ async function boot(): Promise<void> {
   const tutorial = new Tutorial();
   let cheat = '';
   let cameraChanged = false;
+  // ——— Garage en vrai (vu par une caméra de surveillance) et choix du joueur ———
+  const garageScene = new GarageScene(scene);
+  const cctv = document.createElement('div');
+  cctv.id = 'cctv';
+  cctv.innerHTML = '<div class="cc-label"></div>';
+  document.body.append(cctv);
+  const cctvLabel = cctv.firstElementChild as HTMLElement;
+  let cctvName = '';
+  const garageCarOf = (model: string, paint: number): GarageCar | null => {
+    const m = CAR_MODELS.find((c) => c.id === model);
+    if (!m) return null;
+    return { glb: testModel === 'aucun' ? null : m.glb, color: paint >= 0 ? (PAINTS[paint]?.color ?? m.color) : m.color, bigWing: m.bigWing, traits: m.traits };
+  };
+  /** Gare dans l'atelier les voitures d'un joueur, la voiture active en premier. */
+  const showGarageOf = (cars: { model: string; paint: number }[], active: number, name: string): void => {
+    const list = cars.length ? cars : [{ model: (CAR_MODELS[0] as (typeof CAR_MODELS)[number]).id, paint: -1 }];
+    const order = [list[active] ?? list[0], ...list.filter((_, k) => k !== active)];
+    garageScene.setCars(order.map((c) => (c ? garageCarOf(c.model, c.paint) : null)).filter((c): c is GarageCar => c !== null));
+    cctvName = name;
+  };
+  const profiles = new ProfileSelect({
+    hover: (p: Profile | null) => {
+      if (!p) { showGarageOf([], 0, 'NOUVEAU JOUEUR'); return; }
+      const sum = profileSummary(p.id);
+      showGarageOf(sum.cars, sum.active, p.name.toUpperCase());
+    },
+    choose: (p: Profile) => {
+      setActiveProfile(p.id);
+      player.loadProfile(p.id);
+      profiles.close();
+      rebuildPlayerCar();
+      refreshProgress();
+      nosCharge = NOS.seconds;
+      hud.toast(`Bonne course, ${p.name} !`);
+      // La caméra revient en ville, autour de la voiture, puis glisse derrière elle.
+      const a = car.yaw + 0.7;
+      camera.position.set(visual.root.position.x + Math.sin(a) * 6.8, visual.root.position.y + 1.25, visual.root.position.z + Math.cos(a) * 6.8);
+      camera.lookAt(visual.root.position.x, visual.root.position.y + 0.25, visual.root.position.z);
+      titlePhase = 'glisse';
+      glide = 0;
+      glideFrom.copy(camera.position);
+      glideQuat.copy(camera.quaternion);
+      document.body.classList.remove('titre');
+      if (Tutorial.needed) tutorial.start();
+    },
+  });
   const leaveTitle = (): void => {
     if (titlePhase !== 'attente') return;
-    titlePhase = 'glisse';
-    glide = 0;
-    glideFrom.copy(camera.position);
-    glideQuat.copy(camera.quaternion);
+    // Après le titre : qui joue ? (le garage du joueur survolé s'affiche derrière les cartes)
+    titlePhase = 'profils';
     titleEl.classList.add('hidden');
-    document.body.classList.remove('titre');
     window.setTimeout(() => titleEl.remove(), 1200);
-    if (Tutorial.needed) tutorial.start();
+    profiles.open();
   };
   window.addEventListener('pointerdown', leaveTitle);
   window.addEventListener('keydown', (ev) => {
     // Code secret : taper K I K I donne un million de yens (pour tout essayer sans compter).
+    if (titlePhase === 'profils') return;
     cheat = (cheat + ev.code.replace('Key', '')).slice(-4);
     if (cheat === 'KIKI') {
       cheat = '';
@@ -348,27 +396,33 @@ async function boot(): Promise<void> {
   };
   refreshProgress();
 
+  /** Met la voiture affichée en accord avec la voiture active du joueur (modèle, peinture, néon). */
+  let garageDirty = true;
+  function rebuildPlayerCar(): void {
+    if (player.car.model !== visualModel) {
+      // Autre modèle : on reconstruit la voiture affichée.
+      scene.remove(visual.root);
+      visual.root.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh && !m.userData.shared) m.geometry.dispose();
+      });
+      car.setTraits(player.modelOf(player.car).traits);
+      visual = createCarVisual(CAR_SPEC, lookOf());
+      scene.add(visual.root);
+      rig?.applyVisibility(visual);
+      void dressPlayer();
+      visualModel = player.car.model;
+    } else {
+      visual.setPaint(lookOf().color);
+    }
+    applyNeon();
+  }
   // Garage : change de voiture, de peinture ou de néon sans recharger le jeu.
   const garage = new GarageMenu(player, (kind) => {
     if (kind !== 'achat') {
-      if (player.car.model !== visualModel) {
-        // Autre modèle : on reconstruit la voiture affichée.
-        scene.remove(visual.root);
-        visual.root.traverse((o) => {
-          const m = o as THREE.Mesh;
-          if (m.isMesh && !m.userData.shared) m.geometry.dispose();
-        });
-        car.setTraits(player.modelOf(player.car).traits);
-        visual = createCarVisual(CAR_SPEC, lookOf());
-        scene.add(visual.root);
-        rig.applyVisibility(visual);
-        void dressPlayer();
-        visualModel = player.car.model;
-      } else {
-        visual.setPaint(lookOf().color);
-      }
-      applyNeon();
+      rebuildPlayerCar();
     }
+    garageDirty = true;
     nosCharge = NOS.seconds;
     refreshProgress();
   });
@@ -475,6 +529,13 @@ async function boot(): Promise<void> {
       leaveTitle();
       return;
     }
+    if (titlePhase === 'profils') {
+      // Manette : L / R pour changer de carte, le bouton de course pour valider.
+      if (e === 'shiftUp') profiles.move(1);
+      else if (e === 'shiftDown') profiles.move(-1);
+      else if (e === 'raceStart') profiles.confirm();
+      return;
+    }
     if (settings.open && e !== 'raceQuit') return;
     switch (e) {
       case 'camera':
@@ -557,7 +618,7 @@ async function boot(): Promise<void> {
     fixedUpdate(dt) {
       input.beginStep();
       if (garage.open || settings.open) return; // jeu en pause dans les menus
-      if (titlePhase === 'attente') {
+      if (titlePhase === 'attente' || titlePhase === 'profils') {
         // Écran titre : la voiture attend, moteur au ralenti.
         car.update(dt, idleInput, tuned);
         phys.world.step();
@@ -633,12 +694,15 @@ async function boot(): Promise<void> {
         const a = car.yaw + orbit.a;
         camera.position.set(visual.root.position.x + Math.sin(a) * orbit.d, visual.root.position.y + orbit.h, visual.root.position.z + Math.cos(a) * orbit.d);
         camera.lookAt(visual.root.position.x, visual.root.position.y + 0.1, visual.root.position.z);
-      } else if (garage.open) {
-        // Dans le garage, la caméra tourne lentement autour de la voiture.
+      } else if (garage.open || titlePhase === 'profils') {
+        // Garage : on regarde l'atelier par sa caméra de surveillance.
+        if (garage.open && garageDirty) {
+          garageDirty = false;
+          showGarageOf(player.cars.map((c) => ({ model: c.model, paint: c.paint })), player.active, 'ATELIER');
+        }
+        garageScene.update(frameDt, camera);
         garageTime += frameDt;
-        const a = car.yaw + 2.4 + garageTime * 0.25;
-        camera.position.set(visual.root.position.x + Math.sin(a) * 6.2, visual.root.position.y + 1.7, visual.root.position.z + Math.cos(a) * 6.2);
-        camera.lookAt(visual.root.position.x, visual.root.position.y + 0.3, visual.root.position.z);
+        cctvLabel.innerHTML = `<span class="cc-rec">●</span> REC · CAM 03 · GARAGE — ${cctvName} · ${new Date().toLocaleTimeString('fr-CA')}`;
       } else if (titlePhase === 'attente') {
         // Écran titre : la caméra tourne lentement autour de la voiture.
         titleTime += frameDt;
@@ -706,7 +770,16 @@ async function boot(): Promise<void> {
       raceVisuals.update(race, alpha, frameDt);
       trafficVisuals.update(traffic, camera.position.x, camera.position.z);
       lampVisuals.update();
-      updateCityZones(meshes, camera.position.x, camera.position.z);
+      // Vue du garage : on éteint la ville (inutile de la dessiner) et on allume l'atelier.
+      const inGarage = garage.open || titlePhase === 'profils';
+      if (inGarage !== garageScene.visible) {
+        garageScene.setVisible(inGarage);
+        meshes.group.visible = !inGarage;
+        document.body.classList.toggle('cctv', inGarage);
+        if (inGarage) garageDirty = true;
+        else rig.reset();
+      }
+      if (!inGarage) updateCityZones(meshes, camera.position.x, camera.position.z);
       fullMap.update({ x: car.pos.x, z: car.pos.z, yaw: car.yaw, level: player.level, racing: race.active, allOpen: allDistrictsOpen });
       const blocked = gates.blockedNear(frameDt, car.pos.x, car.pos.z);
       if (blocked) hud.toast(`${blocked.name} : ouverture au niveau ${blocked.unlockLevel}`);

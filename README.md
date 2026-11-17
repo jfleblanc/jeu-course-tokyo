@@ -107,6 +107,19 @@ palier. La mini-carte tourne avec la voiture et montre le tracé, les objets et 
 L'option d'adresse `?barrieres` affiche un aperçu des rues transversales barrées (désactivé par
 défaut). Réglages : `src/config/race.ts` (pilotes, banque, objets).
 
+## Joueurs et garage
+
+Après l'écran titre, on choisit **qui joue** : une rangée de petites cartes en bas de l'écran
+(nom, symbole, niveau et palier, argent, voitures, victoires). Survoler une carte montre le
+garage de ce joueur, filmé par une caméra de surveillance. La dernière carte crée un joueur :
+nom, symbole, NIP de 4 chiffres facultatif. Chaque joueur a sa propre sauvegarde ; une partie
+d'avant devient « Joueur 1 ». Le NIP évite seulement de jouer la partie d'un autre par mégarde
+(tout reste dans le navigateur). Code : `src/progression/profiles.ts`, `src/ui/profileSelect.ts`.
+
+Le **garage** (touche G) est un vrai atelier (`src/world/garageScene.ts`) : la voiture active au
+milieu avec le mécano qui travaille dessus, les autres garées le long du mur, servantes, établi,
+étagères, pneus. Il est construit loin sous la ville ; la ville n'est pas dessinée pendant ce temps.
+
 ## Se téléporter pour essayer
 
 Ajouter `?lieu=<nom>` à l'adresse place la voiture à un endroit précis, ouvre tous les quartiers

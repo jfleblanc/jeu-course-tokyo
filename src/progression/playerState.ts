@@ -1,5 +1,6 @@
 import { CAR_MODELS, MAX_CARS, NEON_PRICE, NOS, PAINT_PRICE, RESALE, UPGRADES, UPGRADE_EFFECT, type CarModel, type UpgradeId } from '../config/cars';
 import type { HandlingConfig } from '../config/handling';
+import { activeProfileId, listProfiles, saveKeyFor } from './profiles';
 import { MAX_LEVEL, START_MONEY, TIER_TRIAL, raceReward, tierOf, xpToNext } from '../config/progression';
 
 /**
@@ -45,7 +46,6 @@ export interface RaceSummary {
   tierName: string;
 }
 
-const KEY = 'jeu-course-tokyo.joueur';
 const VERSION = 1;
 
 const newCar = (model: CarModel): OwnedCar => ({
@@ -67,13 +67,36 @@ export class PlayerState {
   races = 0;
   wins = 0;
 
+  /** Clé de sauvegarde du joueur en cours (une par carte de joueur). */
+  private key = 'jeu-course-tokyo.joueur.invite';
+  /** Identifiant du joueur en cours, ou null (invité : essais automatiques, première visite). */
+  profileId: string | null = null;
+
   constructor() {
+    listProfiles(); // migre au besoin l'ancienne sauvegarde unique vers un premier joueur
+    const id = activeProfileId();
+    if (id) this.loadProfile(id);
+    else this.load();
+  }
+
+  /** Passe à un autre joueur : recharge sa sauvegarde (ou une partie neuve). */
+  loadProfile(id: string): void {
+    this.profileId = id;
+    this.key = saveKeyFor(id);
+    this.level = 1;
+    this.xp = 0;
+    this.money = START_MONEY;
+    this.cars = [newCar(CAR_MODELS[0] as CarModel)];
+    this.active = 0;
+    this.races = 0;
+    this.wins = 0;
     this.load();
+    this.save();
   }
 
   private load(): void {
     try {
-      const raw = localStorage.getItem(KEY);
+      const raw = localStorage.getItem(this.key);
       if (!raw) return;
       const d = JSON.parse(raw) as Partial<SaveData>;
       // Migration : quand le format changera, convertir ici les anciennes versions.
@@ -94,7 +117,7 @@ export class PlayerState {
   save(): void {
     try {
       const d: SaveData = { version: VERSION, level: this.level, xp: this.xp, money: this.money, cars: this.cars, active: this.active, races: this.races, wins: this.wins };
-      localStorage.setItem(KEY, JSON.stringify(d));
+      localStorage.setItem(this.key, JSON.stringify(d));
     } catch {
       // Navigation privée, quota… tant pis.
     }

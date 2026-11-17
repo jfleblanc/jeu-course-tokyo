@@ -99,7 +99,7 @@ export class GarageMenu {
         ${price === null ? '<span class="g-tag">au maximum</span>' : `<button data-act="upgrade" data-id="${u.id}" ${buyable(price)}>${yen(price)}</button>`}</div>`;
     }).join('');
 
-    const nos = `<div class="g-row"><div><b>NOS</b><small>${NOS.seconds} s de surpuissance par course (touche Maj)</small></div>
+    const nos = `<div class="g-row"><div><b>NOS</b><small>${NOS.seconds} s de surpuissance par course (touche E)</small></div>
       ${car.nos ? '<span class="g-tag">installé</span>' : `<button data-act="nos" ${buyable(NOS.price)}>${yen(NOS.price)}</button>`}</div>`;
 
     const paints = PAINTS.map((c, i) => `<button class="g-swatch${car.paint === i ? ' on' : ''}" title="${c.name}" style="background:${css(c.color)}" data-act="paint" data-arg="${i}" ${car.paint === i ? '' : buyable(PAINT_PRICE)}></button>`).join('');

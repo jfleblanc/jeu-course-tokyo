@@ -214,3 +214,42 @@ body.titre .hud, body.titre #minimap, body.titre #race-hud { visibility: hidden;
 /* ——— Carte complète ——— */
 #fullmap { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 24; display: none; pointer-events: none; }
 #fullmap.open { display: block; }
+
+/* ——— Choix du joueur : petites cartes en bas, le garage reste visible derrière ——— */
+#profils { position: fixed; left: 0; right: 0; bottom: 0; z-index: 32; padding: 10px 18px 18px; display: flex; flex-direction: column; align-items: center; gap: 8px; background: linear-gradient(180deg, rgba(7, 6, 15, 0), rgba(7, 6, 15, 0.82) 55%); }
+#profils .pf-hint { font-size: 13px; letter-spacing: 0.12em; text-transform: uppercase; color: #fff; }
+#profils kbd { font: 12px ui-monospace, Menlo, monospace; background: rgba(255, 255, 255, 0.16); border-radius: 5px; padding: 1px 6px; }
+#profils .pf-cards { display: flex; gap: 10px; max-width: 100%; overflow-x: auto; padding: 4px; }
+#profils .pf-card { position: relative; flex: 0 0 auto; width: 176px; padding: 9px 11px 10px; border-radius: 10px; background: rgba(12, 10, 26, 0.72); border: 1px solid rgba(255, 255, 255, 0.14); cursor: pointer; backdrop-filter: blur(6px); transition: transform 0.12s, border-color 0.12s, box-shadow 0.12s; }
+#profils .pf-card.on { border-color: var(--cyan); box-shadow: 0 0 18px rgba(46, 230, 255, 0.35); transform: translateY(-4px); }
+#profils .pf-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+#profils .pf-sym { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border-radius: 50%; font-size: 17px; color: #fff; background: rgba(255, 46, 136, 0.25); border: 1px solid var(--magenta); text-shadow: 0 0 8px var(--magenta); }
+#profils .pf-name { font-weight: 700; font-size: 15px; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#profils .pf-name i { font-style: normal; font-size: 11px; }
+#profils .pf-line { font-size: 12px; line-height: 1.45; color: #dfe6ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#profils .pf-line.money { color: var(--amber, #ffb02e); font-weight: 700; }
+#profils .pf-line.dim { color: var(--dim); }
+#profils .pf-card.new { display: flex; flex-direction: column; align-items: center; justify-content: center; width: 130px; border-style: dashed; }
+#profils .pf-plus { font-size: 30px; line-height: 1; color: var(--cyan); }
+#profils .pf-x { position: absolute; top: 4px; right: 6px; border: 0; background: none; color: var(--dim); font-size: 15px; cursor: pointer; opacity: 0; }
+#profils .pf-card:hover .pf-x { opacity: 1; }
+#profils .pf-form { width: min(380px, 92vw); padding: 12px 14px; border-radius: 12px; background: rgba(12, 10, 26, 0.86); border: 1px solid var(--cyan); display: flex; flex-direction: column; gap: 8px; backdrop-filter: blur(8px); }
+#profils .pf-title { font-weight: 700; font-size: 16px; color: #fff; display: flex; align-items: center; gap: 8px; }
+#profils label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--dim); }
+#profils input { font: 15px inherit; color: #fff; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 7px; padding: 6px 9px; outline: none; }
+#profils input:focus { border-color: var(--cyan); }
+#profils .pf-syms { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
+#profils .pf-syms button { font-size: 18px; padding: 4px 0; color: #fff; background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 7px; cursor: pointer; }
+#profils .pf-syms button.on { border-color: var(--magenta); background: rgba(255, 46, 136, 0.28); }
+#profils .pf-row { display: flex; gap: 8px; justify-content: flex-end; }
+#profils .pf-row button { font: 13px inherit; color: #fff; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 7px; padding: 6px 12px; cursor: pointer; }
+#profils .pf-row button.go { background: rgba(46, 230, 255, 0.22); border-color: var(--cyan); }
+#profils .pf-err { color: #ff6b8a; font-size: 12px; }
+#profils .pf-warn { color: #ffb02e; font-size: 13px; }
+
+/* ——— Caméra de surveillance du garage ——— */
+#cctv { position: fixed; inset: 0; z-index: 12; pointer-events: none; display: none; background: repeating-linear-gradient(180deg, rgba(0, 0, 0, 0) 0 2px, rgba(0, 0, 0, 0.13) 2px 3px), radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 55%, rgba(0, 0, 0, 0.55) 100%); }
+body.cctv #cctv { display: block; }
+#cctv .cc-label { position: absolute; left: 18px; top: 14px; font: 13px ui-monospace, Menlo, monospace; letter-spacing: 0.08em; color: #e8f1ff; text-shadow: 0 0 6px rgba(0, 0, 0, 0.9); }
+#cctv .cc-rec { color: #ff3b4e; animation: t-pulse 1.2s steps(2) infinite; }
+body.cctv .hud, body.cctv #minimap, body.cctv #race-hud { visibility: hidden; }

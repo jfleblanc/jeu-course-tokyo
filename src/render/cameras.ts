@@ -41,6 +41,11 @@ export class CameraRig {
     return this.mode;
   }
 
+  /** Après une autre vue (garage) : la caméra se replace d'un coup au lieu de traverser la carte. */
+  reset(): void {
+    this.initialized = false;
+  }
+
   applyVisibility(visual: CarVisual): void {
     const inside = this.mode === 'interieure';
     visual.cabin.visible = !inside;
