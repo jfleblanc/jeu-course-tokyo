@@ -25,6 +25,8 @@ export interface CarVisual {
   /** Position des yeux du conducteur (volant à droite, comme au Japon). */
   eyePoint: THREE.Vector3;
   headlight: THREE.SpotLight;
+  /** Peinture de carrosserie (partagée avec un éventuel modèle 3D). */
+  paint: THREE.Material;
   brakeLevel: ReturnType<typeof uniform>;
   reverseLevel: ReturnType<typeof uniform>;
   /** 0..1 : flammes bleues à l'échappement pendant le NOS. */
@@ -368,6 +370,7 @@ export function createCarVisual(spec: CarSpec, options: CarVisualOptions = {}): 
   root.add(underglow);
 
   return {
+    paint,
     nosLevel,
     setPaint(c) {
       (paintUniform.value as THREE.Color).setRGB(c[0], c[1], c[2]);

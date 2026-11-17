@@ -106,6 +106,24 @@ palier. La mini-carte tourne avec la voiture et montre le tracé, les objets et 
 L'option d'adresse `?barrieres` affiche un aperçu des rues transversales barrées (désactivé par
 défaut). Réglages : `src/config/race.ts` (pilotes, banque, objets).
 
+## Vrais modèles 3D de voitures (essai)
+
+Ajouter `?modele=datsun-240k` à l'adresse remplace la voiture procédurale (joueur et
+adversaires) par un vrai modèle : peinture réglable, feux de frein, roues qui tournent et
+braquent, vue « capot » à la place de la vue intérieure. Les fichiers sont dans
+`public/models/` (crédits et licences : `public/models/CREDITS.md`).
+
+Pour convertir un modèle Sketchfab (glTF décompressé) en GLB léger avec deux niveaux de détail :
+
+```sh
+MESHOPT_JS=<dossier js de meshoptimizer> TEX_DIR=<textures réduites> \
+  node tools/convert-car.mjs <dossier du modèle> datsun-240k public/models/datsun-240k.glb
+```
+
+Chaque voiture a une entrée dans `CARS` (en tête de `tools/convert-car.mjs`) : nom des pièces
+de roue, matériaux à regrouper, part de triangles gardée. Le chargement est dans
+`src/vehicle/glbCar.ts`, qui remplace les matériaux du fichier par ceux du jeu d'après leur nom.
+
 ## La ville
 
 Générée par code à partir d'une graine (`src/config/world.ts`) : un treillis de lignes arrondi en

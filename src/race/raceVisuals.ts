@@ -3,6 +3,7 @@ import { CAR_SPEC } from '../config/handling';
 import { GeomBuilder, type Vec3 } from '../render/geomBuilder';
 import type { CityMaterials } from '../render/materials';
 import { createCarVisual, syncCarVisual, type CarVisual } from '../vehicle/carModel';
+import { applyCarAsset, loadCarAsset } from '../vehicle/glbCar';
 import { pointAt, type PathPoint, type StreetGraph } from '../world/streetGraph';
 import { vec3 } from 'three/tsl';
 import type { Race } from './race';
@@ -42,6 +43,8 @@ export class RaceVisuals {
     /** Aperçu : barrer les rues transversales le long du tracé. */
     private readonly barriers = false,
     tracks: Track[] = [],
+    /** Modèle 3D d'essai pour les adversaires (null = voiture procédurale). */
+    private readonly carModelId: string | null = null,
   ) {
     this.group.name = 'course';
     scene.add(this.group);
@@ -215,6 +218,11 @@ export class RaceVisuals {
     for (const r of race.racers) {
       if (r.isPlayer || !r.level) continue;
       const v = createCarVisual(CAR_SPEC, { color: r.level.color, lights: false });
+      if (this.carModelId) {
+        loadCarAsset(this.carModelId)
+          .then((asset) => applyCarAsset(v, asset, CAR_SPEC, { lod: 1 }))
+          .catch(() => undefined);
+      }
       this.group.add(v.root);
       this.cars.push(v);
     }

@@ -27,6 +27,7 @@ import { Hud } from './ui/hud';
 import { Minimap } from './ui/minimap';
 import { RaceHud } from './ui/raceHud';
 import { createCarVisual, syncCarVisual } from './vehicle/carModel';
+import { applyCarAsset, loadCarAsset } from './vehicle/glbCar';
 import { REST_HEIGHT, Vehicle } from './vehicle/vehicle';
 import { buildCityColliders } from './world/cityColliders';
 import { generateCity } from './world/cityGen';
@@ -92,6 +93,21 @@ async function boot(): Promise<void> {
   let visualModel = player.car.model;
   let visual = createCarVisual(CAR_SPEC, lookOf());
   scene.add(visual.root);
+  // ?modele=datsun-240k : essai d'un vrai modèle 3D à la place de la voiture procédurale
+  // (joueur et adversaires). Si le fichier ne se charge pas, on garde la voiture procédurale.
+  const testModel = params.get('modele');
+  const dressPlayer = (): void => {
+    if (!testModel) return;
+    const target = visual;
+    loadCarAsset(testModel)
+      .then((asset) => {
+        if (target !== visual) return;
+        applyCarAsset(target, asset, CAR_SPEC, { lod: 0 });
+        rig.applyVisibility(target);
+        hud.toast(`Modèle 3D : ${testModel}`);
+      })
+      .catch((err: unknown) => console.info('Modèle 3D indisponible, voiture procédurale conservée.', err));
+  };
   const applyNeon = (): void => {
     const owned = player.car;
     visual.setUnderglow(owned.neon >= 0 ? (NEON_COLORS[owned.neon]?.color ?? null) : null);
@@ -119,6 +135,7 @@ async function boot(): Promise<void> {
   const hud = new Hud(ctx.backend);
   hud.setPreset(store.active);
   const rig = new CameraRig(camera);
+  dressPlayer();
   rig.applyVisibility(visual);
   let perfText = '';
   const panel = new AbPanel(store, {
@@ -149,7 +166,7 @@ async function boot(): Promise<void> {
   const race = new Race(phys, CAR_SPEC, car);
   const tracks = buildTrackBank(city.graph);
   // ?barrieres : aperçu des rues transversales barrées (désactivé par défaut).
-  const raceVisuals = new RaceVisuals(scene, mats, city.graph, params.has('barrieres'), tracks);
+  const raceVisuals = new RaceVisuals(scene, mats, city.graph, params.has('barrieres'), tracks, testModel);
   const minimap = new Minimap(city, tracks.map((t) => ({ x: t.start.x, z: t.start.z, circuit: t.circuit })));
   const card = new RaceCard();
   const raceHud = new RaceHud();
@@ -174,6 +191,7 @@ async function boot(): Promise<void> {
         visual = createCarVisual(CAR_SPEC, lookOf());
         scene.add(visual.root);
         rig.applyVisibility(visual);
+        dressPlayer();
         visualModel = player.car.model;
       } else {
         visual.setPaint(lookOf().color);
