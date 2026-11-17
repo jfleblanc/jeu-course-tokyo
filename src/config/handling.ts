@@ -111,7 +111,7 @@ export const PRESET_A: HandlingConfig = {
 
   yawDamping: 1.2,
   counterSteer: 0.45,
-  trailBraking: 0.75,
+  trailBraking: 1,
 
   driftRearGrip: 0.55,
   driftCarve: 0.6,

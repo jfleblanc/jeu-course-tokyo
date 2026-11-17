@@ -99,8 +99,8 @@ export function createCityMaterials(quality: { reflections: boolean; reflectionS
     const p = positionLocal;
     const n = normalLocal;
     const isWall = float(1).sub(step(0.5, abs(n.y))).mul(float(1).sub(isRoofBox));
-    // Coordonnée le long de la façade : x si le mur regarde vers ±z, sinon z.
-    const along = mix(p.z, p.x, step(0.5, abs(n.z)));
+    // Coordonnée le long de la façade, en mètres (les immeubles peuvent être tournés dans tous les sens).
+    const along = uv().x;
     const cu = along.div(cellW).add(seed.mul(0.25));
     const cv = p.y.div(3.4);
     const cx = floor(cu);
@@ -294,8 +294,8 @@ export function createCityMaterials(quality: { reflections: boolean; reflectionS
   // ————————————————————————————————————————————————————————————————
   // Trottoirs, poteaux, béton : couleur par sommet, dallage discret, halo des néons au sol.
   // ————————————————————————————————————————————————————————————————
-  const solid = new THREE.MeshStandardNodeMaterial();
-  {
+  const makeSolid = (side: THREE.Side): THREE.Material => {
+    const solid = new THREE.MeshStandardNodeMaterial();
     const wp = positionWorld;
     const isTop = step(0.5, normalLocal.y).mul(step(wp.y, float(0.3)));
     const tile = max(step(0.96, fract(wp.x.div(1.5))), step(0.96, fract(wp.z.div(1.5)))).mul(isTop);
@@ -305,8 +305,12 @@ export function createCityMaterials(quality: { reflections: boolean; reflectionS
     solid.metalnessNode = float(0);
     const zone = hash2(floor(wp.x.div(21.0)), floor(wp.z.div(21.0)));
     solid.emissiveNode = neonFrom(zone).mul(0.022).mul(isTop).mul(neonU);
-    solid.side = THREE.DoubleSide;
-  }
+    solid.side = side;
+    return solid;
+  };
+  const solid = makeSolid(THREE.DoubleSide);
+  // Le sol n'a qu'une face : vu d'en dessous (par le miroir de la chaussée) il doit rester invisible.
+  const ground = makeSolid(THREE.FrontSide);
 
   // Flaques de lumière sous les lampadaires : plans additifs.
   const pool = new THREE.MeshBasicNodeMaterial();
@@ -319,10 +323,6 @@ export function createCityMaterials(quality: { reflections: boolean; reflectionS
     pool.depthWrite = false;
     pool.fog = true;
   }
-
-  const ground = new THREE.MeshStandardNodeMaterial();
-  ground.colorNode = vec3(0.03, 0.032, 0.04);
-  ground.roughnessNode = float(0.9);
 
   // Ciel : dégradé du halo urbain (horizon) vers le bleu nuit (zénith).
   const sky = new THREE.MeshBasicNodeMaterial();

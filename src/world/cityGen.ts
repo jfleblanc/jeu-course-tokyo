@@ -1,6 +1,6 @@
 import { Rng } from '../core/rng';
 import { NEON_PALETTE, WORLD, type RoadKind } from '../config/world';
-import { generateStreetGraph, type GraphEdge, type GraphNode, type StreetGraph } from './streetGraph';
+import { generateStreetGraph, pointAt, pointInPolygon, type GraphEdge, type GraphNode, type PathPoint, type StreetGraph } from './streetGraph';
 
 /**
  * Génération du quartier : uniquement des données (aucun rendu, aucune physique).
@@ -14,8 +14,21 @@ export interface Rect {
   z1: number;
 }
 
-/** Un étage (retrait) d'immeuble : boîte posée à la hauteur y0. */
-export interface Tier extends Rect {
+/** Rectangle orienté au sol. L'axe local Z (profondeur) pointe vers la rue. */
+export interface Obb {
+  cx: number;
+  cz: number;
+  /** Largeur le long de la rue. */
+  w: number;
+  /** Profondeur. */
+  d: number;
+  yaw: number;
+}
+
+/** Un volume (retrait) d'immeuble, centré sur l'emprise. */
+export interface Tier {
+  w: number;
+  d: number;
   y0: number;
   y1: number;
 }
@@ -32,7 +45,7 @@ export interface Facade {
 }
 
 export interface Building {
-  footprint: Rect;
+  footprint: Obb;
   tiers: Tier[];
   height: number;
   /** Graine propre à l'immeuble (0..1) : allumage des fenêtres, etc. */
@@ -40,13 +53,12 @@ export interface Building {
   /** 0 = bureaux, 1 = résidentiel, 2 = tour vitrée. */
   style: number;
   wall: [number, number, number];
-  /** Largeur et hauteur d'une cellule de fenêtre (m). */
+  /** Largeur d'une cellule de fenêtre (m). */
   cellW: number;
-  cellH: number;
   /** Part des fenêtres allumées. */
   lit: number;
   facades: Facade[];
-  /** Vrai pour le décor hors limites (pas de collision). */
+  /** Vrai pour le décor lointain (pas de collision). */
   backdrop: boolean;
 }
 
@@ -103,6 +115,14 @@ export interface Tree {
   radius: number;
 }
 
+/** Mur invisible (bord de la ville). */
+export interface Wall {
+  x: number;
+  z: number;
+  yaw: number;
+  halfLength: number;
+}
+
 export interface HighwaySample {
   x: number;
   y: number;
@@ -130,10 +150,8 @@ export interface SpawnPoint {
 export interface CityData {
   seed: number;
   graph: StreetGraph;
-  /** Limites jouables (bord extérieur du périphérique). */
+  /** Boîte englobante de la zone jouable. */
   bounds: Rect;
-  /** Îlots (trottoirs surélevés). */
-  blocks: Rect[];
   buildings: Building[];
   signs: Sign[];
   lamps: Lamp[];
@@ -143,14 +161,14 @@ export interface CityData {
   /** Petits objets lumineux (distributeurs, feux). */
   glowBoxes: Box[];
   trees: Tree[];
-  parks: Rect[];
+  parks: Obb[];
+  /** Murs invisibles derrière le périphérique. */
+  walls: Wall[];
   highway: Highway;
   spawn: SpawnPoint;
   /** Points de réapparition sur la chaussée (milieu de chaque rue). */
   respawns: SpawnPoint[];
 }
-
-type SideKinds = { w: RoadKind | null; e: RoadKind | null; n: RoadKind | null; s: RoadKind | null };
 
 const KIND_RANK: Record<RoadKind, number> = { alley: 0, street: 1, avenue: 2, boulevard: 3 };
 
@@ -170,103 +188,111 @@ function neon(rng: Rng): readonly [number, number, number] {
   return rng.pick(NEON_PALETTE);
 }
 
-function splitLots(rng: Rng, rect: Rect, sides: SideKinds, out: { rect: Rect; sides: SideKinds }[], depth = 0): void {
-  const w = rect.x1 - rect.x0;
-  const d = rect.z1 - rect.z0;
-  const maxLot = rng.range(17, 34);
-  const longest = Math.max(w, d);
-  if (longest <= maxLot || depth > 6) {
-    out.push({ rect, sides });
-    return;
+/** Grille de recherche spatiale : évite de comparer chaque immeuble à tous les autres. */
+class SpatialHash<T> {
+  private readonly cells = new Map<number, T[]>();
+  constructor(private readonly size: number) {}
+  private key(ix: number, iz: number): number {
+    return (ix + 4096) * 8192 + (iz + 4096);
   }
-  const t = rng.range(0.38, 0.62);
-  if (w >= d) {
-    const cut = rect.x0 + w * t;
-    if (cut - rect.x0 < 9 || rect.x1 - cut < 9) {
-      out.push({ rect, sides });
-      return;
+  insert(x0: number, z0: number, x1: number, z1: number, item: T): void {
+    const s = this.size;
+    for (let ix = Math.floor(x0 / s); ix <= Math.floor(x1 / s); ix++) {
+      for (let iz = Math.floor(z0 / s); iz <= Math.floor(z1 / s); iz++) {
+        const k = this.key(ix, iz);
+        const list = this.cells.get(k);
+        if (list) list.push(item);
+        else this.cells.set(k, [item]);
+      }
     }
-    splitLots(rng, { ...rect, x1: cut }, { ...sides, e: null }, out, depth + 1);
-    splitLots(rng, { ...rect, x0: cut }, { ...sides, w: null }, out, depth + 1);
-  } else {
-    const cut = rect.z0 + d * t;
-    if (cut - rect.z0 < 9 || rect.z1 - cut < 9) {
-      out.push({ rect, sides });
-      return;
+  }
+  /** Appelle `fn` pour chaque élément proche ; s'arrête si `fn` renvoie vrai. */
+  some(x0: number, z0: number, x1: number, z1: number, fn: (item: T) => boolean): boolean {
+    const s = this.size;
+    for (let ix = Math.floor(x0 / s); ix <= Math.floor(x1 / s); ix++) {
+      for (let iz = Math.floor(z0 / s); iz <= Math.floor(z1 / s); iz++) {
+        const list = this.cells.get(this.key(ix, iz));
+        if (!list) continue;
+        for (const item of list) if (fn(item)) return true;
+      }
     }
-    splitLots(rng, { ...rect, z1: cut }, { ...sides, s: null }, out, depth + 1);
-    splitLots(rng, { ...rect, z0: cut }, { ...sides, n: null }, out, depth + 1);
+    return false;
   }
 }
 
-function facadesOf(rect: Rect, sides: SideKinds): Facade[] {
-  const f: Facade[] = [];
-  const cx = (rect.x0 + rect.x1) / 2;
-  const cz = (rect.z0 + rect.z1) / 2;
-  if (sides.w) f.push({ cx: rect.x0, cz, nx: -1, nz: 0, length: rect.z1 - rect.z0, kind: sides.w });
-  if (sides.e) f.push({ cx: rect.x1, cz, nx: 1, nz: 0, length: rect.z1 - rect.z0, kind: sides.e });
-  if (sides.n) f.push({ cx, cz: rect.z0, nx: 0, nz: -1, length: rect.x1 - rect.x0, kind: sides.n });
-  if (sides.s) f.push({ cx, cz: rect.z1, nx: 0, nz: 1, length: rect.x1 - rect.x0, kind: sides.s });
-  return f;
+interface RoadSample {
+  x: number;
+  z: number;
+  /** Rayon à garder libre (demi-chaussée + trottoir). */
+  r: number;
+  /** Tolérance : dans une courbe, un immeuble droit mord un peu sur le trottoir. */
+  slack: number;
+  kind: RoadKind;
 }
 
-function makeBuilding(rng: Rng, rect: Rect, sides: SideKinds, centerDist: number, backdrop: boolean): Building {
-  const facades = facadesOf(rect, sides);
+/** Deux rectangles orientés se chevauchent-ils ? (théorème des axes séparateurs) */
+function obbOverlap(a: Obb, b: Obb, margin: number): boolean {
+  const ca = Math.cos(a.yaw), sa = Math.sin(a.yaw);
+  const cb = Math.cos(b.yaw), sb = Math.sin(b.yaw);
+  // Axes locaux : X = (c, −s), Z = (s, c)
+  const axes: [number, number][] = [[ca, -sa], [sa, ca], [cb, -sb], [sb, cb]];
+  const dx = b.cx - a.cx, dz = b.cz - a.cz;
+  const ahw = a.w / 2 - margin, ahd = a.d / 2 - margin, bhw = b.w / 2 - margin, bhd = b.d / 2 - margin;
+  for (const [ax, az] of axes) {
+    const dist = Math.abs(dx * ax + dz * az);
+    const ra = ahw * Math.abs(ca * ax - sa * az) + ahd * Math.abs(sa * ax + ca * az);
+    const rb = bhw * Math.abs(cb * ax - sb * az) + bhd * Math.abs(sb * ax + cb * az);
+    if (dist > ra + rb) return false;
+  }
+  return true;
+}
+
+function makeBuilding(rng: Rng, fp: Obb, facades: Facade[], centerDist: number, boost: number): Building {
   let rank = -1;
   for (const f of facades) rank = Math.max(rank, KIND_RANK[f.kind]);
-  const w = rect.x1 - rect.x0;
-  const d = rect.z1 - rect.z0;
   let height: number;
-  if (rank <= 0) height = rng.range(9, 24);
+  if (rank < 0) height = rng.range(16, 48);
+  else if (rank === 0) height = rng.range(9, 24);
   else if (rank === 1) height = rng.range(14, 36);
   else if (rank === 2) height = rng.range(24, 58);
   else height = rng.range(32, 76);
   // Plus haut vers le centre, quelques tours.
-  height *= 1.15 - 0.4 * Math.min(1, centerDist);
-  if (rank >= 1 && rng.chance(0.07)) height *= 1.7;
-  if (backdrop) height = rng.range(26, 85);
+  height *= 1.2 - 0.5 * Math.min(1, centerDist);
+  if (rank !== 0 && rng.chance(0.07)) height *= 1.7;
+  height *= boost;
   height = Math.round(height / 3.4) * 3.4 + 1.2;
 
   const style = height > 60 ? 2 : rank <= 1 && rng.chance(0.55) ? 1 : rng.chance(0.25) ? 2 : 0;
   const tiers: Tier[] = [];
-  const tierCount = height > 22 && Math.min(w, d) > 13 ? (rng.chance(0.65) ? (rng.chance(0.4) ? 3 : 2) : 1) : 1;
-  let cur: Rect = { ...rect };
-  let y = 0;
+  const tierCount = height > 22 && Math.min(fp.w, fp.d) > 13 ? (rng.chance(0.65) ? (rng.chance(0.4) ? 3 : 2) : 1) : 1;
+  let w = fp.w, d = fp.d, y = 0;
   for (let k = 0; k < tierCount; k++) {
     const last = k === tierCount - 1;
     const top = last ? height : y + (height - y) * rng.range(0.45, 0.75);
-    tiers.push({ ...cur, y0: y, y1: top });
+    tiers.push({ w, d, y0: y, y1: top });
     y = top;
-    // Retrait de l'étage suivant (jamais sous 6 m de large).
-    const inX = Math.min(rng.range(1.2, 4), (cur.x1 - cur.x0 - 7) / 2);
-    const inZ = Math.min(rng.range(1.2, 4), (cur.z1 - cur.z0 - 7) / 2);
-    cur = {
-      x0: cur.x0 + Math.max(0, inX) * (rng.chance(0.8) ? 1 : 0),
-      x1: cur.x1 - Math.max(0, inX) * (rng.chance(0.8) ? 1 : 0),
-      z0: cur.z0 + Math.max(0, inZ) * (rng.chance(0.8) ? 1 : 0),
-      z1: cur.z1 - Math.max(0, inZ) * (rng.chance(0.8) ? 1 : 0),
-    };
+    // Retrait du volume suivant (jamais sous 7 m de large).
+    w = Math.max(7, w - rng.range(2, 7));
+    d = Math.max(7, d - rng.range(2, 7));
   }
-
   return {
-    footprint: rect,
+    footprint: fp,
     tiers,
     height,
     seed: rng.next(),
     style,
     wall: [...rng.pick(WALLS)] as [number, number, number],
     cellW: style === 2 ? rng.range(1.5, 2.2) : style === 1 ? rng.range(2.6, 3.6) : rng.range(1.8, 2.8),
-    cellH: 3.4,
     lit: style === 1 ? rng.range(0.12, 0.34) : style === 2 ? rng.range(0.15, 0.42) : rng.range(0.1, 0.4),
     facades,
-    backdrop,
+    backdrop: false,
   };
 }
 
 function addSigns(rng: Rng, b: Building, signs: Sign[]): void {
   const baseTop = (b.tiers[0] as Tier).y1;
   for (const f of b.facades) {
-    const density = f.kind === 'alley' ? 4.6 : f.kind === 'street' ? 5.5 : f.kind === 'avenue' ? 8 : 9;
+    const density = f.kind === 'alley' ? 4.6 : f.kind === 'street' ? 5.5 : f.kind === 'avenue' ? 7.5 : 8.5;
     const count = Math.floor((f.length / density) * rng.range(0.6, 1.3));
     // Le long de la façade : tangente = (−nz, nx)
     const tx = -f.nz;
@@ -285,19 +311,7 @@ function addSigns(rng: Rng, b: Building, signs: Sign[]): void {
         const out = rng.range(0.8, 1.35);
         const maxOut = f.kind === 'alley' ? 0.15 : 0.35;
         const off = rng.range(0.1, maxOut) + out / 2;
-        signs.push({
-          x: px + f.nx * off,
-          y: rng.range(yMin, yMax),
-          z: pz + f.nz * off,
-          along: 0.22,
-          up,
-          out,
-          nx: f.nx,
-          nz: f.nz,
-          color,
-          seed: rng.next(),
-          type: rng.chance(0.75) ? 0 : 2,
-        });
+        signs.push({ x: px + f.nx * off, y: rng.range(yMin, yMax), z: pz + f.nz * off, along: 0.22, up, out, nx: f.nx, nz: f.nz, color, seed: rng.next(), type: rng.chance(0.75) ? 0 : 2 });
       } else {
         // Panneau à plat sur la façade
         const along = Math.min(rng.range(1.8, 5), f.length * 0.5);
@@ -305,120 +319,77 @@ function addSigns(rng: Rng, b: Building, signs: Sign[]): void {
         const yMax = Math.min(baseTop - up / 2 - 0.4, 13);
         const yMin = 3.9 + up / 2;
         if (yMax < yMin) continue;
-        signs.push({
-          x: px + f.nx * 0.12,
-          y: rng.range(yMin, yMax),
-          z: pz + f.nz * 0.12,
-          along,
-          up,
-          out: 0.16,
-          nx: f.nx,
-          nz: f.nz,
-          color,
-          seed: rng.next(),
-          type: rng.chance(0.6) ? 0 : 1,
-        });
+        signs.push({ x: px + f.nx * 0.12, y: rng.range(yMin, yMax), z: pz + f.nz * 0.12, along, up, out: 0.16, nx: f.nx, nz: f.nz, color, seed: rng.next(), type: rng.chance(0.6) ? 0 : 1 });
       }
     }
-    // Grand écran / panneau publicitaire en hauteur sur les grands axes
+    // Grand écran publicitaire en hauteur sur les grands axes
     if (KIND_RANK[f.kind] >= 2 && baseTop > 24 && f.length > 14 && rng.chance(0.4)) {
       const along = Math.min(f.length * 0.7, rng.range(8, 15));
       const up = rng.range(4, 7);
-      signs.push({
-        x: f.cx + f.nx * 0.2,
-        y: rng.range(14, Math.min(baseTop - up / 2 - 1, 30)),
-        z: f.cz + f.nz * 0.2,
-        along,
-        up,
-        out: 0.3,
-        nx: f.nx,
-        nz: f.nz,
-        color: neon(rng),
-        seed: rng.next(),
-        type: 1,
-      });
+      signs.push({ x: f.cx + f.nx * 0.2, y: rng.range(14, Math.min(baseTop - up / 2 - 1, 30)), z: f.cz + f.nz * 0.2, along, up, out: 0.3, nx: f.nx, nz: f.nz, color: neon(rng), seed: rng.next(), type: 1 });
     }
   }
 }
 
-function catmull(p0: number, p1: number, p2: number, p3: number, t: number): number {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
-}
-
+/** Autoroute surélevée : elle suit la courbe du boulevard central, avec une rampe à chaque bout. */
 function buildHighway(graph: StreetGraph): Highway {
   const H = WORLD.highway;
-  const z = graph.zs[graph.boulevardJ] as number;
-  const nx = graph.xs.length;
-  // Les rampes tiennent dans les deux longs tronçons du boulevard, entre deux carrefours.
-  const nodeHalf = (i: number): number => (graph.nodes[graph.boulevardJ * nx + i] as GraphNode).halfX;
-  const startX = (graph.xs[1] as number) + nodeHalf(1) + 6;
-  const endX = (graph.xs[nx - 2] as number) - nodeHalf(nx - 2) - 6;
-  const total = endX - startX;
-
-  // Points de contrôle : droit sur les rampes, ondulation au milieu (courbe de Catmull-Rom).
-  const ctrl: { x: number; z: number }[] = [];
-  const n = 9;
-  for (let k = 0; k <= n; k++) {
-    const u = k / n;
-    const x = startX + total * u;
-    const flat = Math.min(u, 1 - u) * total < H.rampLength + 10 ? 0 : 1;
-    ctrl.push({ x, z: z + flat * H.weave * Math.sin(u * Math.PI * 3) });
-  }
+  // Courbe du boulevard, rééchantillonnée tous les 3 m.
+  const edges = graph.boulevard.map((id) => graph.edges[id] as GraphEdge);
+  let total = 0;
+  for (const e of edges) total += e.length;
+  const first = edges[0] as GraphEdge;
+  const last = edges[edges.length - 1] as GraphEdge;
+  const startS = first.trimA + 8;
+  const endS = total - last.trimB - 8;
   const samples: HighwaySample[] = [];
-  const stepsPerSeg = 16;
-  let s = 0;
-  let px = 0;
-  let pz = 0;
-  for (let k = 0; k < n; k++) {
-    const c0 = ctrl[Math.max(0, k - 1)] as { x: number; z: number };
-    const c1 = ctrl[k] as { x: number; z: number };
-    const c2 = ctrl[k + 1] as { x: number; z: number };
-    const c3 = ctrl[Math.min(n, k + 2)] as { x: number; z: number };
-    for (let q = 0; q < stepsPerSeg + (k === n - 1 ? 1 : 0); q++) {
-      const t = q / stepsPerSeg;
-      const x = catmull(c0.x, c1.x, c2.x, c3.x, t);
-      const zz = catmull(c0.z, c1.z, c2.z, c3.z, t);
-      if (samples.length > 0) s += Math.hypot(x - px, zz - pz);
-      px = x;
-      pz = zz;
-      samples.push({ x, y: 0, z: zz, tx: 1, tz: 0, s });
+  const p: PathPoint = { x: 0, z: 0, tx: 1, tz: 0 };
+  const sampleAt = (s: number): void => {
+    let rem = s;
+    let e = first;
+    for (const cand of edges) {
+      e = cand;
+      if (rem <= cand.length) break;
+      rem -= cand.length;
     }
+    pointAt(e, rem, p);
+  };
+  for (let s = startS; s <= endS; s += 3) {
+    sampleAt(s);
+    samples.push({ x: p.x, y: 0, z: p.z, tx: p.tx, tz: p.tz, s: s - startS });
   }
-  const length = s;
-  for (let k = 0; k < samples.length; k++) {
-    const a = samples[Math.max(0, k - 1)] as HighwaySample;
-    const b = samples[Math.min(samples.length - 1, k + 1)] as HighwaySample;
-    const cur = samples[k] as HighwaySample;
-    const dx = b.x - a.x;
-    const dz = b.z - a.z;
-    const len = Math.hypot(dx, dz) || 1;
-    cur.tx = dx / len;
-    cur.tz = dz / len;
-    // Profil en long : rampe douce (smoothstep) à chaque bout.
-    const dEnd = Math.min(cur.s, length - cur.s);
-    const r = Math.min(1, dEnd / H.rampLength);
-    cur.y = H.height * r * r * (3 - 2 * r);
+  const length = (samples[samples.length - 1] as HighwaySample).s;
+
+  // Les rampes doivent laisser passer les rues transversales : au premier carrefour rencontré,
+  // le tablier doit déjà être assez haut. On raccourcit la rampe si nécessaire.
+  const rampFor = (edge: GraphEdge, fromStart: boolean): number => {
+    const node = graph.nodes[fromStart ? edge.b : edge.a] as GraphNode;
+    const dist = edge.length - (fromStart ? edge.trimA : edge.trimB) - 8 - node.radius;
+    return Math.max(36, Math.min(H.rampLength, dist / 0.56));
+  };
+  const rampA = rampFor(first, true);
+  const rampB = rampFor(last, false);
+  for (const sp of samples) {
+    const r = Math.min(1, sp.s / rampA, (length - sp.s) / rampB);
+    sp.y = H.height * r * r * (3 - 2 * r);
   }
 
   const pillars: Highway['pillars'] = [];
-  let next = H.rampLength * 0.55;
-  for (const p of samples) {
-    if (p.s < next) continue;
-    if (length - p.s < H.rampLength * 0.5) break;
-    next = p.s + H.pillarSpacing;
+  let next = rampA * 0.55;
+  for (const sp of samples) {
+    if (sp.s < next) continue;
+    if (length - sp.s < rampB * 0.5) break;
     // Pas de pilier au milieu d'un carrefour.
     let blocked = false;
-    for (let i = 0; i < nx; i++) {
-      const node = graph.nodes[graph.boulevardJ * nx + i] as GraphNode;
-      if (node.halfX > 0 && Math.abs(p.x - node.x) < node.halfX + 2.5) blocked = true;
+    for (const node of graph.nodes) {
+      if (node.edges.length > 2 && Math.hypot(sp.x - node.x, sp.z - node.z) < node.radius + 3) blocked = true;
     }
     if (blocked) {
-      next = p.s + 4;
+      next = sp.s + 3;
       continue;
     }
-    if (p.y > 3) pillars.push({ x: p.x, z: p.z, top: p.y, yaw: Math.atan2(p.tx, p.tz) });
+    next = sp.s + H.pillarSpacing;
+    if (sp.y > 3) pillars.push({ x: sp.x, z: sp.z, top: sp.y, yaw: Math.atan2(sp.tx, sp.tz) });
   }
   return { samples, halfWidth: H.deckHalfWidth, barrierHeight: H.barrierHeight, pillars };
 }
@@ -426,21 +397,8 @@ function buildHighway(graph: StreetGraph): Highway {
 export function generateCity(seed: number = WORLD.seed): CityData {
   const graph = generateStreetGraph(seed);
   const rng = new Rng(seed ^ 0x9e3779b9);
-  const { xs, zs, hEdge, vEdge } = graph;
-  const nx = xs.length;
-  const nz = zs.length;
-  const edgeOf = (id: number): GraphEdge | null => (id >= 0 ? (graph.edges[id] as GraphEdge) : null);
+  const R = graph.radius;
 
-  const ring = WORLD.roadWidth.avenue / 2;
-  const bounds: Rect = {
-    x0: (xs[0] as number) - ring,
-    x1: (xs[nx - 1] as number) + ring,
-    z0: (zs[0] as number) - ring,
-    z1: (zs[nz - 1] as number) + ring,
-  };
-  const halfSpan = Math.max(bounds.x1, bounds.z1);
-
-  const blocks: Rect[] = [];
   const buildings: Building[] = [];
   const signs: Sign[] = [];
   const lamps: Lamp[] = [];
@@ -448,191 +406,274 @@ export function generateCity(seed: number = WORLD.seed): CityData {
   const props: Box[] = [];
   const glowBoxes: Box[] = [];
   const trees: Tree[] = [];
-  const parks: Rect[] = [];
+  const parks: Obb[] = [];
+  const walls: Wall[] = [];
+  const respawns: SpawnPoint[] = [];
+  const p: PathPoint = { x: 0, z: 0, tx: 1, tz: 0 };
 
-  // ——— Îlots et immeubles ———
-  for (let j = 0; j < nz - 1; j++) {
-    for (let i = 0; i < nx - 1; i++) {
-      const west = edgeOf((vEdge[i] as number[])[j] as number);
-      const east = edgeOf((vEdge[i + 1] as number[])[j] as number);
-      const north = edgeOf((hEdge[i] as number[])[j] as number);
-      const south = edgeOf((hEdge[i] as number[])[j + 1] as number);
-      const block: Rect = {
-        x0: (xs[i] as number) + (west ? west.width / 2 : 0),
-        x1: (xs[i + 1] as number) - (east ? east.width / 2 : 0),
-        z0: (zs[j] as number) + (north ? north.width / 2 : 0),
-        z1: (zs[j + 1] as number) - (south ? south.width / 2 : 0),
-      };
-      blocks.push(block);
-      const sides: SideKinds = {
-        w: west ? west.kind : null,
-        e: east ? east.kind : null,
-        n: north ? north.kind : null,
-        s: south ? south.kind : null,
-      };
-      const region: Rect = {
-        x0: block.x0 + (west ? WORLD.sidewalk[west.kind] : 0),
-        x1: block.x1 - (east ? WORLD.sidewalk[east.kind] : 0),
-        z0: block.z0 + (north ? WORLD.sidewalk[north.kind] : 0),
-        z1: block.z1 - (south ? WORLD.sidewalk[south.kind] : 0),
-      };
-      if (region.x1 - region.x0 < 8 || region.z1 - region.z0 < 8) continue;
-      const lots: { rect: Rect; sides: SideKinds }[] = [];
-      splitLots(rng, region, sides, lots);
-      for (const lot of lots) {
-        const cx = (lot.rect.x0 + lot.rect.x1) / 2;
-        const cz = (lot.rect.z0 + lot.rect.z1) / 2;
-        const hasStreet = lot.sides.w || lot.sides.e || lot.sides.n || lot.sides.s;
-        // Quelques petits parcs / sanctuaires arborés pour aérer.
-        if (hasStreet && rng.chance(0.045)) {
-          parks.push(lot.rect);
-          const count = rng.int(3, 7);
-          for (let k = 0; k < count; k++) {
-            trees.push({
-              x: rng.range(lot.rect.x0 + 2, lot.rect.x1 - 2),
-              z: rng.range(lot.rect.z0 + 2, lot.rect.z1 - 2),
-              height: rng.range(5, 9),
-              radius: rng.range(1.6, 2.8),
-            });
+  // ——— Zones à garder libres : chaussées + trottoirs + carrefours ———
+  const roadHash = new SpatialHash<RoadSample>(40);
+  for (const e of graph.edges) {
+    const r = e.width / 2 + WORLD.sidewalk[e.kind];
+    for (let s = 0; s <= e.length; s += 4) {
+      pointAt(e, s, p);
+      roadHash.insert(p.x - r, p.z - r, p.x + r, p.z + r, { x: p.x, z: p.z, r, slack: Math.min(1.7, WORLD.sidewalk[e.kind] * 0.55), kind: e.kind });
+    }
+  }
+  for (const n of graph.nodes) {
+    if (n.edges.length === 0) continue;
+    const r = n.radius + 1.5;
+    roadHash.insert(n.x - r, n.z - r, n.x + r, n.z + r, { x: n.x, z: n.z, r, slack: 0.4, kind: 'street' });
+  }
+  const occupied = new SpatialHash<Obb>(40);
+
+  const hitsRoad = (o: Obb): boolean => {
+    const c = Math.cos(o.yaw), s = Math.sin(o.yaw);
+    const reach = Math.hypot(o.w, o.d) / 2 + 22;
+    return roadHash.some(o.cx - reach, o.cz - reach, o.cx + reach, o.cz + reach, (q) => {
+      const dx = q.x - o.cx, dz = q.z - o.cz;
+      const lx = dx * c - dz * s;
+      const lz = dx * s + dz * c;
+      return Math.abs(lx) < o.w / 2 + q.r - q.slack && Math.abs(lz) < o.d / 2 + q.r - q.slack;
+    });
+  };
+  const hitsBuilding = (o: Obb): boolean => {
+    const reach = Math.hypot(o.w, o.d) / 2;
+    return occupied.some(o.cx - reach, o.cz - reach, o.cx + reach, o.cz + reach, (q) => obbOverlap(o, q, 0.15));
+  };
+  const occupy = (o: Obb): void => {
+    const reach = Math.hypot(o.w, o.d) / 2;
+    occupied.insert(o.cx - reach, o.cz - reach, o.cx + reach, o.cz + reach, o);
+  };
+  /** Type de rue qui longe ce point, s'il y en a une tout près. */
+  const roadNear = (x: number, z: number, extra: number): RoadKind | null => {
+    let found: RoadKind | null = null;
+    roadHash.some(x - 30, z - 30, x + 30, z + 30, (q) => {
+      if (Math.hypot(q.x - x, q.z - z) < q.r + extra) {
+        if (!found || KIND_RANK[q.kind] > KIND_RANK[found]) found = q.kind;
+      }
+      return false;
+    });
+    return found;
+  };
+
+  const finishBuilding = (fp: Obb, front: Facade | null, boost: number): void => {
+    const c = Math.cos(fp.yaw), s = Math.sin(fp.yaw);
+    const facades: Facade[] = [];
+    if (front) facades.push(front);
+    // Les autres côtés donnent-ils aussi sur une rue (immeuble d'angle) ?
+    // [normale x, normale z, distance au centre, longueur de la façade]
+    const sides: [number, number, number, number][] = [
+      [c, -s, fp.w / 2, fp.d], // +X local
+      [-c, s, fp.w / 2, fp.d], // −X local
+      [-s, -c, fp.d / 2, fp.w], // −Z local (arrière)
+    ];
+    if (!front) sides.push([s, c, fp.d / 2, fp.w]);
+    for (const [nx, nz, dist, length] of sides) {
+      const fx = fp.cx + nx * dist, fz = fp.cz + nz * dist;
+      const kind = roadNear(fx + nx * 1.5, fz + nz * 1.5, 1.2);
+      if (kind) facades.push({ cx: fx, cz: fz, nx, nz, length, kind });
+    }
+    const b = makeBuilding(rng, fp, facades, Math.hypot(fp.cx, fp.cz) / R, boost);
+    buildings.push(b);
+    occupy(fp);
+    addSigns(rng, b, signs);
+    // Distributeurs automatiques au pied des immeubles, côté petites rues
+    for (const f of b.facades) {
+      if (KIND_RANK[f.kind] <= 1 && rng.chance(0.3)) {
+        const t = rng.range(-0.35, 0.35) * f.length;
+        glowBoxes.push({
+          x: f.cx - f.nz * t + f.nx * 0.38,
+          y: 0.9,
+          z: f.cz + f.nx * t + f.nz * 0.38,
+          sx: 1.0,
+          sy: 1.8,
+          sz: 0.6,
+          yaw: Math.atan2(f.nx, f.nz),
+          color: rng.pick([[0.8, 0.9, 1.0], [1.0, 0.25, 0.2], [0.3, 0.6, 1.0], [0.9, 1.0, 0.9]] as const),
+        });
+      }
+    }
+  };
+
+  // ——— Immeubles le long des rues, des plus grands axes aux plus petits ———
+  const ordered = [...graph.edges].sort((a, b) => KIND_RANK[b.kind] - KIND_RANK[a.kind]);
+  // Deux passes : d'abord de grands immeubles, puis de plus petits pour boucher les trous.
+  for (const pass of [0, 1])
+  for (const e of ordered) {
+    const half = e.width / 2;
+    const sw = WORLD.sidewalk[e.kind];
+    for (const side of [1, -1]) {
+      // Côté extérieur du périphérique : immeubles plus profonds et plus hauts (ils ferment la ville).
+      pointAt(e, e.length / 2, p);
+      const outer = e.onRing && (p.x + p.tz * side) ** 2 + (p.z - p.tx * side) ** 2 > p.x ** 2 + p.z ** 2;
+      let s = e.trimA + 1;
+      const end = e.length - e.trimB - 1;
+      while (s < end - 8) {
+        let w = Math.min(end - s, pass === 1 ? rng.range(8, 13) : e.kind === 'alley' ? rng.range(9, 17) : rng.range(13, 30));
+        let d = outer ? rng.range(24, 34) : pass === 1 ? rng.range(8, 14) : e.kind === 'alley' ? rng.range(9, 16) : rng.range(13, 26);
+        let placed = false;
+        for (let attempt = 0; attempt < 4 && !placed; attempt++) {
+          pointAt(e, s + w / 2, p);
+          // côté : +1 = gauche du sens a→b, gauche = (tz, −tx)
+          const nx = p.tz * side, nz = -p.tx * side;
+          const off = half + sw + d / 2;
+          const fp: Obb = { cx: p.x + nx * off, cz: p.z + nz * off, w, d, yaw: Math.atan2(-nx, -nz) };
+          if (!hitsRoad(fp) && !hitsBuilding(fp)) {
+            const fx = p.x + nx * (half + sw), fz = p.z + nz * (half + sw);
+            if (!outer && pass === 0 && rng.chance(0.04) && w > 12) {
+              // Petit parc / sanctuaire arboré
+              parks.push(fp);
+              occupy(fp);
+              const count = rng.int(3, 7);
+              const c = Math.cos(fp.yaw), sn = Math.sin(fp.yaw);
+              for (let k = 0; k < count; k++) {
+                const lx = rng.range(-w / 2 + 2, w / 2 - 2), lz = rng.range(-d / 2 + 2, d / 2 - 2);
+                trees.push({ x: fp.cx + lx * c + lz * sn, z: fp.cz - lx * sn + lz * c, height: rng.range(5, 9), radius: rng.range(1.6, 2.8) });
+              }
+            } else {
+              finishBuilding(fp, { cx: fx, cz: fz, nx: -nx, nz: -nz, length: w, kind: e.kind }, outer ? 1.5 : 1);
+            }
+            placed = true;
+          } else if (attempt % 2 === 0) {
+            d *= 0.62;
+            if (d < 7) d = 7;
+          } else {
+            w *= 0.62;
           }
-          continue;
+          if (w < 7) break;
         }
-        const b = makeBuilding(rng, lot.rect, lot.sides, Math.hypot(cx, cz) / halfSpan, false);
-        buildings.push(b);
-        addSigns(rng, b, signs);
-        // Distributeurs automatiques au pied des immeubles, côté petites rues
-        for (const f of b.facades) {
-          if (KIND_RANK[f.kind] <= 1 && rng.chance(0.3)) {
-            const t = rng.range(-0.35, 0.35) * f.length;
-            const off = f.kind === 'alley' ? 0.32 : 0.4;
-            glowBoxes.push({
-              x: f.cx - f.nz * t + f.nx * off,
-              y: 0.95 + WORLD.sidewalkHeight,
-              z: f.cz + f.nx * t + f.nz * off,
-              sx: 1.0,
-              sy: 1.8,
-              sz: 0.6,
-              yaw: Math.atan2(f.nx, f.nz),
-              color: rng.pick([[0.8, 0.9, 1.0], [1.0, 0.25, 0.2], [0.3, 0.6, 1.0], [0.9, 1.0, 0.9]] as const),
-            });
-          }
-        }
+        s += placed ? w + rng.range(0, 0.6) : pass === 1 ? 3 : 5;
       }
     }
   }
 
-  // ——— Décor hors limites : une rangée d'immeubles derrière le périphérique ———
-  const sw = WORLD.sidewalk.avenue;
-  const depth = 34;
-  const ringSides: { x0: number; z0: number; x1: number; z1: number; side: keyof SideKinds }[] = [
-    { x0: bounds.x0 - depth - 30, x1: bounds.x1 + depth + 30, z0: bounds.z0 - sw - depth, z1: bounds.z0 - sw, side: 's' },
-    { x0: bounds.x0 - depth - 30, x1: bounds.x1 + depth + 30, z0: bounds.z1 + sw, z1: bounds.z1 + sw + depth, side: 'n' },
-    { x0: bounds.x0 - sw - depth, x1: bounds.x0 - sw, z0: bounds.z0 - sw, z1: bounds.z1 + sw, side: 'e' },
-    { x0: bounds.x1 + sw, x1: bounds.x1 + sw + depth, z0: bounds.z0 - sw, z1: bounds.z1 + sw, side: 'w' },
-  ];
-  for (const r of ringSides) {
-    const horizontal = r.side === 'n' || r.side === 's';
-    let cur = horizontal ? r.x0 : r.z0;
-    const end = horizontal ? r.x1 : r.z1;
-    while (cur < end - 8) {
-      const size = Math.min(rng.range(18, 42), end - cur);
-      const rect: Rect = horizontal ? { x0: cur, x1: cur + size, z0: r.z0, z1: r.z1 } : { x0: r.x0, x1: r.x1, z0: cur, z1: cur + size };
-      const sides: SideKinds = { w: null, e: null, n: null, s: null };
-      sides[r.side] = 'avenue';
-      const b = makeBuilding(rng, rect, sides, 1, true);
-      buildings.push(b);
-      addSigns(rng, b, signs);
-      cur += size;
-    }
+  // ——— Cœurs d'îlots : on remplit les vides derrière les façades ———
+  const B: Rect = { x0: Infinity, z0: Infinity, x1: -Infinity, z1: -Infinity };
+  for (let k = 0; k < graph.ringPolygon.length; k += 2) {
+    const x = graph.ringPolygon[k] as number, z = graph.ringPolygon[k + 1] as number;
+    B.x0 = Math.min(B.x0, x);
+    B.x1 = Math.max(B.x1, x);
+    B.z0 = Math.min(B.z0, z);
+    B.z1 = Math.max(B.z1, z);
   }
-  // Silhouettes lointaines dans le brouillard
-  for (let k = 0; k < 90; k++) {
+  const area = (B.x1 - B.x0) * (B.z1 - B.z0);
+  const fillTries = Math.floor(area / 260);
+  for (let k = 0; k < fillTries; k++) {
+    const x = rng.range(B.x0, B.x1), z = rng.range(B.z0, B.z1);
+    if (!pointInPolygon(graph.ringPolygon, x, z)) continue;
+    const fp: Obb = { cx: x, cz: z, w: rng.range(11, 24), d: rng.range(11, 24), yaw: rng.range(0, Math.PI) };
+    // S'aligne sur l'immeuble voisin s'il y en a un (plus naturel qu'un angle au hasard).
+    occupied.some(x - 20, z - 20, x + 20, z + 20, (q) => {
+      fp.yaw = q.yaw;
+      return true;
+    });
+    if (hitsRoad(fp) || hitsBuilding(fp)) continue;
+    finishBuilding(fp, null, 1.15);
+  }
+
+  // ——— Silhouettes lointaines dans le brouillard (pas de collision) ———
+  for (let k = 0; k < 110; k++) {
     const ang = rng.range(0, Math.PI * 2);
-    const dist = halfSpan + rng.range(90, 520);
-    const cx = Math.cos(ang) * dist * 1.1;
-    const cz = Math.sin(ang) * dist * 1.1;
-    const w = rng.range(22, 50);
-    const d = rng.range(22, 50);
-    const rect: Rect = { x0: cx - w / 2, x1: cx + w / 2, z0: cz - d / 2, z1: cz + d / 2 };
-    const b = makeBuilding(rng, rect, { w: null, e: null, n: null, s: null }, 1, true);
+    const dist = R * 1.25 + rng.range(60, 560);
+    const fp: Obb = { cx: Math.cos(ang) * dist * 1.1, cz: Math.sin(ang) * dist, w: rng.range(22, 50), d: rng.range(22, 50), yaw: rng.range(0, Math.PI) };
+    const b = makeBuilding(rng, fp, [], 1, 1);
     b.height = rng.range(50, 190);
-    b.tiers = [{ ...rect, y0: 0, y1: b.height }];
+    b.tiers = [{ w: fp.w, d: fp.d, y0: 0, y1: b.height }];
     b.style = 2;
+    b.backdrop = true;
     buildings.push(b);
   }
 
-  // ——— Lampadaires, flaques de lumière, feux ———
-  const respawns: SpawnPoint[] = [];
+  // ——— Murs invisibles derrière le trottoir extérieur du périphérique ———
+  for (const eid of graph.ring) {
+    const e = graph.edges[eid] as GraphEdge;
+    pointAt(e, e.length / 2, p);
+    const side = (p.x + p.tz) ** 2 + (p.z - p.tx) ** 2 > p.x ** 2 + p.z ** 2 ? 1 : -1;
+    const off = e.width / 2 + WORLD.sidewalk[e.kind] + 1.2;
+    const count = Math.max(1, Math.ceil(e.length / 9));
+    let px = 0, pz = 0;
+    for (let k = 0; k <= count; k++) {
+      pointAt(e, (e.length * k) / count, p);
+      const x = p.x + p.tz * side * off, z = p.z - p.tx * side * off;
+      if (k > 0) {
+        const len = Math.hypot(x - px, z - pz);
+        walls.push({ x: (x + px) / 2, z: (z + pz) / 2, yaw: Math.atan2(x - px, z - pz), halfLength: len / 2 + 0.6 });
+      }
+      px = x;
+      pz = z;
+    }
+  }
+
+  // ——— Lampadaires, flaques de lumière, points de réapparition ———
   for (const e of graph.edges) {
-    const dirX = e.alongX ? 1 : 0;
-    const dirZ = e.alongX ? 0 : 1;
-    const mx = (e.x0 + e.x1) / 2;
-    const mz = (e.z0 + e.z1) / 2;
+    const s0 = e.trimA, s1 = e.length - e.trimB;
+    const usable = s1 - s0;
+    pointAt(e, (s0 + s1) / 2, p);
     const lane = e.kind === 'alley' ? 0 : e.kind === 'boulevard' ? 10 : e.width / 4;
     // Conduite à gauche, comme au Japon : on réapparaît sur la voie de gauche.
-    respawns.push({ x: mx + (e.alongX ? 0 : lane), z: mz + (e.alongX ? -lane : 0), yaw: e.alongX ? Math.PI / 2 : 0 });
+    respawns.push({ x: p.x + p.tz * lane, z: p.z - p.tx * lane, yaw: Math.atan2(p.tx, p.tz) });
+    if (usable < 6) continue;
     if (e.kind === 'alley') {
       // Ruelles : pas de lampadaire, seulement de petites flaques colorées sous les néons.
-      const count = Math.floor(e.length / 14);
+      const count = Math.floor(usable / 14);
       for (let k = 0; k < count; k++) {
-        const t = (k + rng.range(0.2, 0.8)) / count;
-        const side = rng.chance(0.5) ? 1 : -1;
-        const off = side * (e.width / 2 - 1.2);
-        pools.push({
-          x: e.x0 + dirX * e.length * t + dirZ * off,
-          z: e.z0 + dirZ * e.length * t + dirX * off,
-          radius: rng.range(3.5, 6),
-          color: neon(rng),
-          intensity: 0.55,
-        });
+        pointAt(e, s0 + ((k + rng.range(0.2, 0.8)) / count) * usable, p);
+        const off = (rng.chance(0.5) ? 1 : -1) * (e.width / 2 - 1.2);
+        pools.push({ x: p.x + p.tz * off, z: p.z - p.tx * off, radius: rng.range(3.5, 6), color: neon(rng), intensity: 0.55 });
       }
       continue;
     }
     const spacing = e.kind === 'street' ? 30 : 34;
-    const count = Math.max(1, Math.round(e.length / spacing));
+    const count = Math.max(1, Math.round(usable / spacing));
     const color = e.kind === 'street' ? LAMP_WARM : LAMP_COOL;
     for (let k = 0; k < count; k++) {
-      const t = (k + 0.5) / count;
+      pointAt(e, s0 + ((k + 0.5) / count) * usable, p);
       const sides = e.kind === 'street' ? [k % 2 === 0 ? 1 : -1] : [1, -1];
       for (const side of sides) {
-        const off = side * (e.width / 2 + 0.7);
-        const x = e.x0 + dirX * e.length * t + dirZ * off;
-        const z = e.z0 + dirZ * e.length * t + dirX * off;
+        const off = e.width / 2 + 0.7;
+        const nx = p.tz * side, nz = -p.tx * side;
+        const x = p.x + nx * off, z = p.z + nz * off;
         const arm = e.kind === 'street' ? 1.6 : 3.2;
-        const height = e.kind === 'street' ? 6.5 : 9;
-        lamps.push({ x, z, dx: -side * dirZ, dz: -side * dirX, height, arm, color });
-        pools.push({
-          x: x - side * dirZ * (arm + 1.5),
-          z: z - side * dirX * (arm + 1.5),
-          radius: e.kind === 'street' ? 8 : 11,
-          color,
-          intensity: 0.5,
-        });
+        lamps.push({ x, z, dx: -nx, dz: -nz, height: e.kind === 'street' ? 6.5 : 9, arm, color });
+        pools.push({ x: x - nx * (arm + 1.5), z: z - nz * (arm + 1.5), radius: e.kind === 'street' ? 8 : 11, color, intensity: 0.5 });
       }
     }
   }
-  // Feux de circulation aux carrefours des grands axes
+  // Feux de circulation aux coins des grands carrefours
   for (const node of graph.nodes) {
-    if (node.halfX < 5 || node.halfZ < 5) continue;
-    const corners: [number, number][] = [[1, 1], [-1, 1], [1, -1], [-1, -1]];
-    for (const [sx, sz] of corners) {
-      const x = node.x + sx * (node.halfX + 0.8);
-      const z = node.z + sz * (node.halfZ + 0.8);
+    let wide = 0;
+    for (const eid of node.edges) if (KIND_RANK[(graph.edges[eid] as GraphEdge).kind] >= 2) wide++;
+    if (wide < 3) continue;
+    node.corners.forEach((c, k) => {
+      // Un peu en retrait du coin, vers l'extérieur du carrefour.
+      const dx = c.x - node.x, dz = c.z - node.z;
+      const l = Math.hypot(dx, dz) || 1;
+      const x = c.x + (dx / l) * 1.2, z = c.z + (dz / l) * 1.2;
       props.push({ x, y: 2.6, z, sx: 0.16, sy: 5.2, sz: 0.16, yaw: 0, color: [0.05, 0.05, 0.06] });
       props.push({ x, y: 5.0, z, sx: 0.4, sy: 1.1, sz: 0.4, yaw: 0, color: [0.03, 0.03, 0.035] });
-      const green = sx * sz > 0;
+      const green = k % 2 === 0;
       glowBoxes.push({ x, y: green ? 4.7 : 5.3, z, sx: 0.46, sy: 0.26, sz: 0.46, yaw: 0, color: green ? [0.1, 1.0, 0.5] : [1.0, 0.1, 0.08] });
-    }
+    });
   }
 
   const highway = buildHighway(graph);
 
-  // ——— Départ : sur l'avenue centrale, face au boulevard ———
-  const ci = Math.floor(nx / 2);
-  const startEdge = edgeOf((vEdge[ci] as number[])[graph.boulevardJ - 2] as number) ?? (graph.edges[0] as GraphEdge);
-  const spawn: SpawnPoint = startEdge.alongX
-    ? { x: startEdge.x0 + 12, z: startEdge.z0 - startEdge.width / 4, yaw: Math.PI / 2 }
-    : { x: startEdge.x0 + startEdge.width / 4, z: startEdge.z0 + 12, yaw: 0 };
+  // ——— Départ : sur une avenue large, près du centre, loin d'un carrefour ———
+  let spawn: SpawnPoint = respawns[0] ?? { x: 0, z: 0, yaw: 0 };
+  let best = Infinity;
+  graph.edges.forEach((e, k) => {
+    if (e.kind !== 'avenue' || e.onRing || e.length - e.trimA - e.trimB < 50) return;
+    const r = respawns[k] as SpawnPoint;
+    const score = Math.abs(Math.hypot(r.x, r.z) - R * 0.35);
+    if (score < best) {
+      best = score;
+      pointAt(e, e.trimA + 10, p);
+      spawn = { x: p.x + p.tz * (e.width / 4), z: p.z - p.tx * (e.width / 4), yaw: Math.atan2(p.tx, p.tz) };
+    }
+  });
 
-  return { seed, graph, bounds, blocks, buildings, signs, lamps, pools, props, glowBoxes, trees, parks, highway, spawn, respawns };
+  const margin = 60;
+  const bounds: Rect = { x0: B.x0 - margin, x1: B.x1 + margin, z0: B.z0 - margin, z1: B.z1 + margin };
+  return { seed, graph, bounds, buildings, signs, lamps, pools, props, glowBoxes, trees, parks, walls, highway, spawn, respawns };
 }

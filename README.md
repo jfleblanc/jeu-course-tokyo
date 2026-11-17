@@ -43,7 +43,7 @@ src/
   input/      actions abstraites ← clavier + manette
   physics/    monde Rapier
   vehicle/    simulation (sans Three.js), moteur/boîte, modèle 3D procédural
-  world/      graphe de rues → données de la ville → maillages et collisions
+  world/      graphe de rues courbes → immeubles le long des rues → maillages et collisions
   render/     rendu WebGPU, matériaux TSL, bloom, caméras
   audio/      musique générée par code (pistes décrites dans config/music.ts)
   ui/         HUD et panneau A/B
@@ -67,5 +67,13 @@ Règle : ne changer que deux ou trois réglages à la fois entre A et B.
 
 ## Phases
 
-Voir le brief du projet. Phase 1 (conduite + un quartier) : faite. Suivante : phase 2, une course
-avec points de passage, 3 IA, décompte et classement.
+Voir le brief du projet. Phase 1 (conduite + une ville) : faite. Ensuite : autoroute de ceinture,
+puis phase 2 (une course avec points de passage, 3 IA, décompte et classement).
+
+## La ville
+
+Générée par code à partir d'une graine (`src/config/world.ts`) : un treillis de lignes arrondi en
+galet, ondulé et décalé, avec deux avenues en diagonale. Chaque ligne devient une courbe lisse.
+On obtient environ 19 km de rues : un périphérique, un boulevard central surmonté de l'autoroute,
+de larges avenues courbes, et des rues et ruelles qui servent de raccourcis. Les immeubles sont
+posés le long des rues, orientés selon la courbe ; les cœurs d'îlots sont remplis ensuite.

@@ -1,4 +1,3 @@
-import { WORLD } from '../config/world';
 import { GROUP_WORLD, type PhysicsWorld } from '../physics/physicsWorld';
 import type { CityData, HighwaySample } from './cityGen';
 
@@ -20,28 +19,16 @@ export function buildCityColliders(city: CityData, phys: PhysicsWorld): number {
   // Sol
   box(0, -1, 0, 3000, 1, 3000, 0, 0.9);
 
-  // Trottoirs (bordure de 12 cm que la suspension avale)
-  const sh = WORLD.sidewalkHeight;
-  for (const r of city.blocks) {
-    box((r.x0 + r.x1) / 2, sh / 2, (r.z0 + r.z1) / 2, (r.x1 - r.x0) / 2, sh / 2, (r.z1 - r.z0) / 2, 0, 0.9);
-  }
-
-  // Immeubles : une boîte par immeuble (emprise au sol, hauteur du premier volume)
+  // Immeubles : une boîte orientée par immeuble
   for (const b of city.buildings) {
     if (b.backdrop) continue;
     const f = b.footprint;
     const h = Math.min(b.height, 30);
-    box((f.x0 + f.x1) / 2, h / 2, (f.z0 + f.z1) / 2, (f.x1 - f.x0) / 2, h / 2, (f.z1 - f.z0) / 2, 0, 0.3);
+    box(f.cx, h / 2, f.cz, f.w / 2, h / 2, f.d / 2, f.yaw, 0.3);
   }
 
-  // Murs invisibles au bord du quartier (devant les immeubles de décor)
-  const B = city.bounds;
-  const m = WORLD.sidewalk.avenue;
-  const t = 5;
-  box((B.x0 + B.x1) / 2, 15, B.z0 - m - t, (B.x1 - B.x0) / 2 + 40, 15, t, 0, 0.3);
-  box((B.x0 + B.x1) / 2, 15, B.z1 + m + t, (B.x1 - B.x0) / 2 + 40, 15, t, 0, 0.3);
-  box(B.x0 - m - t, 15, (B.z0 + B.z1) / 2, t, 15, (B.z1 - B.z0) / 2 + 40, 0, 0.3);
-  box(B.x1 + m + t, 15, (B.z0 + B.z1) / 2, t, 15, (B.z1 - B.z0) / 2 + 40, 0, 0.3);
+  // Murs invisibles derrière le périphérique (le bord de la ville)
+  for (const w of city.walls) box(w.x, 15, w.z, 0.5, 15, w.halfLength, w.yaw, 0.3);
 
   // Piliers d'autoroute
   for (const p of city.highway.pillars) box(p.x, p.top / 2, p.z, 0.8, p.top / 2, 0.8, p.yaw, 0.3);

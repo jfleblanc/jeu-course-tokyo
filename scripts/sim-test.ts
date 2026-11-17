@@ -154,17 +154,32 @@ async function cityTest() {
   console.log(`autoroute: hauteur max ${maxY.toFixed(2)} m (tablier ${(s[Math.floor(s.length / 2)]!.y + 0.59).toFixed(2)}), traversée en ${done.toFixed(1)} s, v max ${maxV.toFixed(0)} km/h, inclinaison max ${(Math.acos(minUp) * 57.3).toFixed(1)}°, fin y=${car.pos.y.toFixed(2)}`);
   phys.world.removeRigidBody(car.body);
   // 2) Monter sur un trottoir à 70 km/h en biais
-  const e = city.graph.edges.find((g) => g.kind === 'avenue' && !g.alongX && g.length > 60)!;
-  car = mk(e.x0, e.z0 + 5, 0.25);
+  const { pointAt } = await import('../src/world/streetGraph');
+  const e = city.graph.edges.find((g) => g.kind === 'avenue' && !g.onRing && g.length - g.trimA - g.trimB > 60)!;
+  const st = pointAt(e, e.trimA + 5);
+  const yaw0 = Math.atan2(st.tx, st.tz);
+  car = mk(st.x, st.z, yaw0 + 0.25);
   input.steer = 0; input.throttle = 1; minUp = 1; maxY = 0; let hitSpeed = 0;
   drive(car, 60 * 6, () => { const q = car.rot; minUp = Math.min(minUp, 1 - 2 * (q.x * q.x + q.z * q.z)); maxY = Math.max(maxY, car.pos.y); hitSpeed = Math.max(hitSpeed, car.speed * 3.6); });
-  console.log(`trottoir + mur en biais: v max ${hitSpeed.toFixed(0)} km/h, hauteur max ${maxY.toFixed(2)}, inclinaison max ${(Math.acos(minUp) * 57.3).toFixed(1)}°, fin v=${(car.speed * 3.6).toFixed(0)} y=${car.pos.y.toFixed(2)} x=${(car.pos.x - e.x0).toFixed(1)}`);
+  console.log(`trottoir + mur en biais: v max ${hitSpeed.toFixed(0)} km/h, hauteur max ${maxY.toFixed(2)}, inclinaison max ${(Math.acos(minUp) * 57.3).toFixed(1)}°, fin v=${(car.speed * 3.6).toFixed(0)} y=${car.pos.y.toFixed(2)}`);
   phys.world.removeRigidBody(car.body);
   // 3) Mur de face à 150 km/h
-  car = mk(e.x0, e.z0 + 5, Math.PI / 2);
+  car = mk(st.x, st.z, yaw0 + Math.PI / 2);
   minUp = 1; hitSpeed = 0;
   drive(car, 60 * 8, () => { const q = car.rot; minUp = Math.min(minUp, 1 - 2 * (q.x * q.x + q.z * q.z)); hitSpeed = Math.max(hitSpeed, car.speed * 3.6); });
-  console.log(`mur de face: v max ${hitSpeed.toFixed(0)} km/h, inclinaison max ${(Math.acos(Math.max(-1, minUp)) * 57.3).toFixed(1)}°, fin y=${car.pos.y.toFixed(2)} dx=${(car.pos.x - e.x0).toFixed(1)} (demi-largeur ${e.width / 2} + trottoir 3)`);
+  console.log(`mur de face: v max ${hitSpeed.toFixed(0)} km/h, inclinaison max ${(Math.acos(Math.max(-1, minUp)) * 57.3).toFixed(1)}°, fin y=${car.pos.y.toFixed(2)} distance parcourue ${Math.hypot(car.pos.x - st.x, car.pos.z - st.z).toFixed(1)} m (demi-largeur ${e.width / 2} + trottoir)`);
+  phys.world.removeRigidBody(car.body);
+  // 4) Statistiques du réseau
+  const g = city.graph;
+  const byKind: Record<string, number> = {};
+  let totalLen = 0;
+  for (const ed of g.edges) { byKind[ed.kind] = (byKind[ed.kind] ?? 0) + ed.length; totalLen += ed.length; }
+  const deg: Record<number, number> = {};
+  for (const nd of g.nodes) deg[nd.edges.length] = (deg[nd.edges.length] ?? 0) + 1;
+  console.log(`réseau: ${(totalLen / 1000).toFixed(1)} km de rues — ` + Object.entries(byKind).map(([k, v]) => `${k} ${(v / 1000).toFixed(1)} km`).join(', ') + ` ; rayon ${g.radius.toFixed(0)} m ; carrefours par nombre de branches: ${JSON.stringify(deg)}`);
+  const maxTrim = Math.max(...g.edges.map((ed) => Math.max(ed.trimA, ed.trimB)));
+  const shortest = Math.min(...g.edges.map((ed) => ed.length - ed.trimA - ed.trimB));
+  console.log(`carrefours: retrait max ${maxTrim.toFixed(1)} m, plus courte chaussée ${shortest.toFixed(1)} m ; murs ${city.walls.length}, parcs ${city.parks.length}, piliers ${city.highway.pillars.length}`);
 }
 await cityTest();
 await run('A', PRESET_A);

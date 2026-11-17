@@ -181,7 +181,7 @@ async function boot(): Promise<void> {
       car.afterStep();
       // Filet de sécurité : sortie de carte ou chute sous le sol.
       const b = city.bounds;
-      if (car.pos.y < -6 || car.pos.x < b.x0 - 60 || car.pos.x > b.x1 + 60 || car.pos.z < b.z0 - 60 || car.pos.z > b.z1 + 60) respawn();
+      if (car.pos.y < -6 || car.pos.x < b.x0 || car.pos.x > b.x1 || car.pos.z < b.z0 || car.pos.z > b.z1) respawn();
     },
     render(alpha, frameDt) {
       syncCarVisual(visual, car, alpha);

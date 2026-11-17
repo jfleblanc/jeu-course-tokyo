@@ -79,4 +79,6 @@ Corrections communes à A et B :
 Mesures, drift tenu volant braqué à 110 km/h : angle stabilisé 30° (A) et 24° (B), contre 40°
 avant.
 
-_Choix retenu : à remplir après les essais._
+**Choix retenu (2026-11-16, version 22c9b0e) : A**, avec « Freinage en virage » monté à 1.
+B (« drift encore plus sage ») reste en place pour être essayé par le deuxième joueur ;
+on réajustera plus tard.

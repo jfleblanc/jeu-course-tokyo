@@ -1,9 +1,8 @@
 import * as THREE from 'three/webgpu';
-import { WORLD } from '../config/world';
 import { GeomBuilder, type Vec3 } from '../render/geomBuilder';
 import type { CityMaterials } from '../render/materials';
 import type { Building, CityData, HighwaySample } from './cityGen';
-import type { GraphEdge } from './streetGraph';
+import { pointAt, type GraphEdge, type GraphNode, type PathPoint } from './streetGraph';
 
 /**
  * Transforme les données de la ville en maillages. Tout est fusionné par matériau :
@@ -19,50 +18,89 @@ function addBuilding(gb: GeomBuilder, glow: GeomBuilder, b: Building): void {
   // aData = (graine, largeur de cellule, part allumée, style) ; style +10 = décor lointain
   const iseed = Math.floor(b.seed * 4000);
   const data = [iseed, b.cellW, b.lit, b.style + (b.backdrop ? 10 : 0)] as const;
+  const f = b.footprint;
+  const c = Math.cos(f.yaw), s = Math.sin(f.yaw);
+  // Repère local de l'immeuble → monde
+  const wx = (lx: number, lz: number): number => f.cx + lx * c + lz * s;
+  const wz = (lx: number, lz: number): number => f.cz - lx * s + lz * c;
   for (const t of b.tiers) {
-    const sx = t.x1 - t.x0;
-    const sz = t.z1 - t.z0;
-    gb.box((t.x0 + t.x1) / 2, (t.y0 + t.y1) / 2, (t.z0 + t.z1) / 2, sx, t.y1 - t.y0, sz, 0, b.wall, data, true, false);
+    gb.box(f.cx, (t.y0 + t.y1) / 2, f.cz, t.w, t.y1 - t.y0, t.d, f.yaw, b.wall, data, true, false);
   }
   const top = b.tiers[b.tiers.length - 1];
   if (!top) return;
-  const cx = (top.x0 + top.x1) / 2;
-  const cz = (top.z0 + top.z1) / 2;
-  const w = top.x1 - top.x0;
-  const d = top.z1 - top.z0;
+  const w = top.w, d = top.d;
   // Petits volumes techniques sur le toit (aData.w = 20 : pas de fenêtres)
   const roofData = [iseed, 1, 0, 20] as const;
   const k = b.seed * 97;
   const r1 = k - Math.floor(k);
   const r2 = (k * 7.3) % 1;
   if (w > 8 && d > 8) {
-    gb.box(cx + (r1 - 0.5) * w * 0.4, top.y1 + 1.1, cz + (r2 - 0.5) * d * 0.4, Math.min(5, w * 0.35), 2.2, Math.min(4, d * 0.35), 0, [b.wall[0] * 0.8, b.wall[1] * 0.8, b.wall[2] * 0.8], roofData);
+    const lx = (r1 - 0.5) * w * 0.4, lz = (r2 - 0.5) * d * 0.4;
+    gb.box(wx(lx, lz), top.y1 + 1.1, wz(lx, lz), Math.min(5, w * 0.35), 2.2, Math.min(4, d * 0.35), f.yaw, [b.wall[0] * 0.8, b.wall[1] * 0.8, b.wall[2] * 0.8], roofData);
   }
   // Parapet
-  if (!b.backdrop || b.height < 90) {
+  if (b.height < 90) {
     const ph = 0.7;
     const col: Vec3 = [b.wall[0] * 1.1, b.wall[1] * 1.1, b.wall[2] * 1.1];
-    gb.box(cx, top.y1 + ph / 2, top.z0 + 0.15, w, ph, 0.3, 0, col, roofData);
-    gb.box(cx, top.y1 + ph / 2, top.z1 - 0.15, w, ph, 0.3, 0, col, roofData);
-    gb.box(top.x0 + 0.15, top.y1 + ph / 2, cz, 0.3, ph, d, 0, col, roofData);
-    gb.box(top.x1 - 0.15, top.y1 + ph / 2, cz, 0.3, ph, d, 0, col, roofData);
+    gb.box(wx(0, d / 2 - 0.15), top.y1 + ph / 2, wz(0, d / 2 - 0.15), w, ph, 0.3, f.yaw, col, roofData);
+    gb.box(wx(0, -d / 2 + 0.15), top.y1 + ph / 2, wz(0, -d / 2 + 0.15), w, ph, 0.3, f.yaw, col, roofData);
+    gb.box(wx(w / 2 - 0.15, 0), top.y1 + ph / 2, wz(w / 2 - 0.15, 0), 0.3, ph, d, f.yaw, col, roofData);
+    gb.box(wx(-w / 2 + 0.15, 0), top.y1 + ph / 2, wz(-w / 2 + 0.15, 0), 0.3, ph, d, f.yaw, col, roofData);
   }
-  // Balise rouge clignotante sur les immeubles hauts (aData.y = 5 : clignote)
+  // Balise rouge clignotante sur les immeubles hauts (type 5 : clignote)
   if (b.height > 48) {
-    gb.box(cx, top.y1 + 2.5, cz, 0.18, 5, 0.18, 0, DARK_METAL, roofData);
-    glow.box(cx, top.y1 + 5.2, cz, 0.7, 0.7, 0.7, 0, [1, 0.06, 0.04], [iseed, 5, 1, 1], true, true);
+    gb.box(f.cx, top.y1 + 2.5, f.cz, 0.18, 5, 0.18, 0, DARK_METAL, roofData);
+    glow.box(f.cx, top.y1 + 5.2, f.cz, 0.7, 0.7, 0.7, 0, [1, 0.06, 0.04], [iseed, 5, 1, 1], true, true);
   }
 }
 
-function addRoadEdge(gb: GeomBuilder, e: GraphEdge): void {
+const CURB: Vec3 = [0.11, 0.115, 0.125];
+
+/** Chaussée d'une rue : ruban qui suit la courbe, entre les deux carrefours. */
+function addRoadEdge(gb: GeomBuilder, solid: GeomBuilder, e: GraphEdge): void {
   const half = e.width / 2;
-  const data = [ROAD_KIND[e.kind], e.length, half, 0] as const;
-  const L = e.length;
-  // UV : u = position en travers (−half..half), v = distance le long de la rue
-  if (e.alongX) {
-    gb.quadUv([e.x0, 0, e.z0 + half], [e.x1, 0, e.z0 + half], [e.x1, 0, e.z0 - half], [e.x0, 0, e.z0 - half], [0, 1, 0], [half, 0, half, L, -half, L, -half, 0], [1, 1, 1], data);
-  } else {
-    gb.quadUv([e.x0 - half, 0, e.z0], [e.x0 - half, 0, e.z1], [e.x0 + half, 0, e.z1], [e.x0 + half, 0, e.z0], [0, 1, 0], [-half, 0, -half, L, half, L, half, 0], [1, 1, 1], data);
+  const s0 = e.trimA, s1 = e.length - e.trimB;
+  const usable = s1 - s0;
+  if (usable <= 0.05) return;
+  const data = [ROAD_KIND[e.kind], usable, half, 0] as const;
+  const steps = Math.max(1, Math.ceil(usable / 5));
+  const p: PathPoint = { x: 0, z: 0, tx: 1, tz: 0 };
+  let pl: Vec3 = [0, 0, 0], pr: Vec3 = [0, 0, 0], pv = 0;
+  for (let k = 0; k <= steps; k++) {
+    const v = (usable * k) / steps;
+    pointAt(e, s0 + v, p);
+    // gauche = (tz, −tx)
+    const l: Vec3 = [p.x + p.tz * half, 0, p.z - p.tx * half];
+    const r: Vec3 = [p.x - p.tz * half, 0, p.z + p.tx * half];
+    if (k > 0) {
+      // UV : u = position en travers (−half..half), v = distance le long de la rue
+      gb.quadUv(pr, r, l, pl, [0, 1, 0], [-half, pv, -half, v, half, v, half, pv], [1, 1, 1], data);
+      // Bordure de trottoir (visuelle) de chaque côté
+      for (const side of [1, -1]) {
+        const a = side > 0 ? pl : pr, b = side > 0 ? l : r;
+        const ox = p.tz * side * 0.3, oz = -p.tx * side * 0.3;
+        const a2: Vec3 = [a[0] + ox, 0.09, a[2] + oz], b2: Vec3 = [b[0] + ox, 0.09, b[2] + oz];
+        const a1: Vec3 = [a[0], 0.09, a[2]], b1: Vec3 = [b[0], 0.09, b[2]];
+        solid.quad(a1, b1, b2, a2, [0, 1, 0], 0, 0, 1, 1, CURB);
+        solid.quad(a, b, b1, a1, [-p.tz * side, 0, p.tx * side], 0, 0, 1, 1, CURB);
+      }
+    }
+    pl = l;
+    pr = r;
+    pv = v;
+  }
+}
+
+/** Surface d'un carrefour : éventail de triangles autour du nœud. */
+function addJunction(gb: GeomBuilder, n: GraphNode): void {
+  const o = n.outline;
+  if (o.length < 3) return;
+  const data = [ROAD_KIND.intersection, 1e6, 100, 0] as const;
+  const c: Vec3 = [n.x, 0, n.z];
+  for (let k = 0; k < o.length; k++) {
+    const a = o[k] as { x: number; z: number };
+    const b = o[(k + 1) % o.length] as { x: number; z: number };
+    gb.tri(c, [a.x, 0, a.z], [b.x, 0, b.z], [0, 1, 0], [1, 1, 1], data);
   }
 }
 
@@ -131,38 +169,42 @@ export interface CityMeshes {
 export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes {
   const group = new THREE.Group();
   group.name = 'ville';
-  const sh = WORLD.sidewalkHeight;
+  const sh = 0; // les trottoirs sont au niveau du sol (seule la bordure est en relief)
 
   // ——— Immeubles ———
   const bld = new GeomBuilder();
   const glow = new GeomBuilder();
   for (const b of city.buildings) addBuilding(bld, glow, b);
 
-  // ——— Routes ———
-  const roads = new GeomBuilder();
-  for (const e of city.graph.edges) addRoadEdge(roads, e);
-  for (const n of city.graph.nodes) {
-    if (n.halfX <= 0 || n.halfZ <= 0) continue;
-    roads.quad(
-      [n.x - n.halfX, 0, n.z + n.halfZ], [n.x + n.halfX, 0, n.z + n.halfZ], [n.x + n.halfX, 0, n.z - n.halfZ], [n.x - n.halfX, 0, n.z - n.halfZ],
-      [0, 1, 0], 0, 0, 1, 1, [1, 1, 1], [ROAD_KIND.intersection, 1e6, 100, 0],
-    );
-  }
-
-  // ——— Trottoirs, parcs, mobilier ———
+  // ——— Sol (dallage de trottoir partout), routes par-dessus, bordures ———
   const solid = new GeomBuilder();
-  for (const r of city.blocks) {
-    solid.box((r.x0 + r.x1) / 2, sh / 2, (r.z0 + r.z1) / 2, r.x1 - r.x0, sh, r.z1 - r.z0, 0, SIDEWALK);
+  const groundGeo = new GeomBuilder();
+  // Le sol est découpé en dalles de 60 m : un seul triangle géant perd en précision de profondeur
+  // et passerait par endroits devant la chaussée posée 5 cm plus haut.
+  {
+    const gy = -0.05;
+    const cell = 60;
+    const b = city.bounds;
+    const x0 = Math.floor(b.x0 / cell) * cell, x1 = Math.ceil(b.x1 / cell) * cell;
+    const z0 = Math.floor(b.z0 / cell) * cell, z1 = Math.ceil(b.z1 / cell) * cell;
+    const tile = (ax: number, az: number, bx: number, bz: number): void => {
+      groundGeo.quad([ax, gy, bz], [bx, gy, bz], [bx, gy, az], [ax, gy, az], [0, 1, 0], 0, 0, 1, 1, SIDEWALK);
+    };
+    for (let x = x0; x < x1; x += cell) for (let z = z0; z < z1; z += cell) tile(x, z, x + cell, z + cell);
+    // Au-delà de la ville (dans le brouillard) : quatre grandes dalles suffisent.
+    const G = 2600;
+    tile(-G, -G, G, z0);
+    tile(-G, z1, G, G);
+    tile(-G, z0, x0, z1);
+    tile(x1, z0, G, z1);
   }
-  // Bande de trottoir extérieure, sous les immeubles de décor
-  const B = city.bounds;
-  const outer = 60;
-  solid.box((B.x0 + B.x1) / 2, sh / 2, B.z0 - outer / 2, B.x1 - B.x0 + outer * 2, sh, outer, 0, SIDEWALK);
-  solid.box((B.x0 + B.x1) / 2, sh / 2, B.z1 + outer / 2, B.x1 - B.x0 + outer * 2, sh, outer, 0, SIDEWALK);
-  solid.box(B.x0 - outer / 2, sh / 2, (B.z0 + B.z1) / 2, outer, sh, B.z1 - B.z0, 0, SIDEWALK);
-  solid.box(B.x1 + outer / 2, sh / 2, (B.z0 + B.z1) / 2, outer, sh, B.z1 - B.z0, 0, SIDEWALK);
+  const roads = new GeomBuilder();
+  for (const e of city.graph.edges) addRoadEdge(roads, solid, e);
+  for (const n of city.graph.nodes) addJunction(roads, n);
+
+  // ——— Parcs, arbres, mobilier ———
   for (const r of city.parks) {
-    solid.box((r.x0 + r.x1) / 2, sh + 0.02, (r.z0 + r.z1) / 2, r.x1 - r.x0, 0.04, r.z1 - r.z0, 0, [0.02, 0.05, 0.03]);
+    solid.box(r.cx, 0.0, r.cz, r.w, 0.06, r.d, r.yaw, [0.02, 0.05, 0.03]);
   }
   for (const t of city.trees) {
     solid.cylinder(t.x, sh, t.z, 0.22, 0.14, t.height * 0.5, 6, [0.05, 0.035, 0.025], [0, 0, 0, 0], false);
@@ -215,14 +257,8 @@ export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes
   let triangles = 0;
   const tri = (g: THREE.BufferGeometry): number => (g.index ? g.index.count / 3 : 0);
 
-  // Sol de base, loin sous le brouillard
-  const base = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), mats.ground);
-  base.rotation.x = -Math.PI / 2;
-  base.position.y = -0.05;
-  base.name = 'sol';
-  group.add(base);
-
   for (const [builder, mat, name] of [
+    [groundGeo, mats.ground, 'sol'],
     [bld, mats.building, 'immeubles'],
     [solid, mats.solid, 'mobilier'],
     [glow, mats.glow, 'lumineux'],

@@ -37,6 +37,25 @@ export class GeomBuilder {
     this.count += 4;
   }
 
+  /** Triangle ; l'ordre des sommets est corrigé pour que la face regarde du côté de la normale `n`. */
+  tri(p0: Vec3, p1: Vec3, p2: Vec3, n: Vec3, color: Vec3 = WHITE, data: Vec4 = ZERO4): void {
+    const ax = p1[0] - p0[0], ay = p1[1] - p0[1], az = p1[2] - p0[2];
+    const bx = p2[0] - p0[0], by = p2[1] - p0[1], bz = p2[2] - p0[2];
+    const facing = (ay * bz - az * by) * n[0] + (az * bx - ax * bz) * n[1] + (ax * by - ay * bx) * n[2];
+    const base = this.count;
+    const q1 = facing >= 0 ? p1 : p2;
+    const q2 = facing >= 0 ? p2 : p1;
+    this.pos.push(p0[0], p0[1], p0[2], q1[0], q1[1], q1[2], q2[0], q2[1], q2[2]);
+    this.uvs.push(0, 0, 0, 0, 0, 0);
+    for (let k = 0; k < 3; k++) {
+      this.nor.push(n[0], n[1], n[2]);
+      this.col.push(color[0], color[1], color[2]);
+      this.data.push(data[0], data[1], data[2], data[3]);
+    }
+    this.idx.push(base, base + 1, base + 2);
+    this.count += 3;
+  }
+
   /** Comme quad(), mais avec les UV donnés sommet par sommet. */
   quadUv(p0: Vec3, p1: Vec3, p2: Vec3, p3: Vec3, n: Vec3, uv: readonly [number, number, number, number, number, number, number, number], color: Vec3 = WHITE, data: Vec4 = ZERO4): void {
     const at = this.uvs.length;
