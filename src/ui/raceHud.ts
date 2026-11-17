@@ -2,7 +2,7 @@ import type { Race } from '../race/race';
 import type { RouteTurn } from '../race/route';
 import type { RaceSummary } from '../progression/playerState';
 
-const IDLE_HINT = '<kbd>Entrée</kbd> course · <kbd>T</kbd> circuit à 3 tours';
+const IDLE_HINT = '<kbd>Entrée</kbd> course · <kbd>T</kbd> circuit · ou arrêtez-vous sur une borne de départ';
 
 const fmtTime = (t: number): string => {
   const m = Math.floor(t / 60);
@@ -134,7 +134,7 @@ export class RaceHud {
       const sm = this.summary;
       let reward = '';
       if (sm) {
-        reward = `<div class="reward">${sm.trial ? '' : `<b>+${sm.xp} XP</b> · `}+¥ ${sm.money.toLocaleString('fr-CA')}</div>`;
+        reward = `<div class="reward">${sm.trial ? '' : `<b>+${sm.xp} XP</b> · `}+¥ ${sm.money.toLocaleString('fr-CA')}${sm.bonus ? ` <small>(dont ¥ ${sm.bonus.toLocaleString('fr-CA')} de mallettes)</small>` : ''}</div>`;
         if (sm.promoted) reward += `<div class="levelup">Palier ${sm.tierName} débloqué ! Niveau ${sm.level}</div>`;
         else if (sm.trial) reward += `<div class="levelup">Épreuve manquée : il faut finir dans les deux premiers.</div>`;
         else if (sm.leveledUp) reward += `<div class="levelup">Niveau ${sm.level} !</div>`;

@@ -228,10 +228,34 @@ async function cityTest() {
       for (let sd = 1; sd <= 40; sd++) { const r = generateRoute(city.graph, sd * 53, 950, 3); if (r) { okC++; lapLens.push(r.lapLength); } }
       console.log(`circuits: ${okC}/40 générés, tour de ${Math.min(...lapLens).toFixed(0)}–${Math.max(...lapLens).toFixed(0)} m`);
     }
+    {
+      const { buildTrackBank } = await import('../src/race/trackBank');
+      const bank = buildTrackBank(city.graph);
+      console.log(`banque: ${bank.length} tracés — ` + bank.map((t) => `${t.name} (${t.circuit ? t.route.laps + ' × ' + t.route.lapLength.toFixed(0) : t.route.length.toFixed(0)} m)`).join(' ; '));
+      // Téléporteur et mallettes : le joueur suit le tracé en pilote automatique derrière les autres.
+      const { driveAlongRoute } = await import('../src/ai/driver');
+      const { AI_DRIVERS } = await import('../src/config/race');
+      const me = mk(0, 0, 0);
+      const race = new Race(phys, CAR_SPEC, me);
+      const track = bank.find((t) => race.start(t.route) && race.pickups.some((p) => p.kind === 'teleport')) ?? bank[0]!;
+      race.start(track.route, { cashValue: 280 });
+      const inp = emptyDriveInput(); const slow = { ...AI_DRIVERS[2]!, topSpeed: 120 };
+      const evs: string[] = []; let n2 = 0;
+      while (n2 < 60 * 300 && !race.player!.finished) {
+        if (race.phase === 'running') driveAlongRoute(me, race.route!, race.player!.index, slow, 1, 0, inp);
+        // vise les objets : on force le passage dessus en plaçant la voiture quand elle est tout près
+        me.update(FIXED_DT, race.playerInput(inp), PRESET_A); race.beforeStep(FIXED_DT, PRESET_A); phys.world.step(); me.afterStep(); race.afterStep(FIXED_DT);
+        for (const pk of race.pickups) if (!pk.taken && Math.abs(pk.index - race.player!.index) < 2) { me.teleport(pk.x, 0.75, pk.z, me.yaw, me.speed); }
+        while (race.events.length) { const e = race.events.shift()!; evs.push(e.type === 'cash' ? `+${e.amount}¥` : `téléporté +${e.gained.toFixed(0)} m`); }
+        n2++;
+      }
+      console.log(`objets sur « ${track.name} »: ${race.pickups.length} posés (${race.pickups.filter((p) => p.kind === 'teleport').length} téléporteur), ramassés: ${evs.join(', ')} ; bonus ${race.bonusMoney} ¥ ; arrivé=${race.player!.finished} place ${race.ranking().indexOf(race.player!) + 1}`);
+      race.stop(); phys.world.removeRigidBody(me.body);
+    }
     for (const seed of [7, 4242, 990017, -5, -77]) {
       const me = mk(0, 0, 0);
-      const race = new Race(phys, city.graph, CAR_SPEC, me);
-      if (seed < 0) race.start(-seed * 1000, { laps: 3, difficulty: 1.1 }); else race.start(seed);
+      const race = new Race(phys, CAR_SPEC, me);
+      if (seed < 0) race.start(generateRoute(city.graph, -seed * 1000, 950, 3)!, { difficulty: 1.1 }); else race.start(generateRoute(city.graph, seed)!);
       const route = race.route!;
       let steps = 0;
       const idle = emptyDriveInput(); idle.brake = 1;

@@ -74,8 +74,8 @@ Règle : ne changer que deux ou trois réglages à la fois entre A et B.
 
 ## Phases
 
-Voir le brief du projet. Phases 1 (conduite + une ville), 2 (courses) et 3 (progression) : faites.
-Ensuite : phase 4 (contenu de course).
+Voir le brief du projet. Phases 1 (conduite + une ville), 2 (courses), 3 (progression) et
+4 (contenu de course) : faites. Ensuite : phase 5 (finition).
 
 ## Progression
 
@@ -89,16 +89,22 @@ Tout est sauvegardé dans le navigateur. Réglages : `src/config/progression.ts`
 
 ## Les courses
 
-`Entrée` tire un tracé au sort dans le réseau de rues (environ 2,6 km, sans demi-tour, surtout
-sur les grands axes), place quatre voitures sur la grille et lance le décompte. Des portiques
-marquent les points de passage, une colonne de lumière indique le prochain, et chaque virage
-marqué est annoncé par une flèche à l'écran et un panneau à chevrons sur place. On peut couper
-entre deux points de passage, mais pas en sauter un. Réglages : `src/config/race.ts`.
+La ville contient une **banque de douze tracés nommés** (huit courses d'environ 2,5 km, quatre
+circuits à trois tours), générés une fois pour toutes à partir de graines fixes et validés
+automatiquement. Chaque tracé a une **borne de départ** dans la ville (colonne de lumière cyan
+pour une course, magenta pour un circuit, pastille sur la mini-carte) : s'arrêter dessus affiche
+la **fiche de la course** (longueur, gains, les trois pilotes adverses avec leur voiture et
+leurs points forts). `Entrée` propose une course au hasard, `T` un circuit ; `Entrée` de nouveau
+lance, `Échap` ferme.
 
-`T` lance un circuit fermé à trois tours avec des adversaires 10 % plus rapides : ce sera
-l'épreuve des changements de palier. La mini-carte (en bas à droite) tourne avec la voiture et
-montre le tracé, le prochain point de passage et les adversaires. L'option d'adresse
-`?barrieres` affiche un aperçu des rues transversales barrées (désactivé par défaut).
+En course : portiques aux points de passage, colonne de lumière sur le prochain, flèche à
+l'écran et panneau à chevrons à chaque virage marqué. On peut couper entre deux points de
+passage, mais pas en sauter un. Des **mallettes d'argent** (dorées) sont posées sur le parcours,
+et parfois un **téléporteur** (anneau violet) qui avance la voiture jusqu'à 100 m, sans jamais
+dépasser le premier. Les circuits ont des adversaires 10 % plus rapides et servent d'épreuve de
+palier. La mini-carte tourne avec la voiture et montre le tracé, les objets et les adversaires.
+L'option d'adresse `?barrieres` affiche un aperçu des rues transversales barrées (désactivé par
+défaut). Réglages : `src/config/race.ts` (pilotes, banque, objets).
 
 ## La ville
 

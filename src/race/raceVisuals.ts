@@ -4,7 +4,9 @@ import { GeomBuilder, type Vec3 } from '../render/geomBuilder';
 import type { CityMaterials } from '../render/materials';
 import { createCarVisual, syncCarVisual, type CarVisual } from '../vehicle/carModel';
 import { pointAt, type PathPoint, type StreetGraph } from '../world/streetGraph';
+import { vec3 } from 'three/tsl';
 import type { Race } from './race';
+import type { Track } from './trackBank';
 import type { Route, RoutePoint } from './route';
 
 /**
@@ -23,6 +25,15 @@ export class RaceVisuals {
   private cars: CarVisual[] = [];
   private generation = -1;
   private halfWidths: number[] = [];
+  private pickupMeshes: THREE.Object3D[] = [];
+  private readonly markers = new THREE.Group();
+  private readonly cashMat: THREE.Material;
+  private readonly teleMat: THREE.Material;
+  private readonly cashGeo: THREE.BufferGeometry;
+  private readonly teleGeo: THREE.BufferGeometry;
+  private spin = 0;
+  /** Groupe à part : ses géométries sont partagées et ne doivent pas être libérées avec le décor. */
+  private readonly pickupGroup = new THREE.Group();
 
   constructor(
     scene: THREE.Scene,
@@ -30,6 +41,7 @@ export class RaceVisuals {
     private readonly graph: StreetGraph,
     /** Aperçu : barrer les rues transversales le long du tracé. */
     private readonly barriers = false,
+    tracks: Track[] = [],
   ) {
     this.group.name = 'course';
     scene.add(this.group);
@@ -42,6 +54,30 @@ export class RaceVisuals {
     this.beacon.add(col);
     this.beacon.visible = false;
     scene.add(this.beacon);
+
+    // Objets à ramasser : mallette dorée, anneau de téléportation.
+    const cash = new THREE.MeshBasicNodeMaterial();
+    cash.colorNode = vec3(1.0, 0.72, 0.12).mul(2.2);
+    this.cashMat = cash;
+    const tele = new THREE.MeshBasicNodeMaterial();
+    tele.colorNode = vec3(0.75, 0.25, 1.0).mul(2.6);
+    this.teleMat = tele;
+    this.cashGeo = new THREE.BoxGeometry(1.1, 0.75, 0.32);
+    this.teleGeo = new THREE.TorusGeometry(1.25, 0.16, 8, 28);
+
+    // Bornes de départ des courses dans la ville (visibles en balade libre).
+    const mg = new GeomBuilder();
+    for (const t of tracks) {
+      const c: Vec3 = t.circuit ? MAGENTA : CYAN;
+      const p = t.start;
+      mg.cylinder(p.x, 0.05, p.z, 5.2, 5.2, 0.35, 28, c, [1, 3, 1, 1.0], false);
+      mg.cylinder(p.x, 0.05, p.z, 0.35, 0.35, 46, 8, c, [1, 3, 1, 1.3], false);
+    }
+    const mm = new THREE.Mesh(mg.build(), mats.glow);
+    mm.frustumCulled = false;
+    this.markers.add(mm);
+    scene.add(this.markers);
+    scene.add(this.pickupGroup);
   }
 
   /** Demi-largeur de la chaussée la plus proche d'un point (pour dimensionner un portique). */
@@ -167,6 +203,14 @@ export class RaceVisuals {
       this.group.add(m);
     }
 
+    // — Objets à ramasser —
+    this.pickupMeshes = race.pickups.map((pk) => {
+      const m = pk.kind === 'cash' ? new THREE.Mesh(this.cashGeo, this.cashMat) : new THREE.Mesh(this.teleGeo, this.teleMat);
+      m.position.set(pk.x, pk.kind === 'cash' ? 1.0 : 1.5, pk.z);
+      this.pickupGroup.add(m);
+      return m;
+    });
+
     // — Voitures des adversaires —
     for (const r of race.racers) {
       if (r.isPlayer || !r.level) continue;
@@ -178,6 +222,8 @@ export class RaceVisuals {
   }
 
   private clear(): void {
+    for (const m of this.pickupMeshes) this.pickupGroup.remove(m);
+    this.pickupMeshes = [];
     for (const child of [...this.group.children]) {
       this.group.remove(child);
       child.traverse((o) => {
@@ -190,7 +236,9 @@ export class RaceVisuals {
   }
 
   /** À appeler à chaque image. */
-  update(race: Race, alpha: number): void {
+  update(race: Race, alpha: number, frameDt = 0.016): void {
+    this.markers.visible = !race.active;
+    this.spin += frameDt;
     if (race.generation !== this.generation || (!race.active && this.group.children.length > 0)) {
       this.generation = race.generation;
       if (race.active) this.rebuild(race);
@@ -204,6 +252,13 @@ export class RaceVisuals {
       const v = this.cars[ci++];
       if (v) syncCarVisual(v, r.car, alpha);
     }
+    race.pickups.forEach((pk, k) => {
+      const m = this.pickupMeshes[k];
+      if (!m) return;
+      m.visible = !pk.taken;
+      m.rotation.y = this.spin * (pk.kind === 'cash' ? 1.6 : 2.4) + k;
+      m.position.y = (pk.kind === 'cash' ? 1.0 : 1.5) + Math.sin(this.spin * 2.2 + k) * 0.12;
+    });
     const player = race.player;
     if (player && player.nextCheckpoint < route.checkpoints.length) {
       const p = route.points[route.checkpoints[player.nextCheckpoint] as number] as RoutePoint;

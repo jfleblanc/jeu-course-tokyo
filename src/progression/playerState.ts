@@ -38,6 +38,8 @@ export interface RaceSummary {
   level: number;
   /** Vrai si l'épreuve de palier vient d'être réussie. */
   promoted: boolean;
+  /** Part de l'argent venant des mallettes ramassées. */
+  bonus: number;
   /** Vrai si c'était une épreuve de palier (réussie ou non). */
   trial: boolean;
   tierName: string;
@@ -151,8 +153,9 @@ export class PlayerState {
   // ——— Courses ———
 
   /** Enregistre le résultat d'une course et renvoie ce qui a été gagné. */
-  finishRace(place: number, circuit: boolean, trial: boolean): RaceSummary {
+  finishRace(place: number, circuit: boolean, trial: boolean, bonusMoney = 0): RaceSummary {
     const reward = raceReward(this.level, place, circuit);
+    reward.money += bonusMoney;
     this.races++;
     if (place === 1) this.wins++;
     this.money += reward.money;
@@ -180,7 +183,7 @@ export class PlayerState {
       }
     }
     this.save();
-    return { place, xp: trial ? 0 : reward.xp, money: reward.money, leveledUp, level: this.level, promoted, trial, tierName: this.tierName };
+    return { place, xp: trial ? 0 : reward.xp, money: reward.money, bonus: bonusMoney, leveledUp, level: this.level, promoted, trial, tierName: this.tierName };
   }
 
   // ——— Garage ———

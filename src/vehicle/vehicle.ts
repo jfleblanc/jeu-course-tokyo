@@ -147,11 +147,12 @@ export class Vehicle {
   }
 
   /** Replace la voiture (touche R ou sortie de carte). */
-  teleport(x: number, y: number, z: number, yaw: number): void {
+  teleport(x: number, y: number, z: number, yaw: number, speed = 0): void {
     const half = yaw / 2;
     this.body.setTranslation({ x, y, z }, true);
     this.body.setRotation({ x: 0, y: Math.sin(half), z: 0, w: Math.cos(half) }, true);
-    this.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    // `speed` : vitesse conservée dans la nouvelle direction (téléporteur).
+    this.body.setLinvel({ x: Math.sin(yaw) * speed, y: 0, z: Math.cos(yaw) * speed }, true);
     this.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
     if (this.drivetrain.gear < 1) this.drivetrain.setGear(1);
     this.syncPose();

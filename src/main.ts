@@ -12,7 +12,12 @@ import { FixedLoop } from './core/loop';
 import { TuningStore } from './debug/tuningStore';
 import { InputManager } from './input/input';
 import { createPhysicsWorld } from './physics/physicsWorld';
-import { Race } from './race/race';
+import { Race, pickDrivers } from './race/race';
+import { buildTrackBank, type Track } from './race/trackBank';
+import { RaceCard } from './ui/raceCard';
+import { PICKUPS } from './config/race';
+import type { AiLevel } from './config/race';
+import { raceReward } from './config/progression';
 import { RaceVisuals } from './race/raceVisuals';
 import { CameraRig } from './render/cameras';
 import { createCityMaterials } from './render/materials';
@@ -141,10 +146,12 @@ async function boot(): Promise<void> {
   const music = new MusicPlayer(store.musicTrack, store.musicOn, store.render.musicVolume);
 
   // ——— Course ———
-  const race = new Race(phys, city.graph, CAR_SPEC, car);
+  const race = new Race(phys, CAR_SPEC, car);
+  const tracks = buildTrackBank(city.graph);
   // ?barrieres : aperçu des rues transversales barrées (désactivé par défaut).
-  const raceVisuals = new RaceVisuals(scene, mats, city.graph, params.has('barrieres'));
-  const minimap = new Minimap(city);
+  const raceVisuals = new RaceVisuals(scene, mats, city.graph, params.has('barrieres'), tracks);
+  const minimap = new Minimap(city, tracks.map((t) => ({ x: t.start.x, z: t.start.z, circuit: t.circuit })));
+  const card = new RaceCard();
   const raceHud = new RaceHud();
 
   let raceKind: 'course' | 'circuit' | 'palier' = 'course';
@@ -178,28 +185,56 @@ async function boot(): Promise<void> {
   });
   let garageTime = 0;
 
-  const startRace = (kind: 'course' | 'circuit'): void => {
-    if (garage.open || !(race.phase === 'idle' || race.phase === 'finished')) return;
-    const seed = Math.floor(Math.random() * 1e9);
+  // Course proposée (fiche affichée) en attente de confirmation.
+  let offered: { track: Track; kind: 'course' | 'circuit' | 'palier'; difficulty: number; drivers: AiLevel[] } | null = null;
+
+  /** Affiche la fiche d'un tracé : type, gains, pilotes adverses. */
+  const offer = (track: Track, manual: boolean): void => {
     const base = aiDifficulty(player.level);
-    let ok: boolean;
-    if (kind === 'course' && player.trialPending) {
-      // Dernier niveau du palier, barre d'XP pleine : l'épreuve de palier est un circuit plus dur.
-      raceKind = 'palier';
-      ok = race.start(seed, { laps: RACE.circuit.laps, lapLength: RACE.circuit.lapLength, difficulty: base + TIER_TRIAL.extraDifficulty });
-      raceHud.title = 'Épreuve de palier';
-    } else if (kind === 'circuit') {
-      raceKind = 'circuit';
-      ok = race.start(seed, { laps: RACE.circuit.laps, lapLength: RACE.circuit.lapLength, difficulty: base * RACE.circuit.difficulty });
-      raceHud.title = '';
-    } else {
-      raceKind = 'course';
-      ok = race.start(seed, { difficulty: base });
-      raceHud.title = '';
-    }
+    // Dernier niveau du palier, barre d'XP pleine : tout circuit devient l'épreuve de palier.
+    const kind: 'course' | 'circuit' | 'palier' = track.circuit ? (player.trialPending ? 'palier' : 'circuit') : 'course';
+    const difficulty = kind === 'palier' ? base + TIER_TRIAL.extraDifficulty : kind === 'circuit' ? base * RACE.circuit.difficulty : base;
+    // Les adversaires changent d'une course à l'autre.
+    const drivers = pickDrivers(track.route.seed + player.races * 131);
+    offered = { track, kind, difficulty, drivers };
+    const reward = raceReward(player.level, 1, track.circuit);
+    const title = kind === 'palier' ? 'Épreuve de palier — finir dans les deux premiers' : kind === 'circuit' ? 'Circuit' : 'Course';
+    card.show(track, drivers, kind === 'palier' ? { xp: 0, money: reward.money } : reward, difficulty, title, manual);
+  };
+
+  const pickTrack = (circuit: boolean): Track | null => {
+    const list = tracks.filter((t) => t.circuit === circuit);
+    const fallback = list.length ? list : tracks;
+    return fallback[Math.floor(Math.random() * fallback.length)] ?? null;
+  };
+
+  const launch = (): void => {
+    if (!offered) return;
+    const o = offered;
+    raceKind = o.kind;
+    raceHud.title = o.kind === 'palier' ? 'Épreuve de palier' : '';
     raceHud.summary = null;
     nosCharge = NOS.seconds;
-    hud.toast(!ok ? 'Impossible de tracer une course' : raceKind === 'palier' ? 'Épreuve de palier : finissez dans les deux premiers !' : raceKind === 'circuit' ? `Circuit : ${RACE.circuit.laps} tours` : 'Course !');
+    const ok = race.start(o.track.route, { difficulty: o.difficulty, drivers: o.drivers, cashValue: PICKUPS.cashBase + PICKUPS.cashPerLevel * player.level });
+    card.hide();
+    offered = null;
+    hud.toast(!ok ? 'Impossible de lancer la course' : o.kind === 'palier' ? 'Épreuve de palier : finissez dans les deux premiers !' : o.track.name);
+  };
+
+  /** Entrée ou T : lance la course proposée, sinon en propose une au hasard dans la banque. */
+  const startRace = (kind: 'course' | 'circuit'): void => {
+    if (garage.open || !(race.phase === 'idle' || race.phase === 'finished')) return;
+    if (card.shown && offered) {
+      launch();
+      return;
+    }
+    const track = pickTrack(kind === 'circuit' || player.trialPending);
+    if (!track) {
+      hud.toast('Aucun tracé disponible');
+      return;
+    }
+    if (race.phase === 'finished') race.stop();
+    offer(track, true);
   };
 
   const respawn = (): void => {
@@ -262,6 +297,9 @@ async function boot(): Promise<void> {
       case 'raceQuit':
         if (garage.open) {
           garage.toggle();
+        } else if (card.shown) {
+          card.hide();
+          offered = null;
         } else if (race.active) {
           const wasFinished = race.phase === 'finished';
           race.stop();
@@ -325,7 +363,7 @@ async function boot(): Promise<void> {
         if (race.phase === 'finished') {
           const me = race.player;
           const place = me ? race.ranking().indexOf(me) + 1 : 4;
-          raceHud.summary = player.finishRace(place, raceKind !== 'course', raceKind === 'palier');
+          raceHud.summary = player.finishRace(place, raceKind !== 'course', raceKind === 'palier', race.bonusMoney);
           refreshProgress();
         }
         lastPhase = race.phase;
@@ -333,7 +371,28 @@ async function boot(): Promise<void> {
       visual.nosLevel.value = car.powerBoost > 1 ? 1 : 0;
       hud.setNos(player.car.nos, nosCharge / NOS.seconds);
       sky.position.copy(camera.position);
-      raceVisuals.update(race, alpha);
+      raceVisuals.update(race, alpha, frameDt);
+      // Mallettes et téléporteur ramassés
+      while (race.events.length) {
+        const ev = race.events.shift();
+        if (!ev) break;
+        if (ev.type === 'cash') hud.toast(`Mallette : +¥ ${ev.amount.toLocaleString('fr-CA')}`);
+        else hud.toast(ev.gained > 0 ? `Téléporteur : +${Math.round(ev.gained)} m !` : 'Téléporteur : vous êtes déjà en tête');
+      }
+      // Bornes de départ : en s'arrêtant dessus, la fiche de la course s'affiche.
+      if (race.phase === 'idle' && !garage.open && !card.manual) {
+        let near: Track | null = null;
+        if (car.speed < 9) {
+          for (const t of tracks) {
+            if ((t.start.x - car.pos.x) ** 2 + (t.start.z - car.pos.z) ** 2 < 6 * 6) near = t;
+          }
+        }
+        if (near && card.shown !== near) offer(near, false);
+        else if (!near && card.shown) {
+          card.hide();
+          offered = null;
+        }
+      }
       raceHud.update(frameDt, race);
       minimap.update(frameDt, car, race);
       hud.update(frameDt, car, CAR_SPEC.redlineRpm);
@@ -357,7 +416,7 @@ async function boot(): Promise<void> {
   });
 
   // Accès console pour le débogage : window.__jeu
-  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage };
+  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks };
 
   setBoot('Prêt !');
   // Une première image avant de retirer l'écran de chargement (compile les shaders).

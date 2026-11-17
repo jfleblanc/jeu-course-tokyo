@@ -24,7 +24,11 @@ export class Minimap {
   private routeGeneration = -1;
   private timer = 0;
 
-  constructor(private readonly city: CityData) {
+  constructor(
+    private readonly city: CityData,
+    /** Bornes de départ des courses, affichées en balade libre. */
+    private readonly markers: { x: number; z: number; circuit: boolean }[] = [],
+  ) {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.canvas = document.createElement('canvas');
     this.canvas.id = 'minimap';
@@ -167,6 +171,17 @@ export class Minimap {
     c.scale(zoom, zoom);
     c.translate(-this.mx(car.pos.x), -this.mz(car.pos.z));
     c.drawImage(this.base, 0, 0);
+    if (!race.active) {
+      for (const m of this.markers) {
+        c.fillStyle = m.circuit ? '#ff2d95' : '#2ee6ff';
+        c.strokeStyle = '#0b0b16';
+        c.lineWidth = 1.5 / zoom;
+        c.beginPath();
+        c.arc(this.mx(m.x), this.mz(m.z), 6 / zoom, 0, Math.PI * 2);
+        c.fill();
+        c.stroke();
+      }
+    }
     if (race.active && race.route) {
       c.drawImage(this.routeLayer, 0, 0);
       const route = race.route;
@@ -181,6 +196,14 @@ export class Minimap {
           c.arc(this.mx(p.x), this.mz(p.z), 9 / zoom, 0, Math.PI * 2);
           c.stroke();
         }
+      }
+      // Objets à ramasser
+      for (const pk of race.pickups) {
+        if (pk.taken) continue;
+        c.fillStyle = pk.kind === 'cash' ? '#ffd24a' : '#c86bff';
+        c.beginPath();
+        c.arc(this.mx(pk.x), this.mz(pk.z), 3.5 / zoom, 0, Math.PI * 2);
+        c.fill();
       }
       // Adversaires
       for (const r of race.racers) {

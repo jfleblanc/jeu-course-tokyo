@@ -1,12 +1,12 @@
 import { driveAlongRoute } from '../ai/driver';
 import type { CarSpec, HandlingConfig } from '../config/handling';
-import { AI_DRIVERS, RACE, RUBBER_BAND, type AiLevel } from '../config/race';
+import { AI_DRIVERS, PICKUPS, RACE, RUBBER_BAND, type AiLevel } from '../config/race';
+import { Rng } from '../core/rng';
 import { clamp } from '../core/math';
 import { emptyDriveInput, type DriveInput } from '../input/actions';
 import type { PhysicsWorld } from '../physics/physicsWorld';
 import { REST_HEIGHT, Vehicle } from '../vehicle/vehicle';
-import type { StreetGraph } from '../world/streetGraph';
-import { generateRoute, type Route, type RoutePoint } from './route';
+import type { Route, RoutePoint } from './route';
 
 /**
  * Déroulement d'une course : grille de départ, décompte, suivi de la progression de chaque
@@ -34,6 +34,35 @@ export interface Racer {
   resets: number;
 }
 
+export interface Pickup {
+  kind: 'cash' | 'teleport';
+  x: number;
+  z: number;
+  /** Indice du point du tracé le plus proche. */
+  index: number;
+  taken: boolean;
+}
+
+export type RaceEvent = { type: 'cash'; amount: number } | { type: 'teleport'; gained: number };
+
+export interface RaceOptions {
+  /** Multiplicateur de niveau des adversaires (1 = normal). */
+  difficulty?: number;
+  /** Pilotes adverses (trois). Par défaut : tirés au sort d'après le tracé. */
+  drivers?: AiLevel[];
+  /** Valeur d'une mallette d'argent (¥). */
+  cashValue?: number;
+}
+
+/** Trois pilotes tirés au sort, toujours les mêmes pour un tracé donné. */
+export function pickDrivers(seed: number): AiLevel[] {
+  const rng = new Rng(seed ^ 0x5bd1e995);
+  const pool = [...AI_DRIVERS];
+  const out: AiLevel[] = [];
+  while (out.length < 3 && pool.length) out.push(pool.splice(Math.floor(rng.next() * pool.length), 1)[0] as AiLevel);
+  return out;
+}
+
 export class Race {
   phase: RacePhase = 'idle';
   route: Route | null = null;
@@ -46,11 +75,17 @@ export class Race {
   generation = 0;
   /** Multiplicateur de niveau des adversaires (1 = normal). */
   difficulty = 1;
+  /** Objets à ramasser (mallettes, téléporteur). */
+  pickups: Pickup[] = [];
+  /** Argent ramassé pendant la course (ajouté à la récompense). */
+  bonusMoney = 0;
+  /** Événements à afficher (vidés par l'interface). */
+  events: RaceEvent[] = [];
+  private cashValue = 0;
   private readonly hold: DriveInput = emptyDriveInput();
 
   constructor(
     private readonly phys: PhysicsWorld,
-    private readonly graph: StreetGraph,
     private readonly spec: CarSpec,
     private readonly playerCar: Vehicle,
   ) {
@@ -65,13 +100,12 @@ export class Race {
     return this.racers.find((r) => r.isPlayer) ?? null;
   }
 
-  /** Lance une nouvelle course sur un tracé tiré au sort. Renvoie faux si aucun tracé n'a pu être généré. */
-  start(seed: number, options: { laps?: number; lapLength?: number; difficulty?: number } = {}): boolean {
+  /** Lance une course sur le tracé donné. */
+  start(route: Route, options: RaceOptions = {}): boolean {
     this.stop();
-    const laps = options.laps ?? 1;
-    const route = laps > 1 ? generateRoute(this.graph, seed, options.lapLength ?? RACE.circuit.lapLength, laps) : generateRoute(this.graph, seed);
     this.difficulty = options.difficulty ?? 1;
-    if (!route) return false;
+    this.cashValue = options.cashValue ?? PICKUPS.cashBase;
+    const drivers = options.drivers ?? pickDrivers(route.seed);
     this.route = route;
     const pts = route.points;
     const at = (s: number): RoutePoint => pts[Math.min(pts.length - 1, Math.max(0, Math.round(s / 3)))] as RoutePoint;
@@ -87,7 +121,7 @@ export class Race {
       return { x: p.x + p.tz * slot.lane, z: p.z - p.tx * slot.lane, yaw: Math.atan2(p.tx, p.tz), index: Math.round(slot.s / 3) };
     };
     this.racers = [];
-    AI_DRIVERS.forEach((level, k) => {
+    drivers.slice(0, 3).forEach((level, k) => {
       const slot = slots[k] as (typeof slots)[number];
       const g = place(slot);
       const car = new Vehicle(this.phys, this.spec, { x: g.x, y: REST_HEIGHT + 0.15, z: g.z, yaw: g.yaw });
@@ -96,6 +130,22 @@ export class Race {
     const pg = place(slots[3] as (typeof slots)[number]);
     this.playerCar.teleport(pg.x, REST_HEIGHT + 0.15, pg.z, pg.yaw);
     this.racers.push(this.makeRacer('Vous', true, this.playerCar, null, pg.index, 0));
+    // — Objets à ramasser : mallettes régulières, téléporteur rare (toujours les mêmes pour un tracé) —
+    const rng = new Rng(route.seed ^ 0x2545f491);
+    this.pickups = [];
+    this.bonusMoney = 0;
+    this.events = [];
+    const lapLen = route.lapLength;
+    for (let s = RACE.startLine + PICKUPS.cashSpacing * 0.6; s < lapLen - 60; s += PICKUPS.cashSpacing) {
+      const p = at(s + rng.range(-40, 40));
+      const side = rng.range(-3, 3);
+      this.pickups.push({ kind: 'cash', x: p.x + p.tz * side, z: p.z - p.tx * side, index: Math.round(p.s / 3), taken: false });
+    }
+    if (rng.chance(PICKUPS.teleporterChance)) {
+      const p = at(lapLen * rng.range(0.35, 0.6));
+      const side = rng.range(-2.5, 2.5);
+      this.pickups.push({ kind: 'teleport', x: p.x + p.tz * side, z: p.z - p.tx * side, index: Math.round(p.s / 3), taken: false });
+    }
     this.phase = 'countdown';
     this.countdown = RACE.countdownSeconds + 0.8; // petit temps mort pour regarder la grille
     this.time = 0;
@@ -116,6 +166,7 @@ export class Race {
       }
     }
     this.racers = [];
+    this.pickups = [];
     this.route = null;
     this.phase = 'idle';
   }
@@ -212,7 +263,50 @@ export class Race {
       }
     }
     const player = this.player;
+    // — Objets à ramasser (le joueur seulement) —
+    if (player && !player.finished) {
+      const r2 = PICKUPS.radius * PICKUPS.radius;
+      for (const pk of this.pickups) {
+        if (pk.taken) continue;
+        if ((pk.x - player.car.pos.x) ** 2 + (pk.z - player.car.pos.z) ** 2 > r2) continue;
+        pk.taken = true;
+        if (pk.kind === 'cash') {
+          this.bonusMoney += this.cashValue;
+          this.events.push({ type: 'cash', amount: this.cashValue });
+        } else {
+          this.events.push({ type: 'teleport', gained: this.teleportPlayer(player) });
+        }
+      }
+    }
     if (player?.finished && this.phase === 'running') this.phase = 'finished';
+  }
+
+  /**
+   * Téléporteur : place le joueur juste devant la voiture qui le précède, au plus à
+   * `teleporterMax` mètres, en conservant sa vitesse. Renvoie la distance gagnée (m).
+   */
+  private teleportPlayer(player: Racer): number {
+    const route = this.route;
+    if (!route) return 0;
+    let target = player.progress + PICKUPS.teleporterMax;
+    let ahead: Racer | null = null;
+    for (const r of this.racers) {
+      if (r === player || r.finished || r.progress <= player.progress) continue;
+      if (!ahead || r.progress < ahead.progress) ahead = r;
+    }
+    // Personne devant : le téléporteur ne fait rien gagner (on reste premier).
+    if (!ahead) return 0;
+    target = Math.min(target, ahead.progress + 9);
+    const pts = route.points;
+    // Les points de passage sautés sont comptés comme franchis au pas suivant ; on ne franchit jamais l'arrivée ainsi.
+    const idx = Math.min(pts.length - 4, Math.round(target / 3));
+    const q = pts[idx] as RoutePoint;
+    const gained = q.s - player.progress;
+    if (gained <= 1) return 0;
+    player.car.teleport(q.x, REST_HEIGHT + 0.15, q.z, Math.atan2(q.tx, q.tz), Math.max(8, player.car.speed));
+    player.index = idx;
+    player.progress = q.s;
+    return gained;
   }
 
   /** Tour en cours d'un pilote (1 = premier tour). */
