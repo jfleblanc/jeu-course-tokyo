@@ -44,6 +44,20 @@ export const WORLD = {
     ],
   },
   /**
+   * Liaisons directes entre quartiers (sans repasser par la ville). `from` et `to` : numéros des
+   * quartiers ; la barrière de chantier est du côté `to` et s'ouvre au niveau `unlockLevel`.
+   */
+  links: {
+    halfWidth: 6.5,
+    /** Hauteur du tablier du pont (m) et longueur de ses rampes (m). */
+    bridgeHeight: 24,
+    bridgeRamp: 130,
+    list: [
+      { name: 'Tunnel de la baie', kind: 'tunnel', from: 2, to: 0, unlockLevel: 31, bow: 45 },
+      { name: 'Pont du port', kind: 'pont', from: 2, to: 1, unlockLevel: 31, bow: -55 },
+    ] as { name: string; kind: 'tunnel' | 'pont'; from: number; to: number; unlockLevel: number; bow: number }[],
+  },
+  /**
    * Col de Hakone : une route de montagne qui part d'un bout du village, grimpe en lacets, passe un
    * col et redescend de l'autre côté (entrée et sortie différentes). Tracé : `src/world/mountainPass.ts`.
    */

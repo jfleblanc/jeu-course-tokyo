@@ -1,7 +1,7 @@
 import { driveAlongRoute } from '../ai/driver';
 import { CAR_MODELS } from '../config/cars';
 import type { CarSpec, HandlingConfig } from '../config/handling';
-import { AI_DRIVERS, PICKUPS, RACE, RUBBER_BAND, type AiLevel } from '../config/race';
+import { AI_DRIVERS, PICKUPS, RACE, RUBBER_BAND, type AiLevel, AGGRESSIVE } from '../config/race';
 import { Rng } from '../core/rng';
 import { clamp } from '../core/math';
 import { emptyDriveInput, type DriveInput } from '../input/actions';
@@ -206,10 +206,26 @@ export class Race {
       } else {
         // Effet élastique par rapport au joueur.
         let factor = 1;
+        let blockAt: number | null = null;
         if (player) {
           const gap = r.progress - player.progress;
           const t = clamp(gap / RUBBER_BAND.distance, -1, 1);
           factor = t > 0 ? 1 - RUBBER_BAND.maxSlow * t : 1 - RUBBER_BAND.maxBoost * t;
+          const ag = route.aggression ?? 0;
+          if (ag > 0) {
+            // Pilotes agressifs : plus vite partout, encore plus quand ils sont derrière, et ils
+            // ne lèvent presque plus le pied quand ils mènent.
+            factor = (t > 0 ? 1 - RUBBER_BAND.maxSlow * 0.35 * t : 1 + AGGRESSIVE.chase * ag * -t) * (1 + AGGRESSIVE.pace * ag);
+            r.car.powerBoost = 1 + ag * (AGGRESSIVE.power + AGGRESSIVE.chasePower * Math.max(0, -t));
+            // Le joueur arrive derrière : on se met sur sa trajectoire.
+            if (gap > 2 && gap < AGGRESSIVE.blockRange) {
+              const q = route.points[Math.min(route.points.length - 1, r.index)] as RoutePoint;
+              const pp = player.car.pos;
+              const lat = (pp.x - q.x) * q.tz - (pp.z - q.z) * q.tx; // > 0 : le joueur est à gauche
+              const room = (route.halfWidth ?? 7) - 2.3;
+              blockAt = clamp(lat, -room, room) - r.lane;
+            }
+          } else r.car.powerBoost = 1;
         }
         // Circulation : on contourne la voiture ordinaire la plus proche devant soi.
         const hx = Math.sin(r.car.yaw), hz = Math.cos(r.car.yaw);
@@ -223,7 +239,8 @@ export class Race {
           nearest = along;
           want = lat >= 0 ? -3.6 : 3.6;
         }
-        r.avoid += clamp(want - r.avoid, -7 * dt, 7 * dt);
+        if (blockAt !== null && want === 0) r.avoid += clamp(blockAt - r.avoid, -AGGRESSIVE.blockRate * dt, AGGRESSIVE.blockRate * dt);
+        else r.avoid += clamp(want - r.avoid, -7 * dt, 7 * dt);
         driveAlongRoute(r.car, route, r.index, r.level, factor * this.difficulty, r.lane + r.avoid, r.input);
       }
       r.car.update(dt, r.input, cfg);

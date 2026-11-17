@@ -1,4 +1,5 @@
 import { GROUP_WORLD, type PhysicsWorld, GROUP_BARRIER } from '../physics/physicsWorld';
+import { RailGuide, setRailGuide } from './railGuide';
 import type { CityData, Highway, HighwaySample } from './cityGen';
 
 /**
@@ -16,7 +17,12 @@ export function buildCityColliders(city: CityData, phys: PhysicsWorld): number {
     count++;
   };
 
+  // Glissières douces : toutes les routes à glissières y sont inscrites.
+  const rails = new RailGuide();
+  setRailGuide(rails);
+
   const addHighwayCollider = (hw: Highway): void => {
+    rails.add(hw);
     const verts: number[] = [];
     const idx: number[] = [];
     const half = hw.halfWidth;
@@ -54,7 +60,7 @@ export function buildCityColliders(city: CityData, phys: PhysicsWorld): number {
     // Une paroi de triangles laissait la caisse s'enfoncer puis s'accrocher ; des boîtes bout à
     // bout à angles vifs faisaient buter la caisse sur chaque jointure. Des bouts ronds qui se
     // recouvrent donnent une paroi lisse : on glisse le long sans à-coup.
-    const RAD = 0.26, T = 0.3;
+    const RAD = 0.26, T = 0.3, FRICTION = Number((globalThis as { BARRIER_FRICTION?: number }).BARRIER_FRICTION ?? 0);
     for (const side of [1, -1]) {
       const bh = hw.barrierHeight + (side === hw.outerSide ? 1.6 : 0.5);
       let k = 0;
@@ -67,7 +73,8 @@ export function buildCityColliders(city: CityData, phys: PhysicsWorld): number {
           if (p0.tx * p2.tx + p0.tz * p2.tz > 0.9994 && Math.abs(p2.y - 2 * (s[(k + 1) % n] as HighwaySample).y + p0.y) < 0.02) span = 2;
         }
         const pa = s[k] as HighwaySample, pb = s[(k + span) % n] as HighwaySample;
-        const off = half + T;
+        // (en retrait de 12 cm : la glissière douce agit avant, l'obstacle physique n'est qu'un secours)
+        const off = half + T + 0.12;
         const ax = pa.x - pa.tz * side * off, az = pa.z + pa.tx * side * off;
         const bx = pb.x - pb.tz * side * off, bz = pb.z + pb.tx * side * off;
         const dx = bx - ax, dy = pb.y - pa.y, dz = bz - az;
@@ -75,10 +82,11 @@ export function buildCityColliders(city: CityData, phys: PhysicsWorld): number {
         const yaw = Math.atan2(dx, dz), pitch = -Math.asin(dy / len);
         const cy = Math.cos(yaw / 2), sy = Math.sin(yaw / 2), cp = Math.cos(pitch / 2), sp = Math.sin(pitch / 2);
         // Boîte à bords arrondis : face plane côté route, bouts ronds qui recouvrent l'élément suivant.
+        // Aucun frottement ni rebond : on glisse le long.
         world.createCollider(R.ColliderDesc.roundCuboid(T - RAD, bh / 2 + 0.3 - RAD, len / 2, RAD)
           .setTranslation((ax + bx) / 2, (pa.y + pb.y) / 2 + bh / 2 - 0.3, (az + bz) / 2)
           .setRotation({ x: cy * sp, y: sy * cp, z: -sy * sp, w: cy * cp })
-          .setFriction(0.3).setRestitution(0.05).setCollisionGroups(GROUP_BARRIER));
+          .setFriction(FRICTION).setFrictionCombineRule(R.CoefficientCombineRule.Min).setRestitution(0).setRestitutionCombineRule(R.CoefficientCombineRule.Min).setCollisionGroups(GROUP_BARRIER));
         count++;
         k += span;
       }

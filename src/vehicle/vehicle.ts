@@ -5,6 +5,7 @@ import type { CarSpec, HandlingConfig } from '../config/handling';
 import type { DriveInput } from '../input/actions';
 import { GROUP_CAR, type PhysicsWorld, WHEEL_RAY_GROUPS } from '../physics/physicsWorld';
 import { Drivetrain } from './drivetrain';
+import { railGuide, type RailCar, type RailPush } from '../world/railGuide';
 
 /**
  * Modèle de véhicule « maison » posé sur Rapier :
@@ -70,6 +71,9 @@ function makeWheel(front: boolean, left: boolean, spec: CarSpec): WheelState {
 
 /** Compression au-delà de laquelle ce qu'il y a sous la roue est un rebord, pas la route (m). */
 const LEDGE_COMPRESSION = 0.45;
+
+/** Anti-tonneau : roulis libre (rad) et vitesse de roulis libre (rad/s), puis rappel et frein. */
+const STABILITY = { freeRoll: 0.1, freeRate: 0.9, spring: 60, damp: 9 };
 
 /** Comportement en l'air (saut en haut d'une rampe). */
 const AIR = { extraGravity: 1.1, align: 9, damp: 5, cushionRange: 8, cushionDecel: 75, touchdownSpeed: 3.5 };
@@ -140,6 +144,7 @@ export class Vehicle {
     this.body = phys.world.createRigidBody(bodyDesc);
 
     const he = spec.halfExtents;
+    this.railCar.halfWidth = he.x; this.railCar.halfLength = he.z;
     const colDesc = R.ColliderDesc.cuboid(he.x, he.y, he.z)
       .setTranslation(0, spec.colliderOffsetY, 0)
       .setDensity(0)
@@ -599,6 +604,39 @@ export class Vehicle {
       imp.x = lv.x * k; imp.y = 0; imp.z = lv.z * k;
       body.applyImpulse(imp, true);
     }
+    // Glissières douces : retenue calculée juste avant le contact (voir src/world/railGuide.ts).
+    const guide = railGuide();
+    this.scraping = false;
+    if (guide) {
+      const rc = this.railCar, fl = Math.hypot(fx, fz) || 1;
+      rc.x = p.x; rc.y = p.y; rc.z = p.z; rc.fx = fx / fl; rc.fz = fz / fl; rc.vx = lv.x; rc.vz = lv.z;
+      const push = guide.push(rc, dt, this.railPush);
+      if (push.touching) {
+        this.scraping = true;
+        imp.x = push.dvx * mass; imp.y = 0; imp.z = push.dvz * mass;
+        body.applyImpulse(imp, true);
+        const tq = this.tmpTorque;
+        tq.x = 0; tq.y = push.dyaw * this.inertiaY; tq.z = 0;
+        body.applyTorqueImpulse(tq, true);
+      }
+    }
+    if (contacts >= 1) {
+      // Anti-tonneau : au-delà de quelques degrés de roulis (appui contre une glissière, bordure
+      // prise de travers), on redresse la caisse et on freine sa rotation. En conduite normale
+      // (2 à 4° de roulis en virage) il n'intervient pas.
+      const roll = Math.asin(clamp(ly, -1, 1));
+      const rollRate = av.x * fx + av.y * fy + av.z * fz;
+      const excess = Math.abs(roll) - STABILITY.freeRoll;
+      let k = 0;
+      if (excess > 0) k -= Math.sign(roll) * excess * STABILITY.spring;
+      if (Math.abs(rollRate) > STABILITY.freeRate) k -= (rollRate - Math.sign(rollRate) * STABILITY.freeRate) * STABILITY.damp;
+      if (k !== 0) {
+        k *= this.inertiaY * 0.35 * dt;
+        const tq = this.tmpTorque;
+        tq.x = fx * k; tq.y = fy * k; tq.z = fz * k;
+        body.applyTorqueImpulse(tq, true);
+      }
+    }
     if (contacts >= 2) {
       const iy = this.inertiaY;
       // Amortissement du lacet (réduit pendant le drift pour laisser pivoter)
@@ -623,6 +661,10 @@ export class Vehicle {
   }
 
   private readonly bumpForce = [0, 0, 0, 0];
+  /** Vrai quand la voiture frotte une glissière (pour le son, les étincelles). */
+  scraping = false;
+  private readonly railCar: RailCar = { x: 0, y: 0, z: 0, fx: 0, fz: 1, halfWidth: 0.88, halfLength: 2.12, vx: 0, vz: 0 };
+  private readonly railPush: RailPush = { dvx: 0, dvz: 0, dyaw: 0, touching: false };
   private hbLatch = 0;
   private hbWasDown = false;
 

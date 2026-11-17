@@ -45,6 +45,8 @@ export interface Route {
   turns: RouteTurn[];
   /** Demi-largeur de la chaussée quand le tracé ne suit pas des rues (route du col). */
   halfWidth?: number;
+  /** Pilotes agressifs sur ce tracé (voir AGGRESSIVE) : 0 ou absent = normaux, 1 = à fond. */
+  aggression?: number;
 }
 
 const KIND_WEIGHT = { boulevard: 3, avenue: 3, street: 1.4, alley: 0.6 } as const;

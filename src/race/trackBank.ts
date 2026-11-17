@@ -27,6 +27,7 @@ export function buildTrackBank(graph: StreetGraph, colRoad?: { samples: { x: num
     if (def.col) {
       if (!colRoad) continue;
       route = routeFromPath(def.col > 0 ? colRoad.samples : [...colRoad.samples].reverse(), def.seed, colRoad.halfWidth);
+      route.aggression = 1;
     } else {
       route = def.circuit ? generateRoute(graph, def.seed, RACE.circuit.lapLength, RACE.circuit.laps, district) : generateRoute(graph, def.seed, RACE.targetLength, 1, district);
     }

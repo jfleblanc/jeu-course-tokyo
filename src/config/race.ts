@@ -103,3 +103,21 @@ export const PICKUPS = {
 
 /** Effet élastique : les adversaires ralentissent un peu s'ils sont loin devant, accélèrent s'ils sont loin derrière. */
 export const RUBBER_BAND = { distance: 160, maxBoost: 0.1, maxSlow: 0.12 } as const;
+
+/**
+ * Pilotes agressifs (course du col) : ils roulent plus fort, ne lâchent pas le joueur quand ils
+ * sont derrière, et lui ferment la porte quand ils sont devant.
+ */
+export const AGGRESSIVE = {
+  /** Rythme en plus, tout le temps (0,1 = 10 %). */
+  pace: 0.1,
+  /** Rythme en plus quand ils sont loin derrière le joueur. */
+  chase: 0.2,
+  /** Puissance moteur en plus : de base, et en plus quand ils sont derrière. */
+  power: 0.25,
+  chasePower: 0.45,
+  /** Ils barrent la route au joueur quand il est à moins de cette distance derrière eux (m). */
+  blockRange: 32,
+  /** Vitesse à laquelle ils se décalent pour barrer (m/s). */
+  blockRate: 4.5,
+} as const;

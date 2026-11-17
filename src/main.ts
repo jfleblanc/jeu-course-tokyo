@@ -311,12 +311,12 @@ async function boot(): Promise<void> {
   const tuned: HandlingConfig = { ...PRESET_A };
   // Quartiers extérieurs : fermés par une barrière de chantier jusqu'au niveau requis.
   // ?quartiers=ouverts les ouvre tous (essais).
-  const gates = new DistrictGates(scene, phys, city.graph.districts);
+  const gates = new DistrictGates(scene, phys, [...city.graph.districts, ...city.links.map((l) => ({ name: l.name, unlockLevel: l.unlockLevel, gate: l.gate, link: true }))]);
   const allDistrictsOpen = params.get('quartiers') === 'ouverts';
   gates.setLevel(player.level, allDistrictsOpen);
   const refreshProgress = (): void => {
     hud.setProgress(player.level, player.tierName, player.xp, player.xpNeeded, player.money, player.trialPending);
-    for (const d of gates.setLevel(player.level, allDistrictsOpen)) hud.toast(`Nouveau quartier ouvert : ${d.name} !`);
+    for (const d of gates.setLevel(player.level, allDistrictsOpen)) hud.toast(d.link ? `Liaison ouverte : ${d.name} !` : `Nouveau quartier ouvert : ${d.name} !`);
   };
   refreshProgress();
 

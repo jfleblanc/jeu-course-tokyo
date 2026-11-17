@@ -442,7 +442,7 @@ function buildZone(city: CityData, mats: CityMaterials, zone: number, cell: { x0
   }
   // (les lampadaires sont dessinés à part, par instances : src/render/lampVisuals.ts)
   for (const p of city.props) if (here(p.x, p.z)) solid.box(p.x, p.y, p.z, p.sx, p.sy, p.sz, p.yaw, p.color);
-  for (const g of city.glowBoxes) if (here(g.x, g.z)) glow.box(g.x, g.y, g.z, g.sx, g.sy, g.sz, g.yaw, g.color, [1, 4, 1, 1.5], true, false);
+  for (const g of city.glowBoxes) if (here(g.x, g.z)) glow.box(g.x, g.y, g.z, g.sx, g.sy, g.sz, g.yaw, g.color, g.level ? [1, 3, 1, g.level] : [1, 4, 1, 1.5], true, false);
 
   // ——— Enseignes ———
   for (const sg of city.signs) {

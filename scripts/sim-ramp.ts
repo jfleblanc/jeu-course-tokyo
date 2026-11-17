@@ -48,7 +48,7 @@ const scrape = (name: string, s: S[], i0: number, kmh: number, side: number, clo
   const a = s[i0]!; const v0 = kmh / 3.6;
   const car = new Vehicle(phys, CAR_SPEC, { x: a.x, y: a.y + 0.62, z: a.z, yaw: Math.atan2(a.tx, a.tz) }); car.setTraits(m.traits);
   car.body.setLinvel({ x: a.tx * v0, y: 0, z: a.tz * v0 }, true);
-  let k = i0, worst = 0, prev = kmh, vMin = 1e9, touched = 0, maxTilt = 0; const N = s.length;
+  let k = i0, worst = 0, prev = kmh, vMin = 1e9, touched = 0, maxTilt = 0; const N = s.length; let maxSpin = 0, maxHop = 0;
   for (let i = 0; i < 60 * 14; i++) {
     for (let g = 0; g < 6; g++) { const q = s[(k + 1) % N]!; if ((car.pos.x - q.x) * q.tx + (car.pos.z - q.z) * q.tz > 0 && (closed || k < N - 2)) k = (k + 1) % N; }
     const p = s[k]!;
@@ -61,11 +61,12 @@ const scrape = (name: string, s: S[], i0: number, kmh: number, side: number, clo
     car.update(FIXED_DT, input, cfg); phys.world.step(); car.afterStep();
     const v = car.speed * 3.6; const q = car.rot;
     if (Math.abs(lat) > half - 1.2) touched++;
+    if (i > 30) { const av = car.body.angvel(); const up = { x: 2 * (q.x * q.y - q.w * q.z), y: 1 - 2 * (q.x * q.x + q.z * q.z), z: 2 * (q.y * q.z + q.w * q.x) }; const yawR = av.x * up.x + av.y * up.y + av.z * up.z; maxSpin = Math.max(maxSpin, Math.hypot(av.x - up.x * yawR, av.y - up.y * yawR, av.z - up.z * yawR) * 57.3); maxHop = Math.max(maxHop, Math.abs(car.body.linvel().y - (s[(k + 1) % N]!.y - p.y) / 3 * car.speed)); }
     if (i > 30 && prev - v > worst && process.env.TRACE) console.log(`    t=${(i / 60).toFixed(2)} éch ${k} lat ${lat.toFixed(2)} y-route ${(car.pos.y - p.y).toFixed(2)} v ${prev.toFixed(0)}→${v.toFixed(0)} cap ${((Math.atan2(Math.sin(car.yaw - Math.atan2(p.tx, p.tz)), Math.cos(car.yaw - Math.atan2(p.tx, p.tz)))) * 57.3).toFixed(0)}° roues ${car.wheels.map((w) => (w.inContact ? w.compression.toFixed(2) : '--')).join('/')}`);
     if (i > 30) { worst = Math.max(worst, prev - v); vMin = Math.min(vMin, v); maxTilt = Math.max(maxTilt, Math.acos(Math.min(1, 1 - 2 * (q.x * q.x + q.z * q.z))) * 57.3); }
     prev = v;
   }
-  console.log(`${name} à ${kmh} km/h, appuyée ${side > 0 ? 'à gauche' : 'à droite'}: contact ${(touched / 60).toFixed(0)} s ; pire perte en un pas ${worst.toFixed(1)} km/h ; v mini ${vMin.toFixed(0)} km/h ; inclinaison max ${maxTilt.toFixed(0)}°`);
+  console.log(`${name} à ${kmh} km/h, appuyée ${side > 0 ? 'à gauche' : 'à droite'}: contact ${(touched / 60).toFixed(0)} s ; pire perte en un pas ${worst.toFixed(1)} km/h ; v mini ${vMin.toFixed(0)} km/h ; inclinaison max ${maxTilt.toFixed(0)}° ; roulis/tangage max ${maxSpin.toFixed(0)} °/s ; saut vertical max ${maxHop.toFixed(2)} m/s`);
   phys.world.removeRigidBody(car.body);
 };
 for (const v of [120, 200]) for (const side of [1, -1]) scrape('autoroute centrale', hs, 40, v, side, false, city.highway.halfWidth);

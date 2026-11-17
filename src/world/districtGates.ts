@@ -4,19 +4,22 @@ import { GROUP_WORLD, type PhysicsWorld } from '../physics/physicsWorld';
 import type RAPIER from '@dimforge/rapier3d-compat';
 import type { District } from './streetGraph';
 
+/** Ce qu'une barrière ferme : un quartier, ou une liaison entre quartiers (`link`). */
+export type GateTarget = Pick<District, 'name' | 'unlockLevel' | 'gate'> & { link?: boolean };
+
 /**
  * Barrières de chantier à l'entrée des quartiers extérieurs. Tant que le joueur n'a pas le
  * niveau requis, la route d'accès est fermée (barrière lumineuse + collision) ; elle s'ouvre
  * dès que le niveau est atteint.
  */
 export class DistrictGates {
-  private readonly gates: { district: District; group: THREE.Group; collider: RAPIER.Collider | null }[] = [];
+  private readonly gates: { district: GateTarget; group: THREE.Group; collider: RAPIER.Collider | null }[] = [];
   private warnCooldown = 0;
 
   constructor(
     scene: THREE.Scene,
     private readonly phys: PhysicsWorld,
-    districts: District[],
+    districts: GateTarget[],
   ) {
     const amber = new THREE.MeshBasicNodeMaterial();
     amber.colorNode = vec3(1.0, 0.42, 0.04).mul(2.0);
@@ -37,6 +40,14 @@ export class DistrictGates {
         post.position.set(-w / 2 + (w * k) / 6, 0.75, 0);
         g.add(post);
       }
+      if (d.link) {
+        // Liaison en travaux : panneaux de chantier rayés en travers de la route.
+        for (let k = 0; k < 4; k++) {
+          const board = new THREE.Mesh(new THREE.BoxGeometry(w / 4 - 0.5, 1.5, 0.12), k % 2 === 0 ? amber : dark);
+          board.position.set(-w / 2 + (w * (k + 0.5)) / 4, 2.4, 0.3);
+          g.add(board);
+        }
+      }
       for (const side of [-1, 1]) {
         const beacon = new THREE.Mesh(new THREE.BoxGeometry(0.3, 9, 0.3), amber);
         beacon.position.set((side * w) / 2, 4.5, 0);
@@ -50,8 +61,8 @@ export class DistrictGates {
   }
 
   /** Ouvre ou ferme chaque barrière selon le niveau. Renvoie les quartiers qui viennent de s'ouvrir. */
-  setLevel(level: number, allOpen: boolean): District[] {
-    const opened: District[] = [];
+  setLevel(level: number, allOpen: boolean): GateTarget[] {
+    const opened: GateTarget[] = [];
     const R = this.phys.rapier;
     for (const g of this.gates) {
       const locked = !allOpen && level < g.district.unlockLevel;
@@ -73,7 +84,7 @@ export class DistrictGates {
   }
 
   /** Quartier fermé dont la barrière est juste devant le joueur (pour afficher un message), sinon null. */
-  blockedNear(dt: number, x: number, z: number): District | null {
+  blockedNear(dt: number, x: number, z: number): GateTarget | null {
     this.warnCooldown -= dt;
     if (this.warnCooldown > 0) return null;
     for (const g of this.gates) {
