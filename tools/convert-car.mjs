@@ -207,8 +207,8 @@ const onGround = cand.filter((k) => k.c.lo[1] < ground0 + 0.035 * L0 && Math.abs
 const clusters = [];
 for (const k of onGround.sort((a, b) => b.d - a.d)) {
   const cl = clusters.find((w) => Math.hypot(w.cy - k.cy, w.cz - k.cz) < 0.3 * w.d && Math.abs(w.cx - k.cx) < 0.6 * w.d);
-  if (cl) { cl.xlo = Math.min(cl.xlo, k.c.lo[0]); cl.xhi = Math.max(cl.xhi, k.c.hi[0]); }
-  else clusters.push({ cx: k.cx, cy: k.cy, cz: k.cz, d: k.d, xlo: k.c.lo[0], xhi: k.c.hi[0], aspect: (k.c.hi[0] - k.c.lo[0]) / k.d });
+  if (cl) { cl.xlo = Math.min(cl.xlo, k.c.lo[0]); cl.xhi = Math.max(cl.xhi, k.c.hi[0]); cl.roots.push(k.root); }
+  else clusters.push({ cx: k.cx, cy: k.cy, cz: k.cz, d: k.d, xlo: k.c.lo[0], xhi: k.c.hi[0], aspect: (k.c.hi[0] - k.c.lo[0]) / k.d, roots: [k.root] });
 }
 if (clusters.length < 4) throw new Error(`seulement ${clusters.length} roue(s) trouvée(s)`);
 const wheels = clusters.slice(0, 4).map((w) => ({ ...w, r: w.d / 2, side: Math.sign(w.cx - midX) }));
@@ -216,21 +216,108 @@ const ground = Math.min(...wheels.map((w) => w.cy - w.r));
 // Roues braquées dans le fichier : plus « larges » que les autres. On ne les prend pas comme modèle.
 const minAspect = Math.min(...wheels.map((w) => w.aspect));
 for (const w of wheels) w.turned = w.aspect > minAspect * 1.25;
+// ——— Repère propre de chaque roue ———
+// Dans certains fichiers les roues ont du carrossage ou sont braquées. Les boîtes englobantes ne
+// suffisent alors plus : on mesure l'axe réel, le centre et le rayon de chaque roue sur les sommets
+// de son pneu, puis on teste les pièces dans ce repère (cylindre du pneu), sommet par sommet.
+const near = new Map(); // racine → sommets (soudés) des composantes assez petites et proches d'une roue
+for (const [root, c] of comps) {
+  if (c.flat) continue;
+  const mid = [0, 1, 2].map((a) => (c.lo[a] + c.hi[a]) / 2), dim = Math.max(c.hi[0] - c.lo[0], c.hi[1] - c.lo[1], c.hi[2] - c.lo[2]);
+  if (wheels.some((w) => dim < 1.6 * w.d && Math.hypot(mid[0] - w.cx, mid[1] - w.cy, mid[2] - w.cz) < 1.2 * w.d)) near.set(root, []);
+}
+{
+  const seen = new Set();
+  for (const p of live) for (let v = 0; v < p.gid.length; v++) {
+    const list = near.get(find(p.gid[v])); if (!list || seen.has(p.gid[v])) continue;
+    seen.add(p.gid[v]); list.push(p.pos[v * 3], p.pos[v * 3 + 1], p.pos[v * 3 + 2]);
+  }
+}
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const unit = (a) => { const l = Math.hypot(a[0], a[1], a[2]) || 1; return [a[0] / l, a[1] / l, a[2] / l]; };
+/** Coordonnées d'un point dans le repère d'une roue : [le long de l'axe, haut, avant]. */
+const inWheel = (w, x, y, z) => { const d = [x - w.c[0], y - w.c[1], z - w.c[2]]; return [dot(d, w.axis), dot(d, w.up), dot(d, w.fwd)]; };
+function setFrame(w, axis, c) { w.axis = axis; w.up = unit([-axis[0] * axis[1], 1 - axis[1] * axis[1], -axis[2] * axis[1]]); w.fwd = cross(axis, w.up); w.c = c; }
+for (const w of wheels) {
+  setFrame(w, [1, 0, 0], [w.cx, w.cy, w.cz]);
+  const tyre = w.roots.map((r) => near.get(r));
+  for (let it = 0; it < 3; it++) {
+    // Axe : direction où la couronne extérieure (pneu, bord de jante) est la plus mince. Les flancs
+    // sont des cercles : dès qu'on s'écarte de l'axe la largeur mesurée augmente franchement
+    // (2·R·sin de l'écart), ce qui donne un minimum net, insensible à la répartition des sommets.
+    const crown = [];
+    for (const l of tyre) for (let k = 0; k < l.length; k += 3) { const q = inWheel(w, l[k], l[k + 1], l[k + 2]); if (Math.hypot(q[1], q[2]) > 0.75 * w.r) crown.push(l[k], l[k + 1], l[k + 2]); }
+    const widthAlong = (s, t) => { const l = Math.hypot(1, s, t); let lo = 1e9, hi = -1e9; for (let k = 0; k < crown.length; k += 3) { const d = crown[k] + s * crown[k + 1] + t * crown[k + 2]; if (d < lo) lo = d; if (d > hi) hi = d; } return (hi - lo) / l; };
+    let bs = w.axis[1] / w.axis[0], bt = w.axis[2] / w.axis[0], best = widthAlong(bs, bt);
+    // premier tour : recherche large (jusqu'à 40°, roues braquées), puis pas divisé par deux jusqu'à 0,001°
+    if (it === 0) for (let i = -8; i <= 8; i++) for (let j = -8; j <= 8; j++) { const s = Math.tan((i * 5 * Math.PI) / 180), t = Math.tan((j * 5 * Math.PI) / 180), v = widthAlong(s, t); if (v < best - 1e-9) { best = v; bs = s; bt = t; } }
+    for (let step = it === 0 ? 0.05 : 0.01; step > 2e-5; step /= 2) {
+      for (let moved = true, n = 0; moved && n < 8; n++) { moved = false; for (const [i, j] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) { const v = widthAlong(bs + i * step, bt + j * step); if (v < best - 1e-9) { best = v; bs += i * step; bt += j * step; moved = true; break; } } }
+    }
+    let v = unit([1, bs, bt]);
+    if (Math.acos(Math.min(1, v[0])) < 0.001) v = [1, 0, 0]; // moins de 0,06° : la roue est droite
+    setFrame(w, v, w.c);
+    // Centre : cercle des moindres carrés sur la bande de roulement (les sommets les plus éloignés de l'axe).
+    let rmax = 0; for (let k = 0; k < crown.length; k += 3) { const q = inWheel(w, crown[k], crown[k + 1], crown[k + 2]); rmax = Math.max(rmax, Math.hypot(q[1], q[2])); }
+    const pts = []; for (let k = 0; k < crown.length; k += 3) { const q = inWheel(w, crown[k], crown[k + 1], crown[k + 2]); if (Math.hypot(q[1], q[2]) > 0.97 * rmax) pts.push(q); }
+    const my = pts.reduce((s, q) => s + q[1], 0) / pts.length, mz = pts.reduce((s, q) => s + q[2], 0) / pts.length;
+    let syy = 0, szz = 0, syz = 0, sy3 = 0, sz3 = 0;
+    for (const q of pts) { const y = q[1] - my, z = q[2] - mz, d = y * y + z * z; syy += y * y; szz += z * z; syz += y * z; sy3 += y * d; sz3 += z * d; }
+    const det = 2 * (syy * szz - syz * syz), dy = my + (sy3 * szz - sz3 * syz) / det, dz = mz + (sz3 * syy - sy3 * syz) / det;
+    setFrame(w, v, [0, 1, 2].map((a) => w.c[a] + dy * w.up[a] + dz * w.fwd[a]));
+    w.tr = 0; w.alo = 1e9; w.ahi = -1e9; // rayon réel du pneu et étendue le long de l'axe
+    for (const l of tyre) for (let k = 0; k < l.length; k += 3) { const q = inWheel(w, l[k], l[k + 1], l[k + 2]); w.tr = Math.max(w.tr, Math.hypot(q[1], q[2])); w.alo = Math.min(w.alo, q[0]); w.ahi = Math.max(w.ahi, q[0]); }
+  }
+  w.tilt = (Math.acos(Math.min(1, w.axis[0])) * 180) / Math.PI;
+}
 // À quelle roue appartient chaque composante ? (entièrement dans le cylindre du pneu, élargi vers l'intérieur)
 const wheelOf = new Map();
-for (const [root, c] of comps) {
-  if (c.flat) { wheelOf.set(root, -2); continue; }
+for (const [root, c] of comps) if (c.flat) wheelOf.set(root, -2);
+for (const [root, l] of near) {
   for (let k = 0; k < 4; k++) {
-    const w = wheels[k], width = w.xhi - w.xlo;
-    const inner = cfg.wheelInner ?? 0.45, outer = w.turned ? 0.2 : 0.08;
-    const xlo = w.xlo - (w.side > 0 ? inner : outer) * width, xhi = w.xhi + (w.side < 0 ? inner : outer) * width;
-    if (c.lo[0] < xlo || c.hi[0] > xhi) continue;
-    let far = 0; for (const y of [c.lo[1], c.hi[1]]) for (const z of [c.lo[2], c.hi[2]]) far = Math.max(far, Math.hypot(y - w.cy, z - w.cz));
-    // la boîte englobante d'un disque dépasse le cercle : on compare au carré inscrit pour les grandes pièces
-    const dy = c.hi[1] - c.lo[1], dz = c.hi[2] - c.lo[2];
-    const round = Math.abs(dy - dz) / Math.max(dy, dz) < 0.15;
-    const reach = round ? Math.max(Math.abs(c.lo[1] - w.cy), Math.abs(c.hi[1] - w.cy), Math.abs(c.lo[2] - w.cz), Math.abs(c.hi[2] - w.cz)) : far;
-    if (reach <= w.r * (w.turned ? 1.1 : 1.03)) { wheelOf.set(root, k); break; }
+    const w = wheels[k], width = w.ahi - w.alo;
+    const inner = cfg.wheelInner ?? 0.45, outer = 0.08;
+    const alo = w.alo - (w.side > 0 ? inner : outer) * width, ahi = w.ahi + (w.side < 0 ? inner : outer) * width;
+    let ok = l.length > 0;
+    for (let v = 0; v < l.length && ok; v += 3) { const q = inWheel(w, l[v], l[v + 1], l[v + 2]); ok = q[0] >= alo && q[0] <= ahi && Math.hypot(q[1], q[2]) <= w.tr * 1.03; }
+    if (ok) { wheelOf.set(root, k); break; }
+  }
+}
+// ——— Pièces fixes prises dans la roue : étriers de frein, bouts de suspension ———
+// Tout ce qui est dans la roue modèle tourne avec elle dans le jeu. Une pièce nettement désaxée,
+// assez grande, et qui ne se répète pas autour de l'axe (contrairement aux écrous ou aux rayons)
+// ne tourne pas en vrai : on la retire, avec les petites pièces posées dessus (vis, logo).
+// Mesures dans le repère de la roue, en rayons de pneu.
+for (let k = 0; k < 4; k++) {
+  const w = wheels[k], list = [];
+  for (const [root, l] of near) {
+    if (wheelOf.get(root) !== k) continue;
+    const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; let rmin = 1e9, rmax = 0;
+    for (let v = 0; v < l.length; v += 3) { const q = inWheel(w, l[v], l[v + 1], l[v + 2]); const r = Math.hypot(q[1], q[2]) / w.tr; rmin = Math.min(rmin, r); rmax = Math.max(rmax, r); for (let a = 0; a < 3; a++) { lo[a] = Math.min(lo[a], q[a] / w.tr); hi[a] = Math.max(hi[a], q[a] / w.tr); } }
+    const mid = [0, 1, 2].map((a) => (lo[a] + hi[a]) / 2);
+    list.push({ root, tris: comps.get(root).tris, lo, hi, mid, rmin, rmax, off: Math.hypot(mid[1], mid[2]), size: Math.max(hi[1] - lo[1], hi[2] - lo[2]) });
+  }
+  for (const p of list) {
+    // répétée autour de l'axe ? mêmes dimensions à la même distance, réparties tout autour
+    const same = list.filter((o) => Math.abs(o.tris - p.tris) <= 0.03 * p.tris && Math.abs(o.off - p.off) < 0.03 && Math.abs(o.size - p.size) < 0.08 && Math.abs(o.mid[0] - p.mid[0]) < 0.05);
+    p.repeated = same.length > 1 && Math.hypot(same.reduce((s, o) => s + o.mid[1] / o.off, 0), same.reduce((s, o) => s + o.mid[2] / o.off, 0)) / same.length < 0.25;
+    p.loose = p.off > 0.1 && !p.repeated;
+    // … ou isolée et derrière le flanc intérieur du pneu : c'est de la suspension
+    p.fixed = p.loose && (p.size >= 0.3 || -w.side * p.mid[0] > Math.max(-w.alo, w.ahi) / w.tr);
+    // … ou grande et nettement plus haute que large (ou l'inverse) : ce n'est pas une pièce de révolution
+    const dy = p.hi[1] - p.lo[1], dz = p.hi[2] - p.lo[2];
+    if (!p.repeated && p.size >= 0.3 && Math.min(dy, dz) < 0.85 * Math.max(dy, dz) && !w.roots.includes(p.root)) p.fixed = true;
+  }
+  if (!cfg.keepCalipers) {
+    const big = list.filter((p) => p.fixed);
+    for (const p of list) if (p.loose && !p.fixed && big.some((o) => [0, 1, 2].every((a) => p.mid[a] > o.lo[a] - 0.06 && p.mid[a] < o.hi[a] + 0.06))) p.fixed = true;
+    for (const p of list) if (p.fixed) wheelOf.set(p.root, -3);
+  }
+  w.parts = list;
+  if (process.env.DEBUG_WHEELS) {
+    log(`  roue ${k} côté ${w.side} z ${w.cz.toFixed(2)} inclinaison ${w.tilt.toFixed(2)}° axe ${w.axis.map((x) => x.toFixed(4))} rayon boîte ${w.r.toFixed(4)} réel ${w.tr.toFixed(4)} décalage centre ${Math.hypot(w.c[1] - w.cy, w.c[2] - w.cz).toFixed(4)}`);
+    for (const p of list) log(`    pièce ${String(p.tris).padStart(6)} tri  rayon ${p.rmin.toFixed(2)}–${p.rmax.toFixed(2)}  axe ${p.lo[0].toFixed(2)}…${p.hi[0].toFixed(2)}  désaxée ${p.off.toFixed(3)}  taille ${(p.hi[1] - p.lo[1]).toFixed(2)}×${(p.hi[2] - p.lo[2]).toFixed(2)}${p.repeated ? '  répétée' : ''}${p.fixed ? '  FIXE (retirée)' : p.loose ? '  isolée' : ''}`);
   }
 }
 const frontZ = Math.max(...wheels.map((w) => w.cz)), rearZ = Math.min(...wheels.map((w) => w.cz));
@@ -240,6 +327,9 @@ const wheelTris = [0, 0, 0, 0];
 for (const [root, c] of comps) { const k = wheelOf.get(root); if (k >= 0) wheelTris[k] += c.tris; }
 let tpl = -1; for (let k = 0; k < 4; k++) if (isFront(wheels[k]) && (tpl < 0 || wheelTris[k] > wheelTris[tpl])) tpl = k;
 if (cfg.wheelTemplate === 'rear' || wheels[tpl].turned) { tpl = -1; for (let k = 0; k < 4; k++) if (!isFront(wheels[k]) && (tpl < 0 || wheelTris[k] > wheelTris[tpl])) tpl = k; }
+
+// Composantes qui ne sont que du pneu : simplifiées à part, pour qu'il reste bien rond.
+const tyreRoots = new Set(wheels[tpl].parts.filter((p) => wheels[tpl].roots.includes(p.root) && p.rmin > 0.5 && p.rmax > 0.97).map((p) => p.root));
 
 // Échelle : vraie longueur de la voiture.
 const bodyZ = [1e9, -1e9];
@@ -252,29 +342,46 @@ const origin = [midX, ground, (frontZ + rearZ) / 2];
 const groups = new Map();
 for (const p of live) {
   const role = roles[p.mat];
-  const sel = { body: [], wheel: [] };
+  const sel = { body: [], wheel: [], tyre: [] };
   for (let k = 0; k < p.idx.length; k += 3) {
-    const w = wheelOf.get(find(p.gid[p.idx[k]]));
+    const root = find(p.gid[p.idx[k]]), w = wheelOf.get(root);
     if (w === undefined) sel.body.push(p.idx[k], p.idx[k + 1], p.idx[k + 2]);
-    else if (w === tpl) sel.wheel.push(p.idx[k], p.idx[k + 1], p.idx[k + 2]);
+    else if (w === tpl) sel[tyreRoots.has(root) ? 'tyre' : 'wheel'].push(p.idx[k], p.idx[k + 1], p.idx[k + 2]);
   }
-  for (const part of ['body', 'wheel']) {
-    if (!sel[part].length) continue;
+  for (const what of ['body', 'wheel', 'tyre']) {
+    if (!sel[what].length) continue;
+    const part = what === 'body' ? 'body' : 'wheel';
     // Dans la roue : pas de peinture ni de feux, tout est « solide ».
     let bucket = role.bucket;
     if (part === 'wheel' && !bucket.startsWith('tex:') && !['matte', 'metal', 'chrome'].includes(bucket)) bucket = role.metal >= 0.5 ? (role.rough < 0.3 ? 'chrome' : 'metal') : 'matte';
-    const key = part + '|' + bucket + '|' + p.mat;
-    let gr = groups.get(key); if (!gr) groups.set(key, (gr = { part, bucket, mat: p.mat, pos: [], nor: [], uv: [], idx: [], count: 0 }));
-    const idx = Uint32Array.from(sel[part], (v) => v + gr.count);
+    const key = what + '|' + bucket + '|' + p.mat;
+    let gr = groups.get(key); if (!gr) groups.set(key, (gr = { part, tyre: what === 'tyre', bucket, mat: p.mat, pos: [], nor: [], uv: [], idx: [], count: 0 }));
+    const idx = Uint32Array.from(sel[what], (v) => v + gr.count);
     gr.pos.push(p.pos); gr.nor.push(p.nor); gr.uv.push(p.uv); gr.idx.push(idx); gr.count += p.pos.length / 3;
   }
 }
 const cat = (list, T) => { const n = list.reduce((s, a) => s + a.length, 0); const o = new T(n); let off = 0; for (const a of list) { o.set(a, off); off += a.length; } return o; };
 const meshes = [];
 for (const gr of groups.values()) {
-  const m = { part: gr.part, bucket: gr.bucket, mat: gr.mat, pos: cat(gr.pos, Float32Array), nor: cat(gr.nor, Float32Array), uv: cat(gr.uv, Float32Array), idx: cat(gr.idx, Uint32Array) };
-  const c = gr.part === 'wheel' ? [wheels[tpl].cx, wheels[tpl].cy, wheels[tpl].cz] : origin;
-  for (let k = 0; k < m.pos.length; k += 3) { m.pos[k] = (m.pos[k] - c[0]) * scale; m.pos[k + 1] = (m.pos[k + 1] - c[1]) * scale; m.pos[k + 2] = (m.pos[k + 2] - c[2]) * scale; }
+  const m = { part: gr.part, tyre: gr.tyre, bucket: gr.bucket, mat: gr.mat, pos: cat(gr.pos, Float32Array), nor: cat(gr.nor, Float32Array), uv: cat(gr.uv, Float32Array), idx: cat(gr.idx, Uint32Array) };
+  if (gr.part === 'wheel') {
+    // Les tableaux de sommets sont partagés avec la carrosserie : on ne garde que ceux de la roue
+    // (sinon la simplification mesure son erreur à l'échelle de la voiture entière).
+    const remap = new Int32Array(m.pos.length / 3).fill(-1); let c = 0;
+    for (let k = 0; k < m.idx.length; k++) { const v = m.idx[k]; if (remap[v] < 0) remap[v] = c++; m.idx[k] = remap[v]; }
+    const pos = new Float32Array(c * 3), nor = new Float32Array(c * 3), uv = new Float32Array(c * 2);
+    // Roue modèle redressée : exprimée dans son propre repère, l'axe réel du pneu devient X et
+    // son centre l'origine. Sans cela une roue qui a du carrossage « voile » en tournant dans le jeu.
+    const w = wheels[tpl], d0 = [w.c[0] - w.cx, w.c[1] - w.cy, w.c[2] - w.cz], x0 = dot(d0, w.axis);
+    for (let v = 0; v < remap.length; v++) {
+      const r = remap[v]; if (r < 0) continue;
+      const q = inWheel(w, m.pos[v * 3], m.pos[v * 3 + 1], m.pos[v * 3 + 2]);
+      pos[r * 3] = (q[0] + x0) * scale; pos[r * 3 + 1] = q[1] * scale; pos[r * 3 + 2] = q[2] * scale; // x = 0 : milieu du pneu, comme avant
+      nor[r * 3] = dot([m.nor[v * 3], m.nor[v * 3 + 1], m.nor[v * 3 + 2]], w.axis); nor[r * 3 + 1] = dot([m.nor[v * 3], m.nor[v * 3 + 1], m.nor[v * 3 + 2]], w.up); nor[r * 3 + 2] = dot([m.nor[v * 3], m.nor[v * 3 + 1], m.nor[v * 3 + 2]], w.fwd);
+      uv[r * 2] = m.uv[v * 2]; uv[r * 2 + 1] = m.uv[v * 2 + 1];
+    }
+    m.pos = pos; m.nor = nor; m.uv = uv;
+  } else for (let k = 0; k < m.pos.length; k += 3) { m.pos[k] = (m.pos[k] - origin[0]) * scale; m.pos[k + 1] = (m.pos[k + 1] - origin[1]) * scale; m.pos[k + 2] = (m.pos[k + 2] - origin[2]) * scale; }
   meshes.push(m);
 }
 
@@ -301,15 +408,43 @@ async function colorsOf(m) {
 for (const m of meshes) m.col = m.bucket.startsWith('tex:') || m.bucket === 'paint' || m.bucket === 'glass' ? null : await colorsOf(m);
 
 // ───────────────────────── Simplification ─────────────────────────
+/** Soude les sommets de même position (normale et couleur moyennes) : plus de coutures qui bloquent la simplification. */
+function weld(m) {
+  const ids = new Map(), remap = new Uint32Array(m.pos.length / 3), pos = [], nor = [], uv = [], col = [], cnt = [];
+  for (let v = 0; v < remap.length; v++) {
+    const key = Math.round(m.pos[v * 3] * 2e4) + ',' + Math.round(m.pos[v * 3 + 1] * 2e4) + ',' + Math.round(m.pos[v * 3 + 2] * 2e4);
+    let r = ids.get(key);
+    if (r === undefined) { r = cnt.length; ids.set(key, r); cnt.push(0); pos.push(m.pos[v * 3], m.pos[v * 3 + 1], m.pos[v * 3 + 2]); nor.push(0, 0, 0); uv.push(m.uv[v * 2], m.uv[v * 2 + 1]); if (m.col) col.push(0, 0, 0, 0); }
+    remap[v] = r; cnt[r]++;
+    for (let a = 0; a < 3; a++) nor[r * 3 + a] += m.nor[v * 3 + a];
+    if (m.col) for (let a = 0; a < 4; a++) col[r * 4 + a] += m.col[v * 4 + a];
+  }
+  for (let r = 0; r < cnt.length; r++) { const l = Math.hypot(nor[r * 3], nor[r * 3 + 1], nor[r * 3 + 2]) || 1; for (let a = 0; a < 3; a++) nor[r * 3 + a] /= l; if (m.col) for (let a = 0; a < 4; a++) col[r * 4 + a] /= cnt[r]; }
+  const idx = [];
+  for (let k = 0; k < m.idx.length; k += 3) { const a = remap[m.idx[k]], b = remap[m.idx[k + 1]], c = remap[m.idx[k + 2]]; if (a !== b && b !== c && a !== c) idx.push(a, b, c); }
+  return { ...m, pos: new Float32Array(pos), nor: new Float32Array(nor), uv: new Float32Array(uv), col: m.col ? new Float32Array(col) : null, idx: new Uint32Array(idx) };
+}
 function simplify(m, ratio) {
   let idx = m.idx;
   const want = Math.max(60, Math.floor((idx.length * ratio) / 3) * 3);
   if (ratio < 0.98 && idx.length > want) {
     const textured = m.bucket.startsWith('tex:');
-    const stride = textured ? 5 : 3; const attr = new Float32Array((m.pos.length / 3) * stride);
-    for (let v = 0; v < m.pos.length / 3; v++) { attr[v * stride] = m.nor[v * 3]; attr[v * stride + 1] = m.nor[v * 3 + 1]; attr[v * stride + 2] = m.nor[v * 3 + 2]; if (textured) { attr[v * stride + 3] = m.uv[v * 2]; attr[v * stride + 4] = m.uv[v * 2 + 1]; } }
-    const weights = textured ? [0.5, 0.5, 0.5, 1.5, 1.5] : [0.6, 0.6, 0.6];
+    const stride = textured ? 5 : 3;
+    const attrOf = (m) => { const attr = new Float32Array((m.pos.length / 3) * stride); for (let v = 0; v < m.pos.length / 3; v++) { attr[v * stride] = m.nor[v * 3]; attr[v * stride + 1] = m.nor[v * 3 + 1]; attr[v * stride + 2] = m.nor[v * 3 + 2]; if (textured) { attr[v * stride + 3] = m.uv[v * 2]; attr[v * stride + 4] = m.uv[v * 2 + 1]; } } return attr; };
+    let attr = attrOf(m);
+    // Pneu : la forme (le rond) compte plus que les normales.
+    const weights = textured ? [m.tyre ? 0.15 : 0.5, m.tyre ? 0.15 : 0.5, m.tyre ? 0.15 : 0.5, 1.5, 1.5] : m.tyre ? [0.15, 0.15, 0.15] : [0.6, 0.6, 0.6];
     let res = MeshoptSimplifier.simplifyWithAttributes(idx, m.pos, 3, attr, stride, weights, null, want, 0.04, ['Prune'])[0];
+    if (m.part === 'wheel') {
+      // Roue : elle tourne, la moindre bosse se voit. Pas de simplification grossière : si les coutures
+      // (arêtes vives, facettes) bloquent, on soude les sommets et on recommence, avec une erreur bornée.
+      if (res.length > want * 1.3 && !textured) {
+        m = weld(m); attr = attrOf(m);
+        res = MeshoptSimplifier.simplifyWithAttributes(m.idx, m.pos, 3, attr, stride, weights, null, want, 0.04, ['Prune'])[0];
+      }
+      if (res.length > want * 1.6) res = MeshoptSimplifier.simplifyWithAttributes(res, m.pos, 3, attr, stride, weights, null, want, 0.09, ['Prune'])[0];
+      return { ...m, idx: res };
+    }
     // Beaucoup de petites pièces détachées : on accepte plus d'erreur plutôt que de garder trop de triangles.
     if (res.length > want * 1.6) res = MeshoptSimplifier.simplifyWithAttributes(res, m.pos, 3, attr, stride, weights, null, want, 0.25, ['Prune'])[0];
     if (res.length > want * 2.5 && !textured) res = MeshoptSimplifier.simplifySloppy(res, m.pos, 3, null, want, 0.3)[0];
@@ -338,14 +473,27 @@ function mergeBuckets(list) {
 }
 const weight = (m) => (cfg.weights?.[roles[m.mat].name] ?? cfg.weights?.[m.bucket] ?? ({ paint: 3, glass: 2.5, tail: 2, head: 2, lens: 1.5 }[m.bucket] ?? (m.bucket.startsWith('tex:') ? 2 : 1)));
 function level(part, target) {
-  const ms = meshes.filter((m) => m.part === part);
+  let ms = meshes.filter((m) => m.part === part);
   const total = ms.reduce((s, m) => s + m.idx.length / 3, 0);
   if (total <= target) return mergeBuckets(ms);
+  // Roue : le pneu garde jusqu'à la moitié des triangles. Un pneu lisse a peu de facettes ; trop
+  // simplifié il devient bosselé et la roue semble voilée quand elle tourne.
+  const tyre = ms.filter((m) => m.tyre);
+  if (tyre.length) {
+    const n = tyre.reduce((s, m) => s + m.idx.length / 3, 0), share = Math.min(1, ((cfg.tyreShare ?? 0.5) * target) / n);
+    const done = tyre.map((m) => (share < 0.98 ? simplify(m, share) : m));
+    ms = ms.filter((m) => !m.tyre); target = Math.max(target - done.reduce((s, m) => s + m.idx.length / 3, 0), 0.3 * target);
+    if (ms.reduce((s, m) => s + m.idx.length / 3, 0) <= target) return mergeBuckets([...ms, ...done]);
+    return mergeBuckets([...levelOf(ms, target), ...done]);
+  }
+  return mergeBuckets(levelOf(ms, target));
+}
+function levelOf(ms, target) {
   const weighted = ms.reduce((s, m) => s + (m.idx.length / 3) * weight(m), 0);
   // deux passes : les petits groupes plafonnés à 100 % rendent leur part aux autres
   let k = target / weighted;
   for (let pass = 0; pass < 4; pass++) { const got = ms.reduce((s, m) => s + (m.idx.length / 3) * Math.min(1, k * weight(m)), 0); k *= target / got; }
-  return mergeBuckets(ms.map((m) => (m.idx.length < 1800 ? m : simplify(m, Math.min(1, k * weight(m))))));
+  return ms.map((m) => (m.idx.length < 1800 ? m : simplify(m, Math.min(1, k * weight(m)))));
 }
 const parts = {
   body: level('body', cfg.target ?? 70000),
@@ -408,10 +556,10 @@ const paintRole = roles.find((r) => r.role === 'paint');
 const extras = {
   id, credit: cfg.credit,
   wheelSide: wheels[tpl].side,
-  wheelRadius: r3(wheels[tpl].r * scale),
+  wheelRadius: r3(wheels[tpl].tr * scale),
   axleFrontZ: r3((frontZ - origin[2]) * scale), axleRearZ: r3((rearZ - origin[2]) * scale),
   halfTrackFront: r3(avg(fw, (w) => Math.abs(w.cx - midX)) * scale), halfTrackRear: r3(avg(rw, (w) => Math.abs(w.cx - midX)) * scale),
-  radiusFront: r3(avg(fw, (w) => w.r) * scale), radiusRear: r3(avg(rw, (w) => w.r) * scale),
+  radiusFront: r3(avg(fw, (w) => w.tr) * scale), radiusRear: r3(avg(rw, (w) => w.tr) * scale),
   paint: paintRole ? paintRole.color.slice(0, 3).map(r3) : null,
   min: bb.lo.map(r3), max: bb.hi.map(r3), triangles: stats, draws,
 };
