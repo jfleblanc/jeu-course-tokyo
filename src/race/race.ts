@@ -1,4 +1,5 @@
 import { driveAlongRoute } from '../ai/driver';
+import { CAR_MODELS } from '../config/cars';
 import type { CarSpec, HandlingConfig } from '../config/handling';
 import { AI_DRIVERS, PICKUPS, RACE, RUBBER_BAND, type AiLevel } from '../config/race';
 import { Rng } from '../core/rng';
@@ -125,6 +126,9 @@ export class Race {
       const slot = slots[k] as (typeof slots)[number];
       const g = place(slot);
       const car = new Vehicle(this.phys, this.spec, { x: g.x, y: REST_HEIGHT + 0.15, z: g.z, yaw: g.yaw });
+      // Chaque pilote a la physique de sa voiture (masse, roues motrices, empattement).
+      const model = CAR_MODELS.find((m) => m.glb === level.glb);
+      if (model) car.setTraits(model.traits);
       this.racers.push(this.makeRacer(level.name, false, car, level, g.index, slot.lane * 0.35));
     });
     const pg = place(slots[3] as (typeof slots)[number]);

@@ -1,5 +1,6 @@
 import type RAPIER from '@dimforge/rapier3d-compat';
 import { clamp, moveToward, lerp } from '../core/math';
+import { BASE_TRAITS, type CarTraits } from '../config/handling';
 import type { CarSpec, HandlingConfig } from '../config/handling';
 import type { DriveInput } from '../input/actions';
 import { GROUP_CAR, type PhysicsWorld } from '../physics/physicsWorld';
@@ -20,9 +21,9 @@ export interface WheelState {
   readonly front: boolean;
   readonly left: boolean;
   /** Ancrage dans le repère voiture. */
-  readonly mx: number;
+  mx: number;
   readonly my: number;
-  readonly mz: number;
+  mz: number;
   inContact: boolean;
   /** Longueur de suspension courante (ancrage → centre de roue). */
   suspLength: number;
@@ -42,6 +43,7 @@ export interface WheelState {
 }
 
 const WHEEL_COUNT = 4;
+const CAR_SPEC_INERTIA_Y = 2500;
 /** Hauteur approximative de l'origine du châssis au repos (m). */
 export const REST_HEIGHT = 0.59;
 
@@ -100,6 +102,12 @@ export class Vehicle {
   /** Multiplicateur de puissance momentané (NOS). 1 = normal. */
   powerBoost = 1;
 
+  /** Caractère de la voiture (masse, roues motrices, géométrie) : voir setTraits. */
+  traits: CarTraits = BASE_TRAITS;
+  private massRatio = 1;
+  private inertiaY: number = CAR_SPEC_INERTIA_Y;
+  private readonly com = { x: 0, y: 0, z: 0 };
+
   private steerInput = 0;
   private driftWasDown = false;
   private readonly ray: RAPIER.Ray;
@@ -140,10 +148,36 @@ export class Vehicle {
       makeWheel(false, true, spec),
       makeWheel(false, false, spec),
     ];
+    this.com.x = spec.centerOfMass.x;
+    this.com.y = spec.centerOfMass.y;
+    this.com.z = spec.centerOfMass.z;
+    this.inertiaY = spec.inertia.y;
     this.drivetrain = new Drivetrain(spec);
     this.ray = new R.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 });
     this.syncPose();
     this.copyPose();
+  }
+
+  /**
+   * Donne à la voiture son caractère : masse, roues motrices, empattement, voies, centre de masse.
+   * Les inerties suivent la masse et l'empattement.
+   */
+  setTraits(t: CarTraits): void {
+    const spec = this.spec;
+    this.traits = t;
+    this.massRatio = t.mass / spec.mass;
+    const wb = (t.axleFrontZ - t.axleRearZ) / (spec.axleFrontZ - spec.axleRearZ);
+    const track = (t.halfTrackFront + t.halfTrackRear) / (2 * spec.halfTrack);
+    const k = this.massRatio;
+    const inertia = { x: spec.inertia.x * k * wb * wb, y: spec.inertia.y * k * wb * wb, z: spec.inertia.z * k * track * track };
+    this.inertiaY = inertia.y;
+    this.com.y = t.comY;
+    this.com.z = t.comZ;
+    this.body.setAdditionalMassProperties(t.mass, this.com, inertia, { x: 0, y: 0, z: 0, w: 1 }, true);
+    for (const w of this.wheels) {
+      w.mx = (w.left ? 1 : -1) * (w.front ? t.halfTrackFront : t.halfTrackRear);
+      w.mz = w.front ? t.axleFrontZ : t.axleRearZ;
+    }
   }
 
   /** Replace la voiture (touche R ou sortie de carte). */
@@ -220,7 +254,7 @@ export class Vehicle {
     const fx = 2 * (xz + wy), fy = 2 * (yz - wx), fz = 1 - 2 * (xx + yy);
 
     // Centre de masse dans le monde
-    const c = spec.centerOfMass;
+    const c = this.com;
     const comX = p.x + lx * c.x + ux * c.y + fx * c.z;
     const comY = p.y + ly * c.x + uy * c.y + fy * c.z;
     const comZ = p.z + lz * c.x + uz * c.y + fz * c.z;
@@ -297,7 +331,9 @@ export class Vehicle {
 
     // ——— Suspension : un rayon par roue ———
     const rayLen = spec.suspRestLength + spec.wheelRadius;
-    const staticLoad = (spec.mass * 9.81) / WHEEL_COUNT;
+    const mass = this.traits.mass;
+    const mr = this.massRatio;
+    const staticLoad = (mass * 9.81) / WHEEL_COUNT;
     const maxSuspForce = staticLoad * 4;
     let contacts = 0;
     for (let i = 0; i < WHEEL_COUNT; i++) {
@@ -335,14 +371,14 @@ export class Vehicle {
         w.compression = 0;
       }
       const compVel = clamp((w.compression - prevComp) / dt, -3, 3);
-      suspForce[i] = w.inContact ? cfg.suspStiffness * w.compression + cfg.suspDamping * compVel : 0;
+      suspForce[i] = w.inContact ? (cfg.suspStiffness * w.compression + cfg.suspDamping * compVel) * mr : 0;
     }
     // Barre antiroulis : transfère de la force du côté détendu vers le côté comprimé.
     for (let axle = 0; axle < 2; axle++) {
       const a = this.wheels[axle * 2] as WheelState;
       const b = this.wheels[axle * 2 + 1] as WheelState;
       if (a.inContact && b.inContact) {
-        const f = cfg.antiRoll * (a.compression - b.compression);
+        const f = cfg.antiRoll * mr * (a.compression - b.compression);
         suspForce[axle * 2] = (suspForce[axle * 2] as number) + f;
         suspForce[axle * 2 + 1] = (suspForce[axle * 2 + 1] as number) - f;
       }
@@ -356,14 +392,19 @@ export class Vehicle {
     // une partie des gaz pour qu'elle se remette en ligne au lieu de tourner en rond.
     const slideExcess = clamp((Math.abs(this.bodySlip) - 0.2) / 0.3, 0, 1) * (1 - this.driftAmount);
     const powerCut = 1 - cfg.tractionControl * slideExcess * (vF > 0 ? 1 : 0);
-    const driveForce = dt_.update(dt, vF, this.throttle * powerCut, cfg.enginePower * this.powerBoost, cfg.engineBrake, sliding);
-    const drivenContacts = (rl.inContact ? 1 : 0) + (rr.inContact ? 1 : 0);
+    const driveForce = dt_.update(dt, vF, this.throttle * powerCut, cfg.enginePower * this.powerBoost * mr, cfg.engineBrake * mr, sliding);
+    // Répartition du couple : propulsion, traction ou intégrale.
+    const driveFront = this.traits.driveFront;
+    const rearContacts = (rl.inContact ? 1 : 0) + (rr.inContact ? 1 : 0);
+    const frontContacts = ((this.wheels[0] as WheelState).inContact ? 1 : 0) + ((this.wheels[1] as WheelState).inContact ? 1 : 0);
+    const frontDrive = frontContacts > 0 ? (driveForce * driveFront) / frontContacts : 0;
+    const rearDrive = rearContacts > 0 ? (driveForce * (1 - driveFront)) / rearContacts : 0;
 
     // ——— Pneus ———
     const peakSlip = cfg.peakSlipDeg * (Math.PI / 180);
-    const massShare = spec.mass / WHEEL_COUNT;
+    const massShare = mass / WHEEL_COUNT;
     // Hauteur d'application des forces : entre le sol (plein transfert) et le centre de masse (aucun).
-    const comHeight = Math.max(0.05, REST_HEIGHT + spec.centerOfMass.y);
+    const comHeight = Math.max(0.05, REST_HEIGHT + this.com.y);
     const liftApply = (1 - cfg.weightTransfer) * comHeight;
     const tcCap = lerp(1.0, 0.72, cfg.tractionControl);
 
@@ -375,7 +416,7 @@ export class Vehicle {
         w.gripUse = 0;
         w.slipAngle = 0;
         // Roue en l'air : elle ralentit doucement (ou s'emballe si motrice).
-        w.spinSpeed = lerp(w.spinSpeed, !w.front ? (vF / spec.wheelRadius) * (1 + this.throttle) : vF / spec.wheelRadius, 0.05);
+        w.spinSpeed = lerp(w.spinSpeed, (w.front ? driveFront > 0.5 : driveFront < 0.9) ? (vF / spec.wheelRadius) * (1 + this.throttle) : vF / spec.wheelRadius, 0.05);
         w.spin += w.spinSpeed * dt;
         continue;
       }
@@ -407,9 +448,9 @@ export class Vehicle {
 
       // — Longitudinal —
       let fLong = 0;
-      if (!w.front && drivenContacts > 0) fLong += driveForce / drivenContacts;
+      fLong += w.front ? frontDrive : rearDrive;
       const brakeShare = w.front ? cfg.brakeBias : 1 - cfg.brakeBias;
-      let fBrake = (this.brake * cfg.brakeForce * brakeShare) / 2 + spec.rollingResistance / WHEEL_COUNT;
+      let fBrake = (this.brake * cfg.brakeForce * mr * brakeShare) / 2 + spec.rollingResistance / WHEEL_COUNT;
       // Le frein ne peut pas inverser le sens de la roue en un pas.
       fBrake = Math.min(fBrake, (Math.abs(vLong) * massShare) / dt);
       fLong -= Math.sign(vLong) * fBrake;
@@ -460,7 +501,7 @@ export class Vehicle {
 
       // Rotation visuelle de la roue (patinage si la motricité est dépassée)
       let wheelSpeed = vLong / spec.wheelRadius;
-      if (!w.front && longExcess > 1 && this.throttle > 0.5) wheelSpeed *= 1 + Math.min(1.5, longExcess - 1);
+      if ((w.front ? driveFront > 0.5 : driveFront < 0.9) && longExcess > 1 && this.throttle > 0.5) wheelSpeed *= 1 + Math.min(1.5, longExcess - 1);
       if (this.brake > 0.9 && longExcess > 1.1) wheelSpeed *= 0.3;
       w.spinSpeed = wheelSpeed;
       w.spin += wheelSpeed * dt;
@@ -482,15 +523,15 @@ export class Vehicle {
     // une partie de l'adhérence retirée aux pneus arrière. La trajectoire se courbe vers le nez
     // au lieu de filer tout droit, et la glisse fait perdre un peu de vitesse.
     if (contacts >= 2 && this.driftAmount > 0.01 && cfg.driftCarve > 0) {
-      const want = cfg.driftCarve * 9.81 * spec.mass * this.driftAmount * clamp(Math.abs(this.bodySlip) / 0.2, 0, 1);
-      const f = Math.min(want, (Math.abs(vL) * spec.mass) / dt * 0.5);
+      const want = cfg.driftCarve * 9.81 * mass * this.driftAmount * clamp(Math.abs(this.bodySlip) / 0.2, 0, 1);
+      const f = Math.min(want, (Math.abs(vL) * mass) / dt * 0.5);
       const k = -Math.sign(vL) * f * dt;
       imp.x = lx * k; imp.y = 0; imp.z = lz * k;
       body.applyImpulse(imp, true);
     }
 
     if (contacts >= 2) {
-      const iy = spec.inertia.y;
+      const iy = this.inertiaY;
       // Amortissement du lacet (réduit pendant le drift pour laisser pivoter)
       // Au freinage le poids passe à l'avant et l'arrière s'allège : on stabilise davantage (façon ESP).
       const brakeStab = 1 + 2.5 * this.brake * (1 - this.driftAmount);

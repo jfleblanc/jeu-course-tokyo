@@ -102,6 +102,8 @@ async function boot(): Promise<void> {
   // `?modele=aucun` revient aux voitures procédurales. Si un fichier ne se charge pas, on garde
   // la voiture procédurale.
   let testModel = params.get('modele');
+  // Physique propre à la voiture active (masse, roues motrices, empattement).
+  car.setTraits(player.modelOf(player.car).traits);
   const glbOf = (): string | null => (testModel === 'aucun' ? null : (testModel ?? player.modelOf(player.car).glb));
   const dressPlayer = (): Promise<void> => {
     const id = glbOf();
@@ -111,7 +113,7 @@ async function boot(): Promise<void> {
     return loadCarAsset(id)
       .then((asset) => {
         if (target !== visual) return;
-        applyCarAsset(target, asset, CAR_SPEC, { lod: 0 });
+        applyCarAsset(target, asset, CAR_SPEC, { lod: 0, traits: car.traits });
         rig?.applyVisibility(target);
       })
       .catch((err: unknown) => console.info('Modèle 3D indisponible, voiture procédurale conservée.', err))
@@ -289,6 +291,7 @@ async function boot(): Promise<void> {
           const m = o as THREE.Mesh;
           if (m.isMesh && !m.userData.shared) m.geometry.dispose();
         });
+        car.setTraits(player.modelOf(player.car).traits);
         visual = createCarVisual(CAR_SPEC, lookOf());
         scene.add(visual.root);
         rig.applyVisibility(visual);

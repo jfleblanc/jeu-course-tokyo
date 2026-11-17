@@ -226,7 +226,7 @@ export class RaceVisuals {
       }
       v.root.visible = false;
       loadCarAsset(this.carModelId ?? r.level.glb)
-        .then((asset) => applyCarAsset(v, asset, CAR_SPEC, { lod: 1 }))
+        .then((asset) => applyCarAsset(v, asset, CAR_SPEC, { lod: 1, traits: r.car.traits }))
         .catch(() => undefined)
         .finally(() => (v.root.visible = true));
       this.group.add(v.root);

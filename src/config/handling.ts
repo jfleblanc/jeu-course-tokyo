@@ -259,3 +259,36 @@ export const CAR_SPEC = {
 } as const;
 
 export type CarSpec = typeof CAR_SPEC;
+
+/**
+ * Ce qui distingue physiquement une voiture d'une autre (le reste vient de CAR_SPEC et du
+ * réglage A/B). Moteur, freins et suspension sont mis à l'échelle de la masse dans Vehicle :
+ * la masse change l'inertie, les chocs et le comportement, pas l'accélération (qui se règle
+ * avec `power` dans `config/cars.ts`).
+ */
+export interface CarTraits {
+  /** Masse (kg). */
+  mass: number;
+  /** Part du couple moteur envoyée aux roues avant : 0 = propulsion, 1 = traction, 0.3 = intégrale typée arrière. */
+  driveFront: number;
+  /** Position des essieux et demi-voies (m), d'après le modèle 3D. */
+  axleFrontZ: number;
+  axleRearZ: number;
+  halfTrackFront: number;
+  halfTrackRear: number;
+  /** Centre de masse : hauteur (plus haut = plus de roulis) et position avant/arrière. */
+  comY: number;
+  comZ: number;
+}
+
+/** Voiture de référence (celle sur laquelle le réglage A/B a été mis au point). */
+export const BASE_TRAITS: CarTraits = {
+  mass: CAR_SPEC.mass,
+  driveFront: 0,
+  axleFrontZ: CAR_SPEC.axleFrontZ,
+  axleRearZ: CAR_SPEC.axleRearZ,
+  halfTrackFront: CAR_SPEC.halfTrack,
+  halfTrackRear: CAR_SPEC.halfTrack,
+  comY: CAR_SPEC.centerOfMass.y,
+  comZ: CAR_SPEC.centerOfMass.z,
+};

@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { attribute, color, float, mix, positionLocal, step, vec3 } from 'three/tsl';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import type { CarSpec } from '../config/handling';
+import { BASE_TRAITS, type CarSpec, type CarTraits } from '../config/handling';
 import type { CarVisual } from './carModel';
 import { REST_HEIGHT } from './vehicle';
 
@@ -137,10 +137,13 @@ function looks(visual: CarVisual, glossy: boolean): Record<string, Look> {
 export interface ApplyOptions {
   /** 0 = détail complet (joueur), 1 = allégé (adversaires). */
   lod?: 0 | 1;
+  /** Géométrie physique de la voiture (position réelle des roues) ; défaut : voiture de référence. */
+  traits?: CarTraits;
 }
 
 /** Remplace la carrosserie et les roues procédurales d'une voiture par le modèle 3D. */
 export function applyCarAsset(visual: CarVisual, asset: CarAsset, spec: CarSpec, options: ApplyOptions = {}): void {
+  const traits = options.traits ?? BASE_TRAITS;
   const lod = options.lod ?? 0;
   const table = looks(visual, lod === 0);
   const made = new Map<string, THREE.Material>();
@@ -172,7 +175,7 @@ export function applyCarAsset(visual: CarVisual, asset: CarAsset, spec: CarSpec,
   clear(visual.cabin);
   clear(visual.interior);
   // Le fichier a son origine au sol, au milieu des essieux.
-  const midZ = (spec.axleFrontZ + spec.axleRearZ) / 2;
+  const midZ = (traits.axleFrontZ + traits.axleRearZ) / 2;
   const offset = new THREE.Vector3(0, -REST_HEIGHT, midZ);
   for (const src of lod === 0 ? asset.parts.body : asset.parts.body_lod1) {
     const name = (src.material as THREE.Material).name;
@@ -200,9 +203,9 @@ export function applyCarAsset(visual: CarVisual, asset: CarAsset, spec: CarSpec,
     // Les roues affichées suivent le modèle (voie, empattement, diamètre), pas la physique commune.
     const track = isFront ? asset.halfTrackFront : asset.halfTrackRear;
     visual.wheelOffsets[i] = {
-      x: (left ? 1 : -1) * (track - spec.halfTrack),
+      x: (left ? 1 : -1) * (track - (isFront ? traits.halfTrackFront : traits.halfTrackRear)),
       y: radius - spec.wheelRadius,
-      z: midZ + (isFront ? asset.axleFrontZ : asset.axleRearZ) - (isFront ? spec.axleFrontZ : spec.axleRearZ),
+      z: midZ + (isFront ? asset.axleFrontZ : asset.axleRearZ) - (isFront ? traits.axleFrontZ : traits.axleRearZ),
     };
   });
   // Vue intérieure : caméra au pied du pare-brise (les modèles n'ont pas tous un habitacle complet).

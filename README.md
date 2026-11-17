@@ -115,6 +115,13 @@ adverses ont chacun la leur (`src/config/race.ts`). La peinture se change sur to
 van Kansai et la Supra GT300, qui gardent leur livrée. La vue intérieure est une vue « capot ».
 `?modele=<id>` impose un modèle à tout le monde ; `?modele=aucun` revient à la voiture procédurale.
 
+Chaque voiture a aussi **sa physique** (`traits` dans `src/config/cars.ts`) : masse, roues
+motrices (propulsion, traction pour l'Integra, intégrale pour les GT-R R32 et R34), empattement
+et voies du vrai modèle, hauteur du centre de masse. La masse ne change pas l'accélération
+(réglée par `power`) : elle change l'inertie et surtout les chocs — une voiture lourde pousse
+une légère. Le van pèse 2 700 kg, l'AE86 1 150. `sh scripts/run-sim.sh cars` mesure chaque
+voiture (0-100, freinage, virage, drift, choc).
+
 Ajouter une voiture :
 
 1. télécharger le modèle en glTF sur Sketchfab, le décompresser, vérifier sa licence ;
