@@ -40,7 +40,7 @@ import { applyCarAsset, loadCarAsset } from './vehicle/glbCar';
 import { REST_HEIGHT, Vehicle } from './vehicle/vehicle';
 import { buildCityColliders } from './world/cityColliders';
 import { generateCity } from './world/cityGen';
-import { buildCityMeshes } from './world/cityMesh';
+import { buildCityMeshes, updateCityZones } from './world/cityMesh';
 
 const bootEl = document.getElementById('boot') as HTMLElement;
 const bootMsg = document.getElementById('boot-msg') as HTMLElement;
@@ -615,7 +615,8 @@ async function boot(): Promise<void> {
       hud.setNos(player.car.nos, nosCharge / NOS.seconds);
       sky.position.copy(camera.position);
       raceVisuals.update(race, alpha, frameDt);
-      trafficVisuals.update(traffic);
+      trafficVisuals.update(traffic, camera.position.x, camera.position.z);
+      updateCityZones(meshes, camera.position.x, camera.position.z);
       fullMap.update({ x: car.pos.x, z: car.pos.z, yaw: car.yaw, level: player.level, racing: race.active, allOpen: allDistrictsOpen });
       const blocked = gates.blockedNear(frameDt, car.pos.x, car.pos.z);
       if (blocked) hud.toast(`${blocked.name} : ouverture au niveau ${blocked.unlockLevel}`);

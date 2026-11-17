@@ -109,13 +109,22 @@ défaut). Réglages : `src/config/race.ts` (pilotes, banque, objets).
 
 ## Quartiers extérieurs
 
-Trois quartiers se greffent au-delà de l'autoroute de ceinture, chacun avec sa sortie sur une
-portion au sol : Baie de Yokohama (niveau 11), Docks de Kawasaki (niveau 21), Collines de Hakone
-(niveau 31). Tant que le niveau n'est pas atteint, la sortie est fermée par une barrière de
-chantier lumineuse ; elle s'ouvre toute seule quand on monte de niveau. `?quartiers=ouverts`
-les ouvre tous (essais). Réglages : `WORLD.districts` dans `src/config/world.ts` ; génération dans
-`src/world/cityGen.ts` (un petit réseau par quartier, fusionné au graphe principal) ; barrières
-dans `src/world/districtGates.ts`. Vérification : `sh scripts/run-sim.sh districts`.
+Trois quartiers **aussi grands que la ville principale** (environ 20 km de rues chacun) se
+greffent au-delà de l'autoroute de ceinture, chacun avec sa sortie sur une portion au sol et son
+décor :
+
+- **Baie de Yokohama** (niveau 11) : bord de mer — hôtels clairs, palmiers le long des avenues,
+  éclairage rose, grande roue illuminée et lueur de la mer au large ;
+- **Docks de Kawasaki** (niveau 21) : port — entrepôts bas, parcs à conteneurs (avec collision),
+  grues portiques, éclairage au sodium, peu de néons ;
+- **Collines de Hakone** (niveau 31) : petites maisons, îlots boisés, lumière dorée.
+
+Tant que le niveau n'est pas atteint, la sortie est fermée par une barrière de chantier
+lumineuse ; elle s'ouvre toute seule quand on monte de niveau. `?quartiers=ouverts` les ouvre
+tous (essais). La route d'accès est bordée de glissières. Réglages : `WORLD.districts` dans
+`src/config/world.ts` ; génération et décors dans `src/world/cityGen.ts` ; barrières dans
+`src/world/districtGates.ts`. Les quartiers sont dessinés par morceaux de 300 m, masqués quand
+ils sont trop loin pour être vus (`updateCityZones`). Vérification : `sh scripts/run-sim.sh districts`.
 
 ## Voitures : vrais modèles 3D
 

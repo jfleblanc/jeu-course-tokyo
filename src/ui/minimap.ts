@@ -8,7 +8,7 @@ import type { Vehicle } from '../vehicle/vehicle';
  */
 const SIZE = 210;
 /** Pixels par mètre du plan pré-dessiné. */
-const PX = 0.75;
+let PX = 0.75;
 /** Rayon de terrain visible (m). */
 const VIEW = 260;
 
@@ -41,6 +41,8 @@ export class Minimap {
     this.ctx.scale(dpr, dpr);
 
     const b = city.bounds;
+    // Grande ville : on réduit l'échelle du plan pour ne pas dépasser environ 2000 pixels de côté.
+    PX = Math.min(0.75, 2000 / Math.max(b.x1 - b.x0, b.z1 - b.z0));
     this.ox = b.x0;
     this.oz = b.z0;
     const w = Math.ceil((b.x1 - b.x0) * PX), h = Math.ceil((b.z1 - b.z0) * PX);

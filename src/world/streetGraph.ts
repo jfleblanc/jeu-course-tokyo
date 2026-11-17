@@ -61,6 +61,11 @@ export interface District {
   entryNode: number;
   /** Barrière de chantier tant que le quartier est verrouillé : position, direction de la route, largeur. */
   gate: { x: number; z: number; yaw: number; width: number };
+  /** Décor : 'baie', 'docks' ou 'collines'. */
+  theme: string;
+  /** Direction (unitaire) qui s'éloigne de la ville principale. */
+  outX: number;
+  outZ: number;
 }
 
 export interface StreetGraph {
@@ -239,7 +244,7 @@ export function generateStreetGraph(seed: number, opt?: GraphOptions): StreetGra
     for (let j = 0; j < N; j++) col.push(id(i, j));
     chains.push({ nodes: col, kind: i === mid ? 'avenue' : kindOfLine(i, colShift), closed: false, role: 'line' });
   }
-  if (!opt) {
+  if (!opt || N >= 9) {
   // Deux avenues en diagonale qui se jettent dans le boulevard (carrefours en Y).
   const diag1: number[] = [];
   for (let k = 0; k <= mid - 1; k++) diag1.push(id(k, k + 1));

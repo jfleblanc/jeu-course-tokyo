@@ -51,11 +51,12 @@ export class TrafficVisuals {
     });
   }
 
-  update(traffic: Traffic): void {
+  /** `x`, `z` : position de la caméra ; au-delà de 170 m les voitures ne sont pas dessinées (brouillard). */
+  update(traffic: Traffic, x: number, z: number): void {
     const cars = traffic.cars;
     for (let i = 0; i < cars.length; i++) {
       const c = cars[i];
-      if (!c || !c.active) {
+      if (!c || !c.active || (c.x - x) ** 2 + (c.z - z) ** 2 > 170 * 170) {
         for (const p of this.parts) p.mesh.setMatrixAt(i, this.zero);
         continue;
       }

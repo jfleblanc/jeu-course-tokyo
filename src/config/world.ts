@@ -28,15 +28,18 @@ export const WORLD = {
    * `section` = numéro de la portion au sol de la ceinture où se trouve leur sortie (0 à 3).
    */
   districts: {
-    lines: 5,
-    spacing: 72,
+    /** Même taille que la ville principale. */
+    lines: 11,
+    spacing: 80,
     /** Longueur de la route d'accès entre la ceinture et le quartier (m). */
-    accessLength: 70,
+    accessLength: 150,
     accessWidth: 14,
     list: [
-      { name: 'Baie de Yokohama', unlockLevel: 11, section: 0 },
-      { name: 'Docks de Kawasaki', unlockLevel: 21, section: 2 },
-      { name: 'Collines de Hakone', unlockLevel: 31, section: 1 },
+      // theme : 'baie' = bord de mer (palmiers, hôtels clairs, grande roue), 'docks' = port
+      // (entrepôts, conteneurs, grues), 'collines' = quartier bas et très arboré.
+      { name: 'Baie de Yokohama', unlockLevel: 11, section: 0, theme: 'baie' },
+      { name: 'Docks de Kawasaki', unlockLevel: 21, section: 2, theme: 'docks' },
+      { name: 'Collines de Hakone', unlockLevel: 31, section: 1, theme: 'collines' },
     ],
   },
   ringway: {

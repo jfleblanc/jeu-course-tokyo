@@ -113,6 +113,8 @@ export interface Tree {
   z: number;
   height: number;
   radius: number;
+  /** Vrai pour un palmier (tronc fin, couronne de palmes). */
+  palm?: boolean;
 }
 
 /** Mur invisible (bord de la ville). */
@@ -264,7 +266,52 @@ function obbOverlap(a: Obb, b: Obb, margin: number): boolean {
   return true;
 }
 
+/** Décor du quartier en cours de construction (null = ville principale). */
+let theme: string | null = null;
+
+const DOCK_WALLS: ReadonlyArray<readonly [number, number, number]> = [[0.1, 0.075, 0.06], [0.07, 0.08, 0.09], [0.12, 0.1, 0.08], [0.06, 0.065, 0.07]];
+const BAY_WALLS: ReadonlyArray<readonly [number, number, number]> = [[0.24, 0.22, 0.2], [0.2, 0.2, 0.22], [0.26, 0.2, 0.18], [0.16, 0.2, 0.21]];
+const CONTAINER_COLORS: ReadonlyArray<readonly [number, number, number]> = [[0.5, 0.08, 0.05], [0.05, 0.16, 0.42], [0.06, 0.3, 0.15], [0.6, 0.24, 0.03], [0.42, 0.42, 0.4], [0.5, 0.4, 0.05]];
+
 function makeBuilding(rng: Rng, fp: Obb, facades: Facade[], centerDist: number, boost: number): Building {
+  if (theme) return makeThemedBuilding(rng, fp, facades, boost);
+  return makeCityBuilding(rng, fp, facades, centerDist, boost);
+}
+
+/** Immeuble d'un quartier à thème : entrepôts bas (docks), hôtels clairs (baie), maisons basses (collines). */
+function makeThemedBuilding(rng: Rng, fp: Obb, facades: Facade[], boost: number): Building {
+  const b = makeCityBuilding(rng, fp, facades, 0.6, boost);
+  const flat = (h: number): void => {
+    b.height = Math.round(h / 3.4) * 3.4 + 1.2;
+    b.tiers = [{ w: fp.w, d: fp.d, y0: 0, y1: b.height }];
+  };
+  if (theme === 'docks') {
+    if (rng.chance(0.78)) {
+      // Entrepôt : bas, large, presque sans fenêtres.
+      flat(rng.range(7, 15));
+      b.style = 0;
+      b.cellW = rng.range(4, 6);
+      b.lit = rng.range(0.02, 0.07);
+    } else flat(Math.min(b.height, rng.range(18, 34)));
+    b.wall = [...rng.pick(DOCK_WALLS)] as [number, number, number];
+  } else if (theme === 'baie') {
+    // Hôtels et résidences de bord de mer : clairs, moyens, bien éclairés ; quelques tours.
+    if (!rng.chance(0.12)) flat(Math.min(b.height * 0.6, rng.range(12, 30)));
+    b.style = rng.chance(0.7) ? 1 : 2;
+    b.cellW = b.style === 1 ? rng.range(2.6, 3.4) : rng.range(1.6, 2.2);
+    b.lit = rng.range(0.35, 0.6);
+    b.wall = [...rng.pick(BAY_WALLS)] as [number, number, number];
+  } else {
+    // Collines : petites maisons et auberges.
+    flat(rng.range(6, 15));
+    b.style = 1;
+    b.cellW = rng.range(2.8, 3.8);
+    b.lit = rng.range(0.25, 0.5);
+  }
+  return b;
+}
+
+function makeCityBuilding(rng: Rng, fp: Obb, facades: Facade[], centerDist: number, boost: number): Building {
   let rank = -1;
   for (const f of facades) rank = Math.max(rank, KIND_RANK[f.kind]);
   let height: number;
@@ -645,6 +692,22 @@ export function generateCity(seed: number = WORLD.seed): CityData {
       for (let q = 0; q <= steps; q++) pts.push(ax + ((entry.x - ax) * q) / steps, az + ((entry.z - az) * q) / steps);
       connectors.push({ pts, width: D.accessWidth });
       accessLines.push([ax, az, entry.x, entry.z]);
+      // Glissières en béton de chaque côté de la route d'accès : on ne peut pas en sortir pour
+      // aller buter contre les limites invisibles, et le passage se lit d'un coup d'œil.
+      {
+        const len = Math.hypot(entry.x - ax, entry.z - az);
+        const tx = (entry.x - ax) / len, tz = (entry.z - az) / len;
+        const from = 5, to = len - entry.radius - 4;
+        if (to - from > 8) {
+          const midS = (from + to) / 2;
+          for (const side of [1, -1]) {
+            const gx = tz * side, gz = -tx * side;
+            const off = D.accessWidth / 2 + 0.9;
+            const fp: Obb = { cx: ax + tx * midS + gx * off, cz: az + tz * midS + gz * off, w: to - from, d: 0.7, yaw: Math.atan2(-gx, -gz) };
+            buildings.push({ footprint: fp, tiers: [{ w: fp.w, d: fp.d, y0: 0, y1: 1.25 }], height: 1.25, seed: 0.5, style: 0, wall: [0.16, 0.16, 0.17], cellW: 40, lit: 0, facades: [], backdrop: false });
+          }
+        }
+      }
       const span = Math.ceil(D.accessWidth / 2 / 3) + 1;
       ringway.gaps.push({ side: ringway.outerSide, from: idx - span, to: idx + span });
       let radius = 0;
@@ -652,6 +715,7 @@ export function generateCity(seed: number = WORLD.seed): CityData {
       graph.districts.push({
         id: k, name: def.name, unlockLevel: def.unlockLevel, cx, cz, radius: radius + 60, polygon: sub.ringPolygon, entryNode: offset + sub.nodes.indexOf(entry),
         gate: { x: edgeX + nx * 20, z: edgeZ + nz * 20, yaw: Math.atan2(nx, nz), width: D.accessWidth },
+        theme: def.theme, outX: nx, outZ: nz,
       });
     });
   }
@@ -807,6 +871,18 @@ export function generateCity(seed: number = WORLD.seed): CityData {
                 const lx = rng.range(-w / 2 + 2, w / 2 - 2), lz = rng.range(-d / 2 + 2, d / 2 - 2);
                 trees.push({ x: fp.cx + lx * c + lz * sn, z: fp.cz - lx * sn + lz * c, height: rng.range(5, 9), radius: rng.range(1.6, 2.8) });
               }
+            } else if (theme === 'docks' && !outer && rng.chance(0.32)) {
+              // Docks : un parc à conteneurs en bord de rue à la place d'un immeuble.
+              occupy(fp);
+              const c = Math.cos(fp.yaw), sn = Math.sin(fp.yaw);
+              const cols = Math.max(1, Math.floor(fp.w / 12.9)), rows = Math.max(1, Math.floor(fp.d / 3.1));
+              for (let q = 0; q < cols; q++) for (let r = 0; r < rows; r++) {
+                if (rng.chance(0.25)) continue;
+                const lx = (q - (cols - 1) / 2) * 12.9, lz = (r - (rows - 1) / 2) * 3.1;
+                const cfp: Obb = { cx: fp.cx + lx * c + lz * sn, cz: fp.cz - lx * sn + lz * c, w: 12.2, d: 2.5, yaw: fp.yaw };
+                const h = 2.6 * rng.int(1, 4);
+                buildings.push({ footprint: cfp, tiers: [{ w: cfp.w, d: cfp.d, y0: 0, y1: h }], height: h, seed: rng.next(), style: 0, wall: [...rng.pick(CONTAINER_COLORS)] as [number, number, number], cellW: 12.2, lit: 0, facades: [], backdrop: false });
+              }
             } else {
               finishBuilding(fp, { cx: fx, cz: fz, nx: -nx, nz: -nz, length: w, kind: e.kind }, outer ? 1.5 : 1);
             }
@@ -860,7 +936,8 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     b.tiers = [{ w: fp.w, d: fp.d, y0: 0, y1: b.height }];
     b.style = 2;
     b.backdrop = true;
-    if (!inDistrict(fp.cx, fp.cz, 40) && nearAccess(fp.cx, fp.cz) > 50) buildings.push(b);
+    const atSea = graph.districts.some((dd) => dd.theme === 'baie' && Math.hypot(fp.cx - (dd.cx + dd.outX * (dd.radius + 330)), fp.cz - (dd.cz + dd.outZ * (dd.radius + 330))) < 420);
+    if (!inDistrict(fp.cx, fp.cz, 40) && nearAccess(fp.cx, fp.cz) > 50 && !atSea) buildings.push(b);
   }
 
   // ——— Limite de la ville : mur invisible le long du flanc extérieur de l'autoroute de ceinture ———
@@ -875,7 +952,8 @@ export function generateCity(seed: number = WORLD.seed): CityData {
       const bxx = b.x - b.tz * off, bzz = b.z + b.tx * off;
       const len = Math.hypot(bxx - axx, bzz - azz);
       // (pas de mur devant la sortie vers un quartier extérieur)
-      if (nearAccess((axx + bxx) / 2, (azz + bzz) / 2) > WORLD.districts.accessWidth / 2 + 2.5) walls.push({ x: (axx + bxx) / 2, z: (azz + bzz) / 2, yaw: Math.atan2(bxx - axx, bzz - azz), halfLength: len / 2 + 0.5 });
+      const clearance = WORLD.districts.accessWidth / 2 + 3;
+      if (nearAccess((axx + bxx) / 2, (azz + bzz) / 2) > clearance && nearAccess(axx, azz) > clearance && nearAccess(bxx, bzz) > clearance) walls.push({ x: (axx + bxx) / 2, z: (azz + bzz) / 2, yaw: Math.atan2(bxx - axx, bzz - azz), halfLength: len / 2 + 0.5 });
     }
     // Immeubles de décor juste derrière le mur (sans collision : on ne peut pas les atteindre).
     let i = 0;
@@ -898,8 +976,10 @@ export function generateCity(seed: number = WORLD.seed): CityData {
 
   // ——— Quartiers extérieurs : immeubles le long des rues, cœurs d'îlots, limite ———
   rng = districtRng;
-  buildAlong(graph.edges.slice(mainEdgeCount));
   for (const d of graph.districts) {
+    theme = d.theme;
+    const firstSign = signs.length;
+    buildAlong(graph.edges.filter((e) => e.district === d.id));
     const tries = Math.floor((d.radius * d.radius * 4) / 300);
     for (let k = 0; k < tries; k++) {
       const x = rng.range(d.cx - d.radius, d.cx + d.radius), z = rng.range(d.cz - d.radius, d.cz + d.radius);
@@ -909,9 +989,79 @@ export function generateCity(seed: number = WORLD.seed): CityData {
         fp.yaw = q.yaw;
         return true;
       });
+      if (d.theme === 'docks' && rng.chance(0.7)) {
+        // Parc à conteneurs : des rangées de piles de une à quatre hauteurs (avec collision).
+        const c = Math.cos(fp.yaw), sn = Math.sin(fp.yaw);
+        const rows = rng.int(2, 5), cols = rng.int(1, 3);
+        for (let r = 0; r < rows; r++) for (let q = 0; q < cols; q++) {
+          const lx = (q - (cols - 1) / 2) * 12.9, lz = (r - (rows - 1) / 2) * 3.1;
+          const cfp: Obb = { cx: x + lx * c + lz * sn, cz: z - lx * sn + lz * c, w: 12.2, d: 2.5, yaw: fp.yaw };
+          if (hitsRoad(cfp) || hitsBuilding(cfp)) continue;
+          const h = 2.6 * rng.int(1, 4);
+          buildings.push({ footprint: cfp, tiers: [{ w: cfp.w, d: cfp.d, y0: 0, y1: h }], height: h, seed: rng.next(), style: 0, wall: [...rng.pick(CONTAINER_COLORS)] as [number, number, number], cellW: 12.2, lit: 0, facades: [], backdrop: false });
+          occupy(cfp);
+        }
+        // De temps en temps, une grue portique au-dessus du parc (décor, sans collision).
+        if (rng.chance(0.05)) {
+          const h = rng.range(26, 38), span = 34;
+          // Pas de pied de grue sur une chaussée.
+          let clear = true;
+          for (const side of [-1, 1]) for (const leg of [-1, 1]) if (hitsRoad({ cx: x + side * (span / 2) * c + leg * 5 * sn, cz: z - side * (span / 2) * sn + leg * 5 * c, w: 2.5, d: 2.5, yaw: fp.yaw })) clear = false;
+          if (clear) {
+          for (const side of [-1, 1]) for (const leg of [-1, 1]) props.push({ x: x + side * (span / 2) * c + leg * 5 * sn, y: h / 2, z: z - side * (span / 2) * sn + leg * 5 * c, sx: 1.1, sy: h, sz: 1.1, yaw: fp.yaw, color: [0.2, 0.09, 0.02] });
+          props.push({ x, y: h, z, sx: span + 14, sy: 2.2, sz: 3, yaw: fp.yaw, color: [0.22, 0.1, 0.02] });
+          props.push({ x: x + 4 * c, y: h + 3, z: z - 4 * sn, sx: 5, sy: 4, sz: 4, yaw: fp.yaw, color: [0.1, 0.1, 0.11] });
+          for (const side of [-1, 1]) glowBoxes.push({ x: x + side * (span / 2 + 6) * c, y: h + 1.6, z: z - side * (span / 2 + 6) * sn, sx: 0.7, sy: 0.7, sz: 0.7, yaw: 0, color: [1.0, 0.1, 0.05] });
+          }
+        }
+        continue;
+      }
       if (hitsRoad(fp) || hitsBuilding(fp)) continue;
+      if (d.theme === 'collines' && rng.chance(0.6)) {
+        // Bois : les cœurs d'îlots sont plantés plutôt que bâtis.
+        parks.push(fp);
+        occupy(fp);
+        const c = Math.cos(fp.yaw), sn = Math.sin(fp.yaw);
+        for (let q = rng.int(4, 8); q > 0; q--) {
+          const lx = rng.range(-fp.w / 2 + 1.5, fp.w / 2 - 1.5), lz = rng.range(-fp.d / 2 + 1.5, fp.d / 2 - 1.5);
+          trees.push({ x: x + lx * c + lz * sn, z: z - lx * sn + lz * c, height: rng.range(7, 13), radius: rng.range(1.8, 3.2) });
+        }
+        continue;
+      }
       finishBuilding(fp, null, 1.1);
     }
+    // Docks : peu d'enseignes au néon.
+    if (d.theme === 'docks') {
+      const kept = signs.slice(firstSign).filter(() => rng.chance(0.3));
+      signs.length = firstSign;
+      signs.push(...kept);
+    }
+    if (d.theme === 'baie') {
+      // Palmiers le long des avenues.
+      for (const e of graph.edges) {
+        if (e.district !== d.id || (e.kind !== 'avenue' && e.kind !== 'boulevard')) continue;
+        for (let st = e.trimA + 6; st < e.length - e.trimB - 6; st += 17) {
+          pointAt(e, st, p);
+          for (const side of [1, -1]) trees.push({ x: p.x + p.tz * side * (e.width / 2 + 1.3), z: p.z - p.tx * side * (e.width / 2 + 1.3), height: rng.range(8, 12), radius: rng.range(2.6, 3.4), palm: true });
+        }
+      }
+      // Grande roue illuminée au bord de l'eau (décor, hors d'atteinte), et la mer au-delà.
+      const wx = d.cx + d.outX * (d.radius + 60), wz = d.cz + d.outZ * (d.radius + 60);
+      const yaw = Math.atan2(d.outX, d.outZ);
+      const ax = Math.cos(yaw), az = -Math.sin(yaw); // axe du plan de la roue (perpendiculaire à la direction du large)
+      const R0 = 46, hub = 54;
+      for (let k = 0; k < 40; k++) {
+        const a = (k / 40) * Math.PI * 2;
+        glowBoxes.push({ x: wx + ax * Math.cos(a) * R0, y: hub + Math.sin(a) * R0, z: wz + az * Math.cos(a) * R0, sx: 2.2, sy: 2.2, sz: 1.2, yaw, color: k % 2 ? [1.0, 0.2, 0.6] : [0.2, 0.9, 1.0] });
+      }
+      for (let k = 0; k < 10; k++) {
+        const a = (k / 10) * Math.PI * 2;
+        for (let q = 1; q <= 5; q++) glowBoxes.push({ x: wx + ax * Math.cos(a) * R0 * (q / 6), y: hub + Math.sin(a) * R0 * (q / 6), z: wz + az * Math.cos(a) * R0 * (q / 6), sx: 0.8, sy: 0.8, sz: 0.6, yaw, color: [1.0, 0.85, 0.5] });
+      }
+      for (const side of [-1, 1]) props.push({ x: wx + ax * side * 14, y: hub / 2, z: wz + az * side * 14, sx: 1.6, sy: hub, sz: 1.6, yaw, color: [0.12, 0.12, 0.14] });
+      pools.push({ x: d.cx + d.outX * (d.radius + 330), z: d.cz + d.outZ * (d.radius + 330), radius: 330, color: [0.02, 0.1, 0.14], intensity: 1 });
+    }
+    theme = null;
     // Limite : mur invisible autour du quartier, derrière ses immeubles, ouvert devant la route d'accès.
     const poly = d.polygon;
     const m = poly.length / 2;
@@ -929,7 +1079,7 @@ export function generateCity(seed: number = WORLD.seed): CityData {
       for (let q = 0; q < parts; q++) {
         const x0 = ax + ((bx - ax) * q) / parts, z0 = az + ((bz - az) * q) / parts;
         const x1 = ax + ((bx - ax) * (q + 1)) / parts, z1 = az + ((bz - az) * (q + 1)) / parts;
-        if (nearAccess((x0 + x1) / 2, (z0 + z1) / 2) < 16) continue;
+        if (nearAccess((x0 + x1) / 2, (z0 + z1) / 2) < 24 || nearAccess(x0, z0) < 18 || nearAccess(x1, z1) < 18) continue;
         walls.push({ x: (x0 + x1) / 2, z: (z0 + z1) / 2, yaw: Math.atan2(x1 - x0, z1 - z0), halfLength: len / parts / 2 + 0.5 });
       }
     }
@@ -990,6 +1140,12 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     });
   }
 
+  // Éclairage public propre à chaque quartier : sodium orangé sur les docks, rose chaud sur la baie, doré dans les collines.
+  for (const d of graph.districts) {
+    const tint: readonly [number, number, number] = d.theme === 'docks' ? [1.0, 0.5, 0.14] : d.theme === 'baie' ? [1.0, 0.62, 0.7] : [1.0, 0.78, 0.45];
+    for (const l of lamps) if (Math.hypot(l.x - d.cx, l.z - d.cz) < d.radius) l.color = tint;
+    for (const q of pools) if (q.radius < 20 && Math.hypot(q.x - d.cx, q.z - d.cz) < d.radius) q.color = tint;
+  }
   rng = mainRng;
   const highway = buildHighway(graph);
 

@@ -2,7 +2,7 @@ import * as THREE from 'three/webgpu';
 import { GeomBuilder, type Vec3 } from '../render/geomBuilder';
 import type { CityMaterials } from '../render/materials';
 import type { Building, CityData, Connector, Highway, HighwaySample } from './cityGen';
-import { pointAt, type GraphEdge, type GraphNode, type PathPoint } from './streetGraph';
+import { pointAt, pointInPolygon, type GraphEdge, type GraphNode, type PathPoint } from './streetGraph';
 
 /**
  * Transforme les données de la ville en maillages. Tout est fusionné par matériau :
@@ -200,24 +200,102 @@ function addConnector(gb: GeomBuilder, c: Connector): void {
 export interface CityMeshes {
   group: THREE.Group;
   triangles: number;
+  /** Quartiers extérieurs : leurs maillages sont masqués quand la caméra est loin (ils sont dans le brouillard). */
+  zones: { cx: number; cz: number; radius: number; group: THREE.Group }[];
+}
+
+/** Masque les quartiers trop lointains pour être vus : à appeler de temps en temps. */
+export function updateCityZones(meshes: CityMeshes, x: number, z: number): void {
+  for (const zn of meshes.zones) zn.group.visible = Math.hypot(x - zn.cx, z - zn.cz) < zn.radius + 430;
 }
 
 export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes {
+  const root = new THREE.Group();
+  root.name = 'ville';
+  const zones: CityMeshes['zones'] = [];
+  let total = 0;
+  // La ville principale d'un bloc, puis les quartiers extérieurs par morceaux : ce qui est hors
+  // champ ou trop loin (dans le brouillard) n'est pas dessiné.
+  const main = buildZone(city, mats, -1, null);
+  total += main.triangles;
+  root.add(main.group);
+  // Chaque quartier est découpé en carrés de CHUNK mètres de côté.
+  for (const d of city.graph.districts) {
+    const n = Math.ceil((d.radius + 130) / CHUNK);
+    for (let i = -n; i < n; i++) for (let j = -n; j < n; j++) {
+      const part = buildZone(city, mats, d.id, { x0: d.cx + i * CHUNK, z0: d.cz + j * CHUNK });
+      if (part.triangles === 0) continue;
+      total += part.triangles;
+      root.add(part.group);
+      zones.push({ cx: d.cx + (i + 0.5) * CHUNK, cz: d.cz + (j + 0.5) * CHUNK, radius: CHUNK * 0.75, group: part.group });
+    }
+  }
+  return { group: root, triangles: total, zones };
+}
+
+/**
+ * À quelle zone appartient un point : −1 = ville principale (tout ce qui est à l'intérieur de
+ * l'autoroute de ceinture ou collé derrière elle), sinon le numéro du quartier extérieur.
+ * Les réponses sont gardées en mémoire : la question est posée des dizaines de fois par objet.
+ */
+const zoneCache = new Map<string, number>();
+let zoneCity: CityData | null = null;
+let mainPoly: number[] = [];
+function zoneAt(city: CityData, x: number, z: number): number {
+  if (zoneCity !== city) {
+    zoneCity = city;
+    zoneCache.clear();
+    // Contour de la ville principale : l'autoroute de ceinture, élargie de 50 m vers l'extérieur.
+    mainPoly = [];
+    const rw = city.ringway;
+    for (let i = 0; i < rw.samples.length; i += 4) {
+      const p = rw.samples[i];
+      if (!p) continue;
+      const off = (rw.halfWidth + 50) * rw.outerSide;
+      mainPoly.push(p.x - p.tz * off, p.z + p.tx * off);
+    }
+  }
+  const key = `${x},${z}`;
+  let zone = zoneCache.get(key);
+  if (zone === undefined) {
+    zone = -1;
+    if (!pointInPolygon(mainPoly, x, z)) {
+      for (const d of city.graph.districts) if (Math.hypot(x - d.cx, z - d.cz) < d.radius + 130) zone = d.id;
+    }
+    zoneCache.set(key, zone);
+  }
+  return zone;
+}
+
+/** Côté d'un morceau de quartier (m). */
+const CHUNK = 300;
+
+function buildZone(city: CityData, mats: CityMaterials, zone: number, cell: { x0: number; z0: number } | null): { group: THREE.Group; triangles: number } {
   const group = new THREE.Group();
-  group.name = 'ville';
+  group.name = zone < 0 ? 'ville principale' : `quartier ${zone}`;
+  const main = zone < 0;
+  /** Vrai si ce point appartient à la zone (et au morceau) en cours. */
+  const here = (x: number, z: number): boolean => {
+    if (zoneAt(city, x, z) !== zone) return false;
+    return !cell || (x >= cell.x0 && x < cell.x0 + CHUNK && z >= cell.z0 && z < cell.z0 + CHUNK);
+  };
+  const mid = (e: GraphEdge): boolean => {
+    const k = Math.floor(e.pts.length / 4) * 2;
+    return here(e.pts[k] as number, e.pts[k + 1] as number);
+  };
   const sh = 0; // les trottoirs sont au niveau du sol (seule la bordure est en relief)
 
   // ——— Immeubles ———
   const bld = new GeomBuilder();
   const glow = new GeomBuilder();
-  for (const b of city.buildings) addBuilding(bld, glow, b);
+  for (const b of city.buildings) if (here(b.footprint.cx, b.footprint.cz)) addBuilding(bld, glow, b);
 
   // ——— Sol (dallage de trottoir partout), routes par-dessus, bordures ———
   const solid = new GeomBuilder();
   const groundGeo = new GeomBuilder();
   // Le sol est découpé en dalles de 60 m : un seul triangle géant perd en précision de profondeur
   // et passerait par endroits devant la chaussée posée 5 cm plus haut.
-  {
+  if (main) {
     const gy = -0.05;
     const cell = 60;
     const b = city.bounds;
@@ -244,19 +322,33 @@ export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes
     }
     return false;
   };
-  for (const e of city.graph.edges) addRoadEdge(roads, solid, e, nearConnector);
-  for (const n of city.graph.nodes) addJunction(roads, n);
+  for (const e of city.graph.edges) if (e.district === zone && mid(e)) addRoadEdge(roads, solid, e, nearConnector);
+  for (const n of city.graph.nodes) if (n.district === zone && n.edges.length > 0 && here(n.x, n.z)) addJunction(roads, n);
 
   // ——— Parcs, arbres, mobilier ———
   for (const r of city.parks) {
+    if (!here(r.cx, r.cz)) continue;
     solid.box(r.cx, 0.0, r.cz, r.w, 0.06, r.d, r.yaw, [0.02, 0.05, 0.03]);
   }
   for (const t of city.trees) {
+    if (!here(t.x, t.z)) continue;
+    if (t.palm) {
+      // Palmier : tronc fin, palmes retombantes en étoile.
+      solid.cylinder(t.x, sh, t.z, 0.2, 0.13, t.height, 6, [0.07, 0.05, 0.035], [0, 0, 0, 0], false);
+      for (let k = 0; k < 7; k++) {
+        const a = (k / 7) * Math.PI * 2 + t.x;
+        const dx = Math.sin(a), dz = Math.cos(a);
+        solid.box(t.x + dx * t.radius * 0.5, t.height - 0.15, t.z + dz * t.radius * 0.5, 0.55, 0.1, t.radius, a, [0.03, 0.11, 0.05], [0, 0, 0, 0], true, true);
+        solid.box(t.x + dx * t.radius * 1.1, t.height - 0.75, t.z + dz * t.radius * 1.1, 0.4, 0.1, t.radius * 0.5, a, [0.025, 0.09, 0.045], [0, 0, 0, 0], true, true);
+      }
+      continue;
+    }
     solid.cylinder(t.x, sh, t.z, 0.22, 0.14, t.height * 0.5, 6, [0.05, 0.035, 0.025], [0, 0, 0, 0], false);
     solid.cylinder(t.x, sh + t.height * 0.35, t.z, t.radius, t.radius * 0.55, t.height * 0.35, 7, [0.02, 0.07, 0.04], [0, 0, 0, 0], false);
     solid.cylinder(t.x, sh + t.height * 0.7, t.z, t.radius * 0.55, 0.05, t.height * 0.3, 7, [0.025, 0.08, 0.045], [0, 0, 0, 0], false);
   }
   for (const l of city.lamps) {
+    if (!here(l.x, l.z)) continue;
     solid.cylinder(l.x, sh, l.z, 0.1, 0.07, l.height, 6, DARK_METAL, [0, 0, 0, 0], false);
     const ax = l.x + l.dx * l.arm * 0.5;
     const az = l.z + l.dz * l.arm * 0.5;
@@ -265,11 +357,12 @@ export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes
     // Tête lumineuse (aData : graine, type 3 = uni, -, intensité)
     glow.box(l.x + l.dx * l.arm, sh + l.height - 0.08, l.z + l.dz * l.arm, 0.32, 0.12, 0.8, yaw, l.color, [1, 3, 1, 2.6], true, true);
   }
-  for (const p of city.props) solid.box(p.x, p.y, p.z, p.sx, p.sy, p.sz, p.yaw, p.color);
-  for (const g of city.glowBoxes) glow.box(g.x, g.y, g.z, g.sx, g.sy, g.sz, g.yaw, g.color, [1, 4, 1, 1.5], true, false);
+  for (const p of city.props) if (here(p.x, p.z)) solid.box(p.x, p.y, p.z, p.sx, p.sy, p.sz, p.yaw, p.color);
+  for (const g of city.glowBoxes) if (here(g.x, g.z)) glow.box(g.x, g.y, g.z, g.sx, g.sy, g.sz, g.yaw, g.color, [1, 4, 1, 1.5], true, false);
 
   // ——— Enseignes ———
   for (const sg of city.signs) {
+    if (!here(sg.x, sg.z)) continue;
     const yaw = Math.atan2(sg.nx, sg.nz);
     // aData : graine, type, largeur de la grande face, hauteur
     const faceW = Math.max(sg.along, sg.out);
@@ -278,10 +371,10 @@ export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes
 
   // ——— Autoroute surélevée ———
   const hwRoad = new GeomBuilder();
-  addHighway(city.highway, hwRoad, solid, glow, ROAD_KIND.highway);
-  addHighway(city.ringway, hwRoad, solid, glow, ROAD_KIND.ringway);
+  if (main) addHighway(city.highway, hwRoad, solid, glow, ROAD_KIND.highway);
+  if (main) addHighway(city.ringway, hwRoad, solid, glow, ROAD_KIND.ringway);
   const connectorGeo = new GeomBuilder();
-  for (const c of city.connectors) {
+  for (const c of main ? city.connectors : []) {
     addConnector(connectorGeo, c);
     // Portique vert « autoroute » à l'entrée de la bretelle, visible depuis le périphérique.
     const k = 5;
@@ -310,6 +403,7 @@ export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes
   // ——— Flaques de lumière au sol (plans additifs, pas de vraies lumières) ———
   const pools = new GeomBuilder();
   for (const p of city.pools) {
+    if (!here(p.x, p.z)) continue;
     const r = p.radius;
     const c: Vec3 = [p.color[0] * p.intensity, p.color[1] * p.intensity, p.color[2] * p.intensity];
     pools.quad([p.x - r, 0.04, p.z + r], [p.x + r, 0.04, p.z + r], [p.x + r, 0.04, p.z - r], [p.x - r, 0.04, p.z - r], [0, 1, 0], 0, 0, 1, 1, c);
@@ -321,7 +415,9 @@ export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes
     const m = new THREE.Mesh(geo, mat);
     m.name = name;
     m.matrixAutoUpdate = false;
-    m.frustumCulled = false; // un seul gros maillage : toujours visible
+    // Ville principale : un seul gros maillage, toujours visible. Quartiers : dessinés seulement s'ils sont dans le champ.
+    m.frustumCulled = !main;
+    if (!main) geo.computeBoundingSphere();
     m.renderOrder = order;
     group.add(m);
     return m;
