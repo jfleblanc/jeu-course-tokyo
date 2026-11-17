@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu';
-import { color, float, uniform, vec3 } from 'three/tsl';
+import { color, float, smoothstep, uniform, uv, vec3 } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { CarSpec } from '../config/handling';
 import { REST_HEIGHT, type Vehicle } from './vehicle';
@@ -27,6 +27,12 @@ export interface CarVisual {
   headlight: THREE.SpotLight;
   brakeLevel: ReturnType<typeof uniform>;
   reverseLevel: ReturnType<typeof uniform>;
+  /** 0..1 : flammes bleues à l'échappement pendant le NOS. */
+  nosLevel: ReturnType<typeof uniform>;
+  /** Change la couleur de carrosserie sans reconstruire la voiture. */
+  setPaint(color: readonly [number, number, number]): void;
+  /** Néon sous la voiture (null = éteint). */
+  setUnderglow(color: readonly [number, number, number] | null): void;
 }
 
 /**
@@ -98,6 +104,8 @@ export interface CarVisualOptions {
   color?: readonly [number, number, number];
   /** Faux pour les adversaires : pas de vraies lumières (elles coûtent cher), seulement les feux émissifs. */
   lights?: boolean;
+  /** Grand aileron (GT) au lieu du petit. */
+  bigWing?: boolean;
 }
 
 export function createCarVisual(spec: CarSpec, options: CarVisualOptions = {}): CarVisual {
@@ -114,7 +122,8 @@ export function createCarVisual(spec: CarSpec, options: CarVisualOptions = {}): 
   // ——— Matériaux ———
   const paint = new THREE.MeshPhysicalNodeMaterial();
   const paintColor = options.color ?? [0.72, 0.035, 0.05];
-  paint.colorNode = color(paintColor[0], paintColor[1], paintColor[2]);
+  const paintUniform = uniform(new THREE.Color(paintColor[0], paintColor[1], paintColor[2]));
+  paint.colorNode = paintUniform;
   paint.metalnessNode = float(0.55);
   paint.roughnessNode = float(0.32);
   // Adversaires : vernis plus mat, sinon nos phares font une tache blanche sur leur coffre.
@@ -204,8 +213,22 @@ export function createCarVisual(spec: CarSpec, options: CarVisualOptions = {}): 
   pipe.rotateX(Math.PI / 2);
   for (const x of [-0.5, -0.38, 0.38, 0.5]) mesh(pipe, rim, body, x, -0.3, -2.25);
   // Aileron
-  mesh(boxGeo(1.62, 0.035, 0.3), trim, body, 0, 0.5, -2.02).rotation.x = -0.1;
-  for (const x of [-0.6, 0.6]) mesh(boxGeo(0.04, 0.24, 0.16), trim, body, x, 0.38, -1.98);
+  if (options.bigWing) {
+    mesh(boxGeo(1.8, 0.04, 0.38), trim, body, 0, 0.72, -2.05).rotation.x = -0.14;
+    for (const x of [-0.89, 0.89]) mesh(boxGeo(0.03, 0.2, 0.42), trim, body, x, 0.7, -2.05);
+    for (const x of [-0.55, 0.55]) mesh(boxGeo(0.05, 0.46, 0.18), trim, body, x, 0.49, -1.98);
+  } else {
+    mesh(boxGeo(1.62, 0.035, 0.3), trim, body, 0, 0.5, -2.02).rotation.x = -0.1;
+    for (const x of [-0.6, 0.6]) mesh(boxGeo(0.04, 0.24, 0.16), trim, body, x, 0.38, -1.98);
+  }
+  // Flammes de NOS aux échappements
+  const nosLevel = uniform(0);
+  const nosMat = new THREE.MeshBasicNodeMaterial();
+  nosMat.colorNode = vec3(0.25, 0.6, 1.0).mul(nosLevel.mul(9.0));
+  nosMat.transparent = true;
+  nosMat.blending = THREE.AdditiveBlending;
+  nosMat.depthWrite = false;
+  for (const x of [-0.44, 0.44]) mesh(boxGeo(0.2, 0.09, 0.5), nosMat, body, x, -0.3, -2.55);
   // Rétroviseurs
   for (const x of [-0.96, 0.96]) mesh(boxGeo(0.2, 0.11, 0.1), paint, body, x, 0.31, 0.62);
 
@@ -328,7 +351,31 @@ export function createCarVisual(spec: CarSpec, options: CarVisualOptions = {}): 
   fill.position.set(0, 4.0, -1.4);
   if (options.lights !== false) root.add(fill);
 
+  // Néon sous la voiture : une lueur additive au ras du sol.
+  const glowColor = uniform(new THREE.Color(0, 0, 0));
+  const glowMat = new THREE.MeshBasicNodeMaterial();
+  {
+    const d = uv().sub(0.5).mul(2).length();
+    glowMat.colorNode = glowColor.mul(smoothstep(1.0, 0.25, d)).mul(1.6);
+    glowMat.transparent = true;
+    glowMat.blending = THREE.AdditiveBlending;
+    glowMat.depthWrite = false;
+  }
+  const underglow = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 6.4), glowMat);
+  underglow.rotation.x = -Math.PI / 2;
+  underglow.position.y = ground + 0.07;
+  underglow.visible = false;
+  root.add(underglow);
+
   return {
+    nosLevel,
+    setPaint(c) {
+      (paintUniform.value as THREE.Color).setRGB(c[0], c[1], c[2]);
+    },
+    setUnderglow(c) {
+      underglow.visible = c !== null;
+      if (c) (glowColor.value as THREE.Color).setRGB(c[0], c[1], c[2]);
+    },
     root,
     body,
     cabin,

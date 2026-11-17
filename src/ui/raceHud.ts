@@ -1,5 +1,6 @@
 import type { Race } from '../race/race';
 import type { RouteTurn } from '../race/route';
+import type { RaceSummary } from '../progression/playerState';
 
 const IDLE_HINT = '<kbd>Entrée</kbd> course · <kbd>T</kbd> circuit à 3 tours';
 
@@ -24,6 +25,10 @@ export class RaceHud {
   private lastBig = '';
   private goTimer = 0;
   private resultsShown = false;
+  /** Récompenses de la course qui vient de se terminer (fournies par la progression). */
+  summary: RaceSummary | null = null;
+  /** Titre affiché au départ et à l'arrivée (ex. « Épreuve de palier »). */
+  title = '';
 
   constructor() {
     const root = document.createElement('div');
@@ -126,7 +131,15 @@ export class RaceHud {
     if (race.phase === 'finished' && !this.resultsShown) {
       this.resultsShown = true;
       const medal = ['1re place !', '2e place', '3e place', '4e place'][place - 1] ?? `${place}e place`;
-      this.results.innerHTML = `<h2>${medal}</h2><div class="time">${fmtTime(player.finishTime)}</div><div class="list" data-r="list"></div><p><kbd>Entrée</kbd> course &nbsp; <kbd>T</kbd> circuit &nbsp; <kbd>Échap</kbd> balade libre</p>`;
+      const sm = this.summary;
+      let reward = '';
+      if (sm) {
+        reward = `<div class="reward">${sm.trial ? '' : `<b>+${sm.xp} XP</b> · `}+¥ ${sm.money.toLocaleString('fr-CA')}</div>`;
+        if (sm.promoted) reward += `<div class="levelup">Palier ${sm.tierName} débloqué ! Niveau ${sm.level}</div>`;
+        else if (sm.trial) reward += `<div class="levelup">Épreuve manquée : il faut finir dans les deux premiers.</div>`;
+        else if (sm.leveledUp) reward += `<div class="levelup">Niveau ${sm.level} !</div>`;
+      }
+      this.results.innerHTML = `<h2>${this.title ? this.title + ' — ' : ''}${medal}</h2><div class="time">${fmtTime(player.finishTime)}</div>${reward}<div class="list" data-r="list"></div><p><kbd>Entrée</kbd> course &nbsp; <kbd>T</kbd> circuit &nbsp; <kbd>Échap</kbd> balade libre</p>`;
       this.results.classList.add('on');
     }
     if (this.resultsShown) {

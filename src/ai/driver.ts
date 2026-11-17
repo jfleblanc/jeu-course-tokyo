@@ -53,6 +53,7 @@ export function driveAlongRoute(car: Vehicle, route: Route, index: number, level
   // En gros dérapage ou très désaxé : on lève le pied.
   if (Math.abs(diff) > 0.9) out.throttle = Math.min(out.throttle, 0.3);
   out.drift = false;
+  out.nos = false;
   out.shiftUp = false;
   out.shiftDown = false;
 }

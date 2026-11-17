@@ -19,6 +19,9 @@ export class Hud {
   private readonly version: HTMLElement;
   private readonly toastEl: HTMLElement;
   private readonly help: HTMLElement;
+  private readonly prog: HTMLElement;
+  private readonly nos: HTMLElement;
+  private readonly nosFill: HTMLElement;
   private toastTimer = 0;
   private lastKmh = -1;
   private lastGear = '';
@@ -53,16 +56,31 @@ export class Hud {
       <kbd>M</kbd> boîte auto / manuelle · <kbd>↑</kbd> <kbd>↓</kbd> rapports (manuelle)<br>
       <kbd>F1</kbd> panneau de réglage · <kbd>B</kbd> basculer conduite A / B<br>
       <kbd>Entrée</kbd> course · <kbd>T</kbd> circuit à 3 tours · <kbd>Échap</kbd> abandonner<br>
+      <kbd>G</kbd> garage · <kbd>Maj</kbd> NOS (si installé)<br>
       <kbd>N</kbd> musique suivante · <kbd>P</kbd> musique oui / non<br>
       <kbd>H</kbd> masquer cette aide
       <div class="pad" id="hud-pad"></div>`;
 
-    document.body.append(speed, this.version, this.preset, this.toastEl, this.help);
+    this.prog = el('div', { id: 'hud-prog', class: 'hud' });
+    this.nos = el('div', { id: 'hud-nos', class: 'hud' }, 'NOS<div class="bar"><i></i></div>');
+    this.nosFill = this.nos.querySelector('i') as HTMLElement;
+    document.body.append(speed, this.version, this.preset, this.toastEl, this.help, this.prog, this.nos);
   }
 
   setPreset(p: PresetName): void {
     this.preset.innerHTML = `CONDUITE <b>${p}</b>`;
     this.preset.classList.toggle('b', p === 'B');
+  }
+
+  /** Bandeau de progression : niveau, palier, XP, argent. */
+  setProgress(level: number, tier: string, xp: number, need: number, money: number, trial: boolean): void {
+    this.prog.innerHTML = `<div class="line"><span>Niveau <b>${level}</b> · ${tier}</span><span class="money">¥ ${money.toLocaleString('fr-CA')}</span></div><div class="bar"><i style="width:${Math.min(100, (xp / need) * 100).toFixed(0)}%"></i></div>${trial ? '<small class="trial">Épreuve de palier prête : Entrée</small>' : '<small>G : garage</small>'}`;
+  }
+
+  /** Jauge de NOS (cachée si la voiture n'en a pas). */
+  setNos(installed: boolean, ratio: number): void {
+    this.nos.classList.toggle('on', installed);
+    if (installed) this.nosFill.style.width = `${(Math.max(0, Math.min(1, ratio)) * 100).toFixed(0)}%`;
   }
 
   toggleHelp(): void {

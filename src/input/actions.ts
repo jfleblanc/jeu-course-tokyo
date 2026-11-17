@@ -10,6 +10,7 @@ export interface DriveInput {
   /** -1..1, positif = à gauche. */
   steer: number;
   drift: boolean;
+  nos: boolean;
   /** Vrai pendant un seul pas de simulation. */
   shiftUp: boolean;
   shiftDown: boolean;
@@ -21,6 +22,7 @@ export interface RawInput {
   brake: number;
   steer: number;
   drift: boolean;
+  nos: boolean;
 }
 
 /** Actions ponctuelles (un appui = un événement). */
@@ -37,6 +39,7 @@ export type ActionEvent =
   | 'musicToggle'
   | 'raceStart'
   | 'circuitStart'
+  | 'garage'
   | 'raceQuit';
 
 export const emptyDriveInput = (): DriveInput => ({
@@ -44,6 +47,7 @@ export const emptyDriveInput = (): DriveInput => ({
   brake: 0,
   steer: 0,
   drift: false,
+  nos: false,
   shiftUp: false,
   shiftDown: false,
 });

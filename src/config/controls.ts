@@ -10,6 +10,7 @@ export const KEYBOARD = {
   steerLeft: ['KeyA'],
   steerRight: ['KeyD'],
   drift: ['Space'],
+  nos: ['ShiftLeft', 'ShiftRight'],
 } as const;
 
 export const KEY_EVENTS: Record<string, ActionEvent> = {
@@ -25,6 +26,7 @@ export const KEY_EVENTS: Record<string, ActionEvent> = {
   KeyP: 'musicToggle',
   Enter: 'raceStart',
   KeyT: 'circuitStart',
+  KeyG: 'garage',
   Escape: 'raceQuit',
 };
 
@@ -36,7 +38,8 @@ export const GAMEPAD = {
   throttleButton: 7, // ZR
   brakeButton: 6, // ZL
   steerAxis: 0, // stick gauche, horizontal
-  driftButtons: [0, 1], // B ou A
+  driftButtons: [0], // B
+  nosButtons: [1], // A
   deadzone: 0.14,
   events: {
     5: 'shiftUp', // R

@@ -47,5 +47,6 @@ export class KeyboardSource {
     out.brake = this.any(KEYBOARD.brake) ? 1 : 0;
     out.steer = (this.any(KEYBOARD.steerLeft) ? 1 : 0) - (this.any(KEYBOARD.steerRight) ? 1 : 0);
     out.drift = this.any(KEYBOARD.drift);
+    out.nos = this.any(KEYBOARD.nos);
   }
 }

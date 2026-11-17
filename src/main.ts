@@ -1,5 +1,9 @@
 import * as THREE from 'three/webgpu';
-import { CAR_SPEC } from './config/handling';
+import { NEON_COLORS, NOS, PAINTS } from './config/cars';
+import { CAR_SPEC, PRESET_A, type HandlingConfig } from './config/handling';
+import { TIER_TRIAL, aiDifficulty } from './config/progression';
+import { PlayerState } from './progression/playerState';
+import { GarageMenu } from './ui/garageMenu';
 import { RACE } from './config/race';
 import { QUALITY, type Quality } from './config/render';
 import { WORLD } from './config/world';
@@ -73,8 +77,21 @@ async function boot(): Promise<void> {
 
   // ——— Voiture ———
   const car = new Vehicle(phys, CAR_SPEC, { x: city.spawn.x, y: REST_HEIGHT + 0.15, z: city.spawn.z, yaw: city.spawn.yaw });
-  const visual = createCarVisual(CAR_SPEC);
+  // ——— Joueur : niveau, argent, garage (sauvegardé dans le navigateur) ———
+  const player = new PlayerState();
+  const lookOf = (): { color: readonly [number, number, number]; bigWing: boolean } => {
+    const owned = player.car;
+    const model = player.modelOf(owned);
+    return { color: owned.paint >= 0 ? (PAINTS[owned.paint]?.color ?? model.color) : model.color, bigWing: model.bigWing };
+  };
+  let visualModel = player.car.model;
+  let visual = createCarVisual(CAR_SPEC, lookOf());
   scene.add(visual.root);
+  const applyNeon = (): void => {
+    const owned = player.car;
+    visual.setUnderglow(owned.neon >= 0 ? (NEON_COLORS[owned.neon]?.color ?? null) : null);
+  };
+  applyNeon();
 
   // ——— Reflets de la carrosserie : on photographie la ville une fois, depuis le point de départ ———
   try {
@@ -130,6 +147,61 @@ async function boot(): Promise<void> {
   const minimap = new Minimap(city);
   const raceHud = new RaceHud();
 
+  let raceKind: 'course' | 'circuit' | 'palier' = 'course';
+  let lastPhase = race.phase;
+  let nosCharge: number = NOS.seconds;
+  const tuned: HandlingConfig = { ...PRESET_A };
+  const refreshProgress = (): void => hud.setProgress(player.level, player.tierName, player.xp, player.xpNeeded, player.money, player.trialPending);
+  refreshProgress();
+
+  // Garage : change de voiture, de peinture ou de néon sans recharger le jeu.
+  const garage = new GarageMenu(player, (kind) => {
+    if (kind !== 'achat') {
+      if (player.car.model !== visualModel) {
+        // Autre modèle : on reconstruit la voiture affichée.
+        scene.remove(visual.root);
+        visual.root.traverse((o) => {
+          const m = o as THREE.Mesh;
+          if (m.isMesh) m.geometry.dispose();
+        });
+        visual = createCarVisual(CAR_SPEC, lookOf());
+        scene.add(visual.root);
+        rig.applyVisibility(visual);
+        visualModel = player.car.model;
+      } else {
+        visual.setPaint(lookOf().color);
+      }
+      applyNeon();
+    }
+    nosCharge = NOS.seconds;
+    refreshProgress();
+  });
+  let garageTime = 0;
+
+  const startRace = (kind: 'course' | 'circuit'): void => {
+    if (garage.open || !(race.phase === 'idle' || race.phase === 'finished')) return;
+    const seed = Math.floor(Math.random() * 1e9);
+    const base = aiDifficulty(player.level);
+    let ok: boolean;
+    if (kind === 'course' && player.trialPending) {
+      // Dernier niveau du palier, barre d'XP pleine : l'épreuve de palier est un circuit plus dur.
+      raceKind = 'palier';
+      ok = race.start(seed, { laps: RACE.circuit.laps, lapLength: RACE.circuit.lapLength, difficulty: base + TIER_TRIAL.extraDifficulty });
+      raceHud.title = 'Épreuve de palier';
+    } else if (kind === 'circuit') {
+      raceKind = 'circuit';
+      ok = race.start(seed, { laps: RACE.circuit.laps, lapLength: RACE.circuit.lapLength, difficulty: base * RACE.circuit.difficulty });
+      raceHud.title = '';
+    } else {
+      raceKind = 'course';
+      ok = race.start(seed, { difficulty: base });
+      raceHud.title = '';
+    }
+    raceHud.summary = null;
+    nosCharge = NOS.seconds;
+    hud.toast(!ok ? 'Impossible de tracer une course' : raceKind === 'palier' ? 'Épreuve de palier : finissez dans les deux premiers !' : raceKind === 'circuit' ? `Circuit : ${RACE.circuit.laps} tours` : 'Course !');
+  };
+
   const respawn = (): void => {
     // En course : on revient sur le tracé, au dernier point atteint.
     const pr = race.player;
@@ -175,19 +247,22 @@ async function boot(): Promise<void> {
         hud.toggleHelp();
         break;
       case 'raceStart':
-        if (race.phase === 'idle' || race.phase === 'finished') {
-          if (race.start(Math.floor(Math.random() * 1e9))) hud.toast('Course !');
-          else hud.toast('Impossible de tracer une course');
-        }
+        startRace('course');
         break;
       case 'circuitStart':
-        if (race.phase === 'idle' || race.phase === 'finished') {
-          if (race.start(Math.floor(Math.random() * 1e9), RACE.circuit)) hud.toast(`Circuit : ${RACE.circuit.laps} tours`);
-          else hud.toast('Impossible de tracer un circuit');
+        startRace('circuit');
+        break;
+      case 'garage':
+        // Pas de garage en pleine course.
+        if (garage.open || race.phase === 'idle' || race.phase === 'finished') {
+          garage.toggle();
+          garageTime = 0;
         }
         break;
       case 'raceQuit':
-        if (race.active) {
+        if (garage.open) {
+          garage.toggle();
+        } else if (race.active) {
           const wasFinished = race.phase === 'finished';
           race.stop();
           hud.toast(wasFinished ? 'Balade libre' : 'Course abandonnée');
@@ -216,7 +291,15 @@ async function boot(): Promise<void> {
   const loop = new FixedLoop({
     fixedUpdate(dt) {
       input.beginStep();
-      car.update(dt, race.playerInput(input.drive), store.current);
+      if (garage.open) return; // jeu en pause dans le garage
+      // NOS : surpuissance tant qu'il en reste ; se recharge seulement en balade libre.
+      const hasNos = player.car.nos;
+      const boosting = hasNos && input.drive.nos && nosCharge > 0 && input.drive.throttle > 0.2 && race.phase !== 'countdown';
+      car.powerBoost = boosting ? NOS.boost : 1;
+      if (boosting) nosCharge = Math.max(0, nosCharge - dt);
+      else if (hasNos && !race.active) nosCharge = Math.min(NOS.seconds, nosCharge + NOS.refill * dt);
+      player.applyTo(store.current, tuned);
+      car.update(dt, race.playerInput(input.drive), tuned);
       race.beforeStep(dt, store.current);
       phys.world.step();
       car.afterStep();
@@ -228,7 +311,27 @@ async function boot(): Promise<void> {
     render(alpha, frameDt) {
       syncCarVisual(visual, car, alpha);
       visual.root.updateMatrixWorld(true);
-      rig.update(frameDt, visual, car);
+      if (garage.open) {
+        // Dans le garage, la caméra tourne lentement autour de la voiture.
+        garageTime += frameDt;
+        const a = car.yaw + 2.4 + garageTime * 0.25;
+        camera.position.set(visual.root.position.x + Math.sin(a) * 6.2, visual.root.position.y + 1.7, visual.root.position.z + Math.cos(a) * 6.2);
+        camera.lookAt(visual.root.position.x, visual.root.position.y + 0.3, visual.root.position.z);
+      } else {
+        rig.update(frameDt, visual, car);
+      }
+      // Fin de course : récompenses.
+      if (race.phase !== lastPhase) {
+        if (race.phase === 'finished') {
+          const me = race.player;
+          const place = me ? race.ranking().indexOf(me) + 1 : 4;
+          raceHud.summary = player.finishRace(place, raceKind !== 'course', raceKind === 'palier');
+          refreshProgress();
+        }
+        lastPhase = race.phase;
+      }
+      visual.nosLevel.value = car.powerBoost > 1 ? 1 : 0;
+      hud.setNos(player.car.nos, nosCharge / NOS.seconds);
       sky.position.copy(camera.position);
       raceVisuals.update(race, alpha);
       raceHud.update(frameDt, race);
@@ -254,7 +357,7 @@ async function boot(): Promise<void> {
   });
 
   // Accès console pour le débogage : window.__jeu
-  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, visual, input, meshes, colliderCount, race };
+  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage };
 
   setBoot('Prêt !');
   // Une première image avant de retirer l'écran de chargement (compile les shaders).

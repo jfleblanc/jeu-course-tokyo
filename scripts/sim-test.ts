@@ -260,6 +260,22 @@ async function cityTest() {
   const shortest = Math.min(...g.edges.map((ed) => ed.length - ed.trimA - ed.trimB));
   console.log(`carrefours: retrait max ${maxTrim.toFixed(1)} m, plus courte chaussée ${shortest.toFixed(1)} m ; murs ${city.walls.length}, parcs ${city.parks.length}, piliers ${city.highway.pillars.length}`);
 }
+// ——— Progression : combien de courses pour atteindre l'épreuve de palier, puis la réussir ———
+{
+  const { PlayerState } = await import('../src/progression/playerState');
+  const p = new PlayerState();
+  let races = 0;
+  while (!p.trialPending && races < 500) { p.finishRace(races % 3 === 0 ? 1 : 2, false, false); races++; }
+  const before = { level: p.level, xp: p.xp, money: p.money };
+  const fail = p.finishRace(3, true, true);
+  const win = p.finishRace(2, true, true);
+  console.log(`\nprogression: épreuve de palier atteinte après ${races} courses (niveau ${before.level}, ¥ ${before.money}) ; épreuve manquée → niveau ${fail.level}, promu=${fail.promoted} ; réussie → niveau ${win.level} (${win.tierName}), promu=${win.promoted}`);
+  p.money = 100000;
+  const bought = p.buyCar((await import('../src/config/cars')).CAR_MODELS[1]!);
+  p.buyUpgrade('engine'); p.buyNos();
+  const value = p.resaleValue(p.car); const m0 = p.money; p.sellCar(p.active);
+  console.log(`garage: achat=${bought}, revente ${value} ¥ (argent ${m0} → ${p.money}), voitures restantes ${p.cars.length}`);
+}
 await cityTest();
 await run('A', PRESET_A);
 await run('B', PRESET_B);

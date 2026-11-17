@@ -12,7 +12,7 @@ Le numéro de version (hash du commit) est affiché en haut à droite.
 |---|---|---|
 | Accélérer / freiner (et reculer) | `W` / `S` | `ZR` / `ZL` (lissées) |
 | Tourner | `A` `D` | stick gauche |
-| Drift | `Espace` | `B` ou `A` |
+| Drift | `Espace` | `B` |
 | Boîte auto ↔ manuelle | `M` | `Y` |
 | Monter / descendre un rapport (manuelle) | `↑` / `↓` | `R` / `L` |
 | Caméra poursuite ↔ intérieure | `C` | `X` |
@@ -21,6 +21,8 @@ Le numéro de version (hash du commit) est affiché en haut à droite.
 | Replacer la voiture | `R` | clic du stick gauche |
 | Lancer une course / l'abandonner | `Entrée` / `Échap` | croix ↑ / croix ← |
 | Lancer un circuit à 3 tours | `T` | |
+| Garage (voitures, améliorations, peinture) | `G` | |
+| NOS (si installé) | `Maj` | `A` |
 | Musique suivante / musique oui-non | `N` / `P` | croix → / croix ↓ |
 | Afficher / masquer l'aide | `H` | |
 
@@ -47,6 +49,7 @@ src/
   vehicle/    simulation (sans Three.js), moteur/boîte, modèle 3D procédural
   world/      graphe de rues courbes → immeubles le long des rues → maillages et collisions
   render/     rendu WebGPU, matériaux TSL, bloom, caméras
+  progression/ niveau, XP, argent, garage, sauvegarde (un seul objet versionné)
   race/       tracés générés, déroulement d'une course, décor de course
   ai/         pilote automatique des adversaires
   audio/      musique générée par code (pistes décrites dans config/music.ts)
@@ -71,8 +74,18 @@ Règle : ne changer que deux ou trois réglages à la fois entre A et B.
 
 ## Phases
 
-Voir le brief du projet. Phase 1 (conduite + une ville) et phase 2 (une course) : faites.
-Ensuite : phase 3 (progression : XP, argent, garage).
+Voir le brief du projet. Phases 1 (conduite + une ville), 2 (courses) et 3 (progression) : faites.
+Ensuite : phase 4 (contenu de course).
+
+## Progression
+
+Chaque course rapporte de l'XP et de l'argent, selon la place et le niveau. Quatre paliers de
+dix niveaux ; au dernier niveau d'un palier, il faut réussir une **épreuve de palier** (circuit
+à trois tours, adversaires renforcés, finir dans les deux premiers). Les adversaires deviennent
+meilleurs avec le niveau. Le garage (`G`) permet d'acheter une deuxième voiture, des
+améliorations (moteur, pneus, carbone, NOS), une peinture et un néon, et de revendre à 50 %.
+Tout est sauvegardé dans le navigateur. Réglages : `src/config/progression.ts` et
+`src/config/cars.ts`.
 
 ## Les courses
 

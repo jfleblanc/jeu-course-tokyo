@@ -42,6 +42,7 @@ export class GamepadSource {
       if (out) {
         out.throttle = out.brake = out.steer = 0;
         out.drift = false;
+        out.nos = false;
       }
       return false;
     }
@@ -75,6 +76,7 @@ export class GamepadSource {
       out.brake = Math.max(b[GAMEPAD.brakeButton]?.value ?? 0, b[GAMEPAD.brakeButton]?.pressed ? 1 : 0);
       out.steer = steer;
       out.drift = GAMEPAD.driftButtons.some((i) => b[i]?.pressed ?? false);
+      out.nos = GAMEPAD.nosButtons.some((i) => b[i]?.pressed ?? false);
     }
     return true;
   }

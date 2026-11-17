@@ -97,6 +97,8 @@ export class Vehicle {
   reversing = false;
   /** Accélération longitudinale lissée (m/s²) pour la caméra. */
   accelLong = 0;
+  /** Multiplicateur de puissance momentané (NOS). 1 = normal. */
+  powerBoost = 1;
 
   private steerInput = 0;
   private driftWasDown = false;
@@ -353,7 +355,7 @@ export class Vehicle {
     // une partie des gaz pour qu'elle se remette en ligne au lieu de tourner en rond.
     const slideExcess = clamp((Math.abs(this.bodySlip) - 0.2) / 0.3, 0, 1) * (1 - this.driftAmount);
     const powerCut = 1 - cfg.tractionControl * slideExcess * (vF > 0 ? 1 : 0);
-    const driveForce = dt_.update(dt, vF, this.throttle * powerCut, cfg.enginePower, cfg.engineBrake, sliding);
+    const driveForce = dt_.update(dt, vF, this.throttle * powerCut, cfg.enginePower * this.powerBoost, cfg.engineBrake, sliding);
     const drivenContacts = (rl.inContact ? 1 : 0) + (rr.inContact ? 1 : 0);
 
     // ——— Pneus ———
