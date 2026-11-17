@@ -53,6 +53,11 @@ export class Minimap {
     this.drawBase();
   }
 
+  /** Plan pré-dessiné et échelle, pour la carte complète (touche Tab). */
+  get layers(): { base: HTMLCanvasElement; route: HTMLCanvasElement; ox: number; oz: number; px: number } {
+    return { base: this.base, route: this.routeLayer, ox: this.ox, oz: this.oz, px: PX };
+  }
+
   private mx(x: number): number {
     return (x - this.ox) * PX;
   }

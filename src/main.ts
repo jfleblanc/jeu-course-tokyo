@@ -21,6 +21,7 @@ import { Sfx } from './audio/sfx';
 import { Traffic, type TrafficActor } from './world/traffic';
 import { TrafficVisuals } from './render/trafficVisuals';
 import { DistrictGates } from './world/districtGates';
+import { FullMap } from './ui/fullMap';
 import { emptyDriveInput } from './input/actions';
 import { bindings } from './input/bindings';
 import { PICKUPS } from './config/race';
@@ -283,6 +284,7 @@ async function boot(): Promise<void> {
   const raceVisuals = new RaceVisuals(scene, mats, city.graph, params.has('barrieres'), tracks, testModel);
   const minimap = new Minimap(city, tracks.map((t) => ({ x: t.start.x, z: t.start.z, circuit: t.circuit })));
   const card = new RaceCard();
+  const fullMap = new FullMap(minimap.layers, city.graph.districts, tracks.map((t) => ({ x: t.start.x, z: t.start.z, circuit: t.circuit, name: t.name })));
   const raceHud = new RaceHud();
 
   let raceKind: 'course' | 'circuit' | 'palier' = 'course';
@@ -442,8 +444,13 @@ async function boot(): Promise<void> {
           garageTime = 0;
         }
         break;
+      case 'map':
+        if (!garage.open) fullMap.toggle();
+        break;
       case 'raceQuit':
-        if (settings.open) {
+        if (fullMap.open) {
+          fullMap.toggle();
+        } else if (settings.open) {
           settings.toggle();
         } else if (garage.open) {
           garage.toggle();
@@ -609,6 +616,7 @@ async function boot(): Promise<void> {
       sky.position.copy(camera.position);
       raceVisuals.update(race, alpha, frameDt);
       trafficVisuals.update(traffic);
+      fullMap.update({ x: car.pos.x, z: car.pos.z, yaw: car.yaw, level: player.level, racing: race.active, allOpen: allDistrictsOpen });
       const blocked = gates.blockedNear(frameDt, car.pos.x, car.pos.z);
       if (blocked) hud.toast(`${blocked.name} : ouverture au niveau ${blocked.unlockLevel}`);
       // Mallettes et téléporteur ramassés

@@ -160,6 +160,8 @@ pour les adversaires. Le chargement est dans `src/vehicle/glbCar.ts`.
   (`src/world/traffic.ts`, réglages dans `src/config/traffic.ts`). Percutées, elles deviennent
   poussables ; les adversaires les contournent. `?trafic=non` les retire, `?trafic=balade` les
   garde hors des courses. Banc d'essai : `sh scripts/run-sim.sh traffic`.
+- **Carte complète** : `Tab` (ou clic du stick droit) affiche toute la ville en plein écran, y
+  compris les quartiers encore fermés, avec le niveau requis (`src/ui/fullMap.ts`).
 - **Code secret** : taper `K` `I` `K` `I` au clavier donne 1 000 000 ¥ (autant de fois qu'on veut).
 - **Paramètres** (`Échap` en balade, `src/ui/settingsMenu.ts`) : volumes, boîte de vitesses,
   qualité d'image, touches du clavier modifiables (`src/input/bindings.ts`), test de manette.

@@ -27,6 +27,7 @@ export const KEY_EVENTS: Record<string, ActionEvent> = {
   Enter: 'raceStart',
   KeyT: 'circuitStart',
   KeyG: 'garage',
+  Tab: 'map',
   Escape: 'raceQuit',
 };
 
@@ -52,6 +53,7 @@ export const GAMEPAD = {
     15: 'musicNext', // croix : droite
     13: 'musicToggle', // croix : bas
     12: 'raceStart', // croix : haut
+    11: 'map', // clic du stick droit
     14: 'raceQuit', // croix : gauche
   } as Record<number, ActionEvent>,
 } as const;

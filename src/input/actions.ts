@@ -40,6 +40,7 @@ export type ActionEvent =
   | 'raceStart'
   | 'circuitStart'
   | 'garage'
+  | 'map'
   | 'raceQuit';
 
 export const emptyDriveInput = (): DriveInput => ({
