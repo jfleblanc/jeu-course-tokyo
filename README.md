@@ -107,6 +107,16 @@ palier. La mini-carte tourne avec la voiture et montre le tracé, les objets et 
 L'option d'adresse `?barrieres` affiche un aperçu des rues transversales barrées (désactivé par
 défaut). Réglages : `src/config/race.ts` (pilotes, banque, objets).
 
+## Quartiers extérieurs
+
+Trois quartiers se greffent au-delà de l'autoroute de ceinture, chacun avec sa sortie sur une
+portion au sol : Baie de Yokohama (niveau 11), Docks de Kawasaki (niveau 21), Collines de Hakone
+(niveau 31). Tant que le niveau n'est pas atteint, la sortie est fermée par une barrière de
+chantier lumineuse ; elle s'ouvre toute seule quand on monte de niveau. `?quartiers=ouverts`
+les ouvre tous (essais). Réglages : `WORLD.districts` dans `src/config/world.ts` ; génération dans
+`src/world/cityGen.ts` (un petit réseau par quartier, fusionné au graphe principal) ; barrières
+dans `src/world/districtGates.ts`. Vérification : `sh scripts/run-sim.sh districts`.
+
 ## Voitures : vrais modèles 3D
 
 Treize voitures, chacune avec son modèle 3D (`public/models/<id>.glb`, crédits et licences dans

@@ -23,6 +23,22 @@ export const WORLD = {
     pillarSpacing: 27,
   },
   /** Autoroute de ceinture : fait le tour de la ville, tantôt au sol, tantôt surélevée. */
+  /**
+   * Quartiers extérieurs, au-delà de l'autoroute de ceinture, ouverts à un certain niveau.
+   * `section` = numéro de la portion au sol de la ceinture où se trouve leur sortie (0 à 3).
+   */
+  districts: {
+    lines: 5,
+    spacing: 72,
+    /** Longueur de la route d'accès entre la ceinture et le quartier (m). */
+    accessLength: 70,
+    accessWidth: 14,
+    list: [
+      { name: 'Baie de Yokohama', unlockLevel: 11, section: 0 },
+      { name: 'Docks de Kawasaki', unlockLevel: 21, section: 2 },
+      { name: 'Collines de Hakone', unlockLevel: 31, section: 1 },
+    ],
+  },
   ringway: {
     /** Distance entre le périphérique et l'axe de l'autoroute (m). */
     offset: 64,

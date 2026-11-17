@@ -20,6 +20,7 @@ import { Tutorial } from './ui/tutorial';
 import { Sfx } from './audio/sfx';
 import { Traffic, type TrafficActor } from './world/traffic';
 import { TrafficVisuals } from './render/trafficVisuals';
+import { DistrictGates } from './world/districtGates';
 import { emptyDriveInput } from './input/actions';
 import { bindings } from './input/bindings';
 import { PICKUPS } from './config/race';
@@ -288,7 +289,15 @@ async function boot(): Promise<void> {
   let lastPhase = race.phase;
   let nosCharge: number = NOS.seconds;
   const tuned: HandlingConfig = { ...PRESET_A };
-  const refreshProgress = (): void => hud.setProgress(player.level, player.tierName, player.xp, player.xpNeeded, player.money, player.trialPending);
+  // Quartiers extérieurs : fermés par une barrière de chantier jusqu'au niveau requis.
+  // ?quartiers=ouverts les ouvre tous (essais).
+  const gates = new DistrictGates(scene, phys, city.graph.districts);
+  const allDistrictsOpen = params.get('quartiers') === 'ouverts';
+  gates.setLevel(player.level, allDistrictsOpen);
+  const refreshProgress = (): void => {
+    hud.setProgress(player.level, player.tierName, player.xp, player.xpNeeded, player.money, player.trialPending);
+    for (const d of gates.setLevel(player.level, allDistrictsOpen)) hud.toast(`Nouveau quartier ouvert : ${d.name} !`);
+  };
   refreshProgress();
 
   // Garage : change de voiture, de peinture ou de néon sans recharger le jeu.
@@ -600,6 +609,8 @@ async function boot(): Promise<void> {
       sky.position.copy(camera.position);
       raceVisuals.update(race, alpha, frameDt);
       trafficVisuals.update(traffic);
+      const blocked = gates.blockedNear(frameDt, car.pos.x, car.pos.z);
+      if (blocked) hud.toast(`${blocked.name} : ouverture au niveau ${blocked.unlockLevel}`);
       // Mallettes et téléporteur ramassés
       while (race.events.length) {
         const ev = race.events.shift();

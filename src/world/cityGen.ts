@@ -1,6 +1,6 @@
 import { Rng } from '../core/rng';
 import { NEON_PALETTE, WORLD, type RoadKind } from '../config/world';
-import { generateStreetGraph, pointAt, pointInPolygon, type GraphEdge, type GraphNode, type PathPoint, type StreetGraph } from './streetGraph';
+import { generateStreetGraph, mergeGraph, pointAt, pointInPolygon, type GraphEdge, type GraphNode, type PathPoint, type StreetGraph } from './streetGraph';
 
 /**
  * Génération du quartier : uniquement des données (aucun rendu, aucune physique).
@@ -417,7 +417,7 @@ function buildHighway(graph: StreetGraph): Highway {
  * deux bretelles en pente douce la relient au périphérique : on y entre et on en sort à pleine vitesse.
  * Son flanc extérieur est un mur plein : c'est la limite visible de la ville.
  */
-function buildRingway(graph: StreetGraph, rng: Rng): { ringway: Highway; connectors: Connector[] } {
+function buildRingway(graph: StreetGraph, rng: Rng): { ringway: Highway; connectors: Connector[]; groundCenters: number[] } {
   const C = WORLD.ringway;
   const poly = graph.ringPolygon;
   const n = poly.length / 2;
@@ -584,13 +584,18 @@ function buildRingway(graph: StreetGraph, rng: Rng): { ringway: Highway; connect
     const sp = samples[i] as HighwaySample;
     if (sp.y > 3.2) pillars.push({ x: sp.x, z: sp.z, top: sp.y, yaw: Math.atan2(sp.tx, sp.tz) });
   }
-  return { ringway: { samples, halfWidth: C.halfWidth, barrierHeight: WORLD.highway.barrierHeight, pillars, closed: true, outerSide, gaps }, connectors };
+  const groundCenters = centers.map((c) => Math.round((c / total) * count) % count);
+  return { ringway: { samples, halfWidth: C.halfWidth, barrierHeight: WORLD.highway.barrierHeight, pillars, closed: true, outerSide, gaps }, connectors, groundCenters };
 }
 
 
 export function generateCity(seed: number = WORLD.seed): CityData {
   const graph = generateStreetGraph(seed);
-  const rng = new Rng(seed ^ 0x9e3779b9);
+  // `rng` change de générateur pendant la construction des quartiers extérieurs : la ville
+  // principale reste exactement la même qu'avant leur ajout.
+  const mainRng = new Rng(seed ^ 0x9e3779b9);
+  const districtRng = new Rng(seed ^ 0x51ed270b);
+  let rng = mainRng;
   const R = graph.radius;
 
   const buildings: Building[] = [];
@@ -604,6 +609,63 @@ export function generateCity(seed: number = WORLD.seed): CityData {
   const walls: Wall[] = [];
   const respawns: SpawnPoint[] = [];
   const p: PathPoint = { x: 0, z: 0, tx: 1, tz: 0 };
+
+  // ——— Autoroute de ceinture, puis quartiers extérieurs greffés au-delà ———
+  const { ringway, connectors, groundCenters } = buildRingway(graph, rng);
+  const mainEdgeCount = graph.edges.length;
+  /** Axes des routes d'accès (pour dégager le décor autour) : x0, z0, x1, z1. */
+  const accessLines: number[][] = [];
+  {
+    const D = WORLD.districts;
+    const half = ((D.lines - 1) / 2) * D.spacing;
+    D.list.forEach((def, k) => {
+      const idx = groundCenters[def.section % groundCenters.length];
+      if (idx === undefined) return;
+      const mid = ringway.samples[idx] as HighwaySample;
+      const nx = -mid.tz * ringway.outerSide, nz = mid.tx * ringway.outerSide;
+      const edgeX = mid.x + nx * ringway.halfWidth, edgeZ = mid.z + nz * ringway.halfWidth;
+      const reach = D.accessLength + half;
+      const cx = edgeX + nx * reach, cz = edgeZ + nz * reach;
+      const sub = generateStreetGraph(seed + 7919 * (k + 1), { district: k, lines: D.lines, spacing: D.spacing, cx, cz, ezx: nx, ezz: nz });
+      // Entrée : le carrefour du quartier le plus proche de la sortie de l'autoroute.
+      let entry = sub.nodes[0] as (typeof sub.nodes)[number], bd = Infinity;
+      for (const node of sub.nodes) {
+        if (node.edges.length === 0) continue;
+        const d = Math.hypot(node.x - edgeX, node.z - edgeZ);
+        if (d < bd) {
+          bd = d;
+          entry = node;
+        }
+      }
+      const offset = mergeGraph(graph, sub);
+      // Route d'accès : de la chaussée de l'autoroute jusqu'au carrefour d'entrée.
+      const ax = mid.x + nx * (ringway.halfWidth - 1.5), az = mid.z + nz * (ringway.halfWidth - 1.5);
+      const pts: number[] = [];
+      const steps = Math.max(6, Math.round(Math.hypot(entry.x - ax, entry.z - az) / 5));
+      for (let q = 0; q <= steps; q++) pts.push(ax + ((entry.x - ax) * q) / steps, az + ((entry.z - az) * q) / steps);
+      connectors.push({ pts, width: D.accessWidth });
+      accessLines.push([ax, az, entry.x, entry.z]);
+      const span = Math.ceil(D.accessWidth / 2 / 3) + 1;
+      ringway.gaps.push({ side: ringway.outerSide, from: idx - span, to: idx + span });
+      let radius = 0;
+      for (let q = 0; q < sub.ringPolygon.length; q += 2) radius = Math.max(radius, Math.hypot((sub.ringPolygon[q] as number) - cx, (sub.ringPolygon[q + 1] as number) - cz));
+      graph.districts.push({
+        id: k, name: def.name, unlockLevel: def.unlockLevel, cx, cz, radius: radius + 60, polygon: sub.ringPolygon, entryNode: offset + sub.nodes.indexOf(entry),
+        gate: { x: edgeX + nx * 20, z: edgeZ + nz * 20, yaw: Math.atan2(nx, nz), width: D.accessWidth },
+      });
+    });
+  }
+  /** Distance à la route d'accès la plus proche (m). */
+  const nearAccess = (x: number, z: number): number => {
+    let best = Infinity;
+    for (const [x0, z0, x1, z1] of accessLines as [number, number, number, number][]) {
+      const dx = x1 - x0, dz = z1 - z0;
+      const t = Math.max(0, Math.min(1, ((x - x0) * dx + (z - z0) * dz) / (dx * dx + dz * dz)));
+      best = Math.min(best, Math.hypot(x - x0 - dx * t, z - z0 - dz * t));
+    }
+    return best;
+  };
+  const inDistrict = (x: number, z: number, margin: number): boolean => graph.districts.some((d) => Math.hypot(x - d.cx, z - d.cz) < d.radius + margin);
 
   // ——— Zones à garder libres : chaussées + trottoirs + carrefours ———
   const roadHash = new SpatialHash<RoadSample>(40);
@@ -620,7 +682,6 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     roadHash.insert(n.x - r, n.z - r, n.x + r, n.z + r, { x: n.x, z: n.z, r, slack: 0.4, kind: 'street' });
   }
   // Autoroute de ceinture et bretelles : rien ne se construit dessus ni dessous.
-  const { ringway, connectors } = buildRingway(graph, rng);
   for (let i = 0; i < ringway.samples.length; i += 2) {
     const sp = ringway.samples[i] as HighwaySample;
     const r = ringway.halfWidth + 3;
@@ -708,7 +769,8 @@ export function generateCity(seed: number = WORLD.seed): CityData {
   };
 
   // ——— Immeubles le long des rues, des plus grands axes aux plus petits ———
-  const ordered = [...graph.edges].sort((a, b) => KIND_RANK[b.kind] - KIND_RANK[a.kind]);
+  const buildAlong = (list: GraphEdge[]): void => {
+  const ordered = [...list].sort((a, b) => KIND_RANK[b.kind] - KIND_RANK[a.kind]);
   // Deux passes : d'abord de grands immeubles, puis de plus petits pour boucher les trous.
   for (const pass of [0, 1])
   for (const e of ordered) {
@@ -717,7 +779,10 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     for (const side of [1, -1]) {
       // Côté extérieur du périphérique : immeubles plus profonds et plus hauts (ils ferment la ville).
       pointAt(e, e.length / 2, p);
-      const outer = e.onRing && (p.x + p.tz * side) ** 2 + (p.z - p.tx * side) ** 2 > p.x ** 2 + p.z ** 2;
+      // (pour un quartier extérieur, « extérieur » se juge depuis son propre centre)
+      const dc = e.district >= 0 ? graph.districts[e.district] : undefined;
+      const ocx = dc ? dc.cx : 0, ocz = dc ? dc.cz : 0;
+      const outer = e.onRing && (p.x + p.tz * side - ocx) ** 2 + (p.z - p.tx * side - ocz) ** 2 > (p.x - ocx) ** 2 + (p.z - ocz) ** 2;
       let s = e.trimA + 1;
       const end = e.length - e.trimB - 1;
       while (s < end - 8) {
@@ -758,6 +823,8 @@ export function generateCity(seed: number = WORLD.seed): CityData {
       }
     }
   }
+  };
+  buildAlong(graph.edges.slice(0, mainEdgeCount));
 
   // ——— Cœurs d'îlots : on remplit les vides derrière les façades ———
   const B: Rect = { x0: Infinity, z0: Infinity, x1: -Infinity, z1: -Infinity };
@@ -793,7 +860,7 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     b.tiers = [{ w: fp.w, d: fp.d, y0: 0, y1: b.height }];
     b.style = 2;
     b.backdrop = true;
-    buildings.push(b);
+    if (!inDistrict(fp.cx, fp.cz, 40) && nearAccess(fp.cx, fp.cz) > 50) buildings.push(b);
   }
 
   // ——— Limite de la ville : mur invisible le long du flanc extérieur de l'autoroute de ceinture ———
@@ -807,7 +874,8 @@ export function generateCity(seed: number = WORLD.seed): CityData {
       const axx = a.x - a.tz * off, azz = a.z + a.tx * off;
       const bxx = b.x - b.tz * off, bzz = b.z + b.tx * off;
       const len = Math.hypot(bxx - axx, bzz - azz);
-      walls.push({ x: (axx + bxx) / 2, z: (azz + bzz) / 2, yaw: Math.atan2(bxx - axx, bzz - azz), halfLength: len / 2 + 0.5 });
+      // (pas de mur devant la sortie vers un quartier extérieur)
+      if (nearAccess((axx + bxx) / 2, (azz + bzz) / 2) > WORLD.districts.accessWidth / 2 + 2.5) walls.push({ x: (axx + bxx) / 2, z: (azz + bzz) / 2, yaw: Math.atan2(bxx - axx, bzz - azz), halfLength: len / 2 + 0.5 });
     }
     // Immeubles de décor juste derrière le mur (sans collision : on ne peut pas les atteindre).
     let i = 0;
@@ -819,14 +887,58 @@ export function generateCity(seed: number = WORLD.seed): CityData {
       const fp: Obb = { cx: sp.x + nx * dist, cz: sp.z + nz * dist, w: wB, d: dB, yaw: Math.atan2(-nx, -nz) };
       const bd = makeBuilding(rng, fp, [{ cx: sp.x + nx * (ringway.halfWidth + 7), cz: sp.z + nz * (ringway.halfWidth + 7), nx: -nx, nz: -nz, length: wB, kind: 'avenue' }], 1, 1.7);
       bd.backdrop = true;
-      buildings.push(bd);
-      addSigns(rng, bd, signs);
+      const clear = nearAccess(fp.cx, fp.cz) < 34 || inDistrict(fp.cx, fp.cz, -20);
+      if (!clear) buildings.push(bd);
+      // (les enseignes sont tirées quand même : la ville principale reste identique)
+      const signsHere: Sign[] = clear ? [] : signs;
+      addSigns(rng, bd, signsHere);
       i += Math.max(4, Math.round((wB + rng.range(1, 6)) / 3));
     }
   }
 
+  // ——— Quartiers extérieurs : immeubles le long des rues, cœurs d'îlots, limite ———
+  rng = districtRng;
+  buildAlong(graph.edges.slice(mainEdgeCount));
+  for (const d of graph.districts) {
+    const tries = Math.floor((d.radius * d.radius * 4) / 300);
+    for (let k = 0; k < tries; k++) {
+      const x = rng.range(d.cx - d.radius, d.cx + d.radius), z = rng.range(d.cz - d.radius, d.cz + d.radius);
+      if (!pointInPolygon(d.polygon, x, z)) continue;
+      const fp: Obb = { cx: x, cz: z, w: rng.range(11, 22), d: rng.range(11, 22), yaw: rng.range(0, Math.PI) };
+      occupied.some(x - 20, z - 20, x + 20, z + 20, (q) => {
+        fp.yaw = q.yaw;
+        return true;
+      });
+      if (hitsRoad(fp) || hitsBuilding(fp)) continue;
+      finishBuilding(fp, null, 1.1);
+    }
+    // Limite : mur invisible autour du quartier, derrière ses immeubles, ouvert devant la route d'accès.
+    const poly = d.polygon;
+    const m = poly.length / 2;
+    const out = 46;
+    const ring: [number, number][] = [];
+    for (let k = 0; k < m; k++) {
+      const x = poly[k * 2] as number, z = poly[k * 2 + 1] as number;
+      const l = Math.hypot(x - d.cx, z - d.cz) || 1;
+      ring.push([x + ((x - d.cx) / l) * out, z + ((z - d.cz) / l) * out]);
+    }
+    for (let k = 0; k < m; k++) {
+      const [ax, az] = ring[k] as [number, number], [bx, bz] = ring[(k + 1) % m] as [number, number];
+      const len = Math.hypot(bx - ax, bz - az);
+      const parts = Math.max(1, Math.round(len / 12));
+      for (let q = 0; q < parts; q++) {
+        const x0 = ax + ((bx - ax) * q) / parts, z0 = az + ((bz - az) * q) / parts;
+        const x1 = ax + ((bx - ax) * (q + 1)) / parts, z1 = az + ((bz - az) * (q + 1)) / parts;
+        if (nearAccess((x0 + x1) / 2, (z0 + z1) / 2) < 16) continue;
+        walls.push({ x: (x0 + x1) / 2, z: (z0 + z1) / 2, yaw: Math.atan2(x1 - x0, z1 - z0), halfLength: len / parts / 2 + 0.5 });
+      }
+    }
+  }
+  rng = mainRng;
+
   // ——— Lampadaires, flaques de lumière, points de réapparition ———
   for (const e of graph.edges) {
+    rng = e.district >= 0 ? districtRng : mainRng;
     const s0 = e.trimA, s1 = e.length - e.trimB;
     const usable = s1 - s0;
     pointAt(e, (s0 + s1) / 2, p);
@@ -878,13 +990,14 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     });
   }
 
+  rng = mainRng;
   const highway = buildHighway(graph);
 
   // ——— Départ : sur une avenue large, près du centre, loin d'un carrefour ———
   let spawn: SpawnPoint = respawns[0] ?? { x: 0, z: 0, yaw: 0 };
   let best = Infinity;
   graph.edges.forEach((e, k) => {
-    if (e.kind !== 'avenue' || e.onRing || e.length - e.trimA - e.trimB < 50) return;
+    if (e.district >= 0 || e.kind !== 'avenue' || e.onRing || e.length - e.trimA - e.trimB < 50) return;
     const r = respawns[k] as SpawnPoint;
     const score = Math.abs(Math.hypot(r.x, r.z) - R * 0.35);
     if (score < best) {
@@ -899,6 +1012,12 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     B.x1 = Math.max(B.x1, sp.x);
     B.z0 = Math.min(B.z0, sp.z);
     B.z1 = Math.max(B.z1, sp.z);
+  }
+  for (const d of graph.districts) {
+    B.x0 = Math.min(B.x0, d.cx - d.radius);
+    B.x1 = Math.max(B.x1, d.cx + d.radius);
+    B.z0 = Math.min(B.z0, d.cz - d.radius);
+    B.z1 = Math.max(B.z1, d.cz + d.radius);
   }
   const margin = 60;
   const bounds: Rect = { x0: B.x0 - margin, x1: B.x1 + margin, z0: B.z0 - margin, z1: B.z1 + margin };
