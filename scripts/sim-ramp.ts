@@ -42,3 +42,32 @@ if (br) for (const v of [150, 220, 290]) { run('pont de Hakone, vers la campagne
 // Ceinture : chaque descente (de surélevé vers le sol)
 const rs = city.ringway.samples as S[]; let done = 0;
 for (let i = 2; i < rs.length - 60 && done < 4; i++) if (rs[i]!.y > 6 && rs[i + 1]!.y < rs[i]!.y - 0.01 && rs[i - 1]!.y >= rs[i]!.y - 0.001) { let j = i; while (j < rs.length - 1 && rs[j]!.y > 0.01) j++; run(`ceinture, descente n° ${++done}`, rs, i - 8, Math.min(rs.length - 1, j + 14), 290); i = j; }
+
+// ——— Frôler une glissière : la voiture doit glisser le long, sans à-coup ———
+const scrape = (name: string, s: S[], i0: number, kmh: number, side: number, closed: boolean, half: number) => {
+  const a = s[i0]!; const v0 = kmh / 3.6;
+  const car = new Vehicle(phys, CAR_SPEC, { x: a.x, y: a.y + 0.62, z: a.z, yaw: Math.atan2(a.tx, a.tz) }); car.setTraits(m.traits);
+  car.body.setLinvel({ x: a.tx * v0, y: 0, z: a.tz * v0 }, true);
+  let k = i0, worst = 0, prev = kmh, vMin = 1e9, touched = 0, maxTilt = 0; const N = s.length;
+  for (let i = 0; i < 60 * 14; i++) {
+    for (let g = 0; g < 6; g++) { const q = s[(k + 1) % N]!; if ((car.pos.x - q.x) * q.tx + (car.pos.z - q.z) * q.tz > 0 && (closed || k < N - 2)) k = (k + 1) % N; }
+    const p = s[k]!;
+    const lat = (car.pos.x - p.x) * -p.tz + (car.pos.z - p.z) * p.tx;
+    // on vise un point au-delà de la glissière : la voiture s'y appuie en permanence
+    const t = s[closed ? (k + 6) % N : Math.min(N - 1, k + 6)]!;
+    const aimX = t.x - t.tz * side * (half + 1.5), aimZ = t.z + t.tx * side * (half + 1.5);
+    let d = Math.atan2(aimX - car.pos.x, aimZ - car.pos.z) - car.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
+    input.steer = Math.max(-0.5, Math.min(0.5, d * 2)); input.throttle = car.speed * 3.6 < kmh ? 1 : 0.3;
+    car.update(FIXED_DT, input, cfg); phys.world.step(); car.afterStep();
+    const v = car.speed * 3.6; const q = car.rot;
+    if (Math.abs(lat) > half - 1.2) touched++;
+    if (i > 30 && prev - v > worst && process.env.TRACE) console.log(`    t=${(i / 60).toFixed(2)} éch ${k} lat ${lat.toFixed(2)} y-route ${(car.pos.y - p.y).toFixed(2)} v ${prev.toFixed(0)}→${v.toFixed(0)} cap ${((Math.atan2(Math.sin(car.yaw - Math.atan2(p.tx, p.tz)), Math.cos(car.yaw - Math.atan2(p.tx, p.tz)))) * 57.3).toFixed(0)}° roues ${car.wheels.map((w) => (w.inContact ? w.compression.toFixed(2) : '--')).join('/')}`);
+    if (i > 30) { worst = Math.max(worst, prev - v); vMin = Math.min(vMin, v); maxTilt = Math.max(maxTilt, Math.acos(Math.min(1, 1 - 2 * (q.x * q.x + q.z * q.z))) * 57.3); }
+    prev = v;
+  }
+  console.log(`${name} à ${kmh} km/h, appuyée ${side > 0 ? 'à gauche' : 'à droite'}: contact ${(touched / 60).toFixed(0)} s ; pire perte en un pas ${worst.toFixed(1)} km/h ; v mini ${vMin.toFixed(0)} km/h ; inclinaison max ${maxTilt.toFixed(0)}°`);
+  phys.world.removeRigidBody(car.body);
+};
+for (const v of [120, 200]) for (const side of [1, -1]) scrape('autoroute centrale', hs, 40, v, side, false, city.highway.halfWidth);
+for (const v of [150, 250]) for (const side of [1, -1]) scrape('ceinture', rs, 30, v, side, true, city.ringway.halfWidth);
+if (city.mountain) { const cs = city.mountain.road.samples as S[]; for (const side of [1, -1]) scrape('col', cs, 60, 90, side, false, city.mountain.road.halfWidth); }

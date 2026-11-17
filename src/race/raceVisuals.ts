@@ -85,6 +85,7 @@ export class RaceVisuals {
 
   /** Demi-largeur de la chaussée la plus proche d'un point (pour dimensionner un portique). */
   private halfWidthAt(route: Route, p: RoutePoint): number {
+    if (route.halfWidth) return route.halfWidth;
     let best = 9, bd = Infinity;
     for (const eid of route.edges) {
       const e = this.graph.edges[eid];
@@ -119,18 +120,19 @@ export class RaceVisuals {
       const yaw = Math.atan2(p.tx, p.tz);
       const color = last ? MAGENTA : CYAN;
       const h = last ? 7 : 6;
+      const py = p.y ?? 0;
       for (const side of [1, -1]) {
         const x = p.x + p.tz * side * half, z = p.z - p.tx * side * half;
-        solid.box(x, h / 2, z, 0.5, h, 0.5, yaw, DARK);
-        glow.box(x, h / 2, z, 0.62, h - 0.6, 0.12, yaw, color, [1, 3, 1, 1.4], false, false);
+        solid.box(x, py + h / 2, z, 0.5, h, 0.5, yaw, DARK);
+        glow.box(x, py + h / 2, z, 0.62, h - 0.6, 0.12, yaw, color, [1, 3, 1, 1.4], false, false);
       }
-      glow.box(p.x, h + 0.25, p.z, half * 2 + 0.5, last ? 1.1 : 0.5, 0.3, yaw, color, [1, last ? 1 : 3, half * 2, last ? 1.1 : 1.6], true, true);
+      glow.box(p.x, py + h + 0.25, p.z, half * 2 + 0.5, last ? 1.1 : 0.5, 0.3, yaw, color, [1, last ? 1 : 3, half * 2, last ? 1.1 : 1.6], true, true);
     });
 
     // — Ligne de départ —
     const st = pts[Math.round(34 / 3)] as RoutePoint;
     const sh = Math.min(15, this.halfWidthAt(route, st));
-    glow.box(st.x, 0.06, st.z, sh * 2, 0.02, 0.7, Math.atan2(st.tx, st.tz), [1, 1, 1], [1, 3, 1, 0.9], true, false);
+    glow.box(st.x, (st.y ?? 0) + 0.06, st.z, sh * 2, 0.02, 0.7, Math.atan2(st.tx, st.tz), [1, 1, 1], [1, 3, 1, 0.9], true, false);
 
     // — Panneaux à chevrons : placés dans l'axe d'arrivée, juste après le virage, face au pilote —
     for (const t of route.turns) {
@@ -139,6 +141,8 @@ export class RaceVisuals {
       const apex = pts[t.index] as RoutePoint;
       const ix = before.tx, iz = before.tz; // direction d'arrivée
       const cx = apex.x + ix * 13, cz = apex.z + iz * 13;
+      // (route en altitude : le panneau est posé à la hauteur du virage, relevé si la route monte)
+      const ay = Math.max(apex.y ?? 0, (pts[Math.min(pts.length - 1, t.index + 4)] as RoutePoint).y ?? 0);
       // Gauche du pilote = (iz, −ix) ; les chevrons pointent du côté du virage.
       const dir = t.angle > 0 ? 1 : -1;
       const ux = iz * dir, uz = -ix * dir;
@@ -146,15 +150,15 @@ export class RaceVisuals {
       const count = sharp ? 5 : 4;
       const w = count * 1.5 + 0.6;
       const yaw = Math.atan2(ix, iz);
-      solid.box(cx, 1.55, cz, w, 1.7, 0.18, yaw, DARK, [0, 0, 0, 0], true, true);
-      for (const end of [-1, 1]) solid.box(cx + ux * end * (w / 2 - 0.2), 0.4, cz + uz * end * (w / 2 - 0.2), 0.14, 0.8, 0.14, yaw, DARK);
+      solid.box(cx, ay + 1.55, cz, w, 1.7, 0.18, yaw, DARK, [0, 0, 0, 0], true, true);
+      for (const end of [-1, 1]) solid.box(cx + ux * end * (w / 2 - 0.2), ay + 0.4, cz + uz * end * (w / 2 - 0.2), 0.14, 0.8, 0.14, yaw, DARK);
       const n: Vec3 = [-ix, 0, -iz];
       const fx = -ix * 0.11, fz = -iz * 0.11; // légèrement devant le panneau
       const color = sharp ? MAGENTA : AMBER;
       for (let c = 0; c < count; c++) {
         const u0 = (c - (count - 1) / 2) * 1.5;
         // Un chevron « > » : deux barres obliques qui se rejoignent à la pointe.
-        const P = (u: number, v: number): Vec3 => [cx + ux * u + fx, 1.55 + v, cz + uz * u + fz];
+        const P = (u: number, v: number): Vec3 => [cx + ux * u + fx, ay + 1.55 + v, cz + uz * u + fz];
         for (const sgn of [1, -1]) {
           glow.quad(P(u0 - 0.5, sgn * 0.62), P(u0 - 0.12, sgn * 0.62), P(u0 + 0.52, 0), P(u0 + 0.14, 0), n, 0, 0, 1, 1, color, [1, 3, 1, 1.5]);
         }
@@ -209,7 +213,7 @@ export class RaceVisuals {
     // — Objets à ramasser —
     this.pickupMeshes = race.pickups.map((pk) => {
       const m = pk.kind === 'cash' ? new THREE.Mesh(this.cashGeo, this.cashMat) : new THREE.Mesh(this.teleGeo, this.teleMat);
-      m.position.set(pk.x, pk.kind === 'cash' ? 1.0 : 1.5, pk.z);
+      m.position.set(pk.x, (pk.y ?? 0) + (pk.kind === 'cash' ? 1.0 : 1.5), pk.z);
       this.pickupGroup.add(m);
       return m;
     });
@@ -271,12 +275,12 @@ export class RaceVisuals {
       if (!m) return;
       m.visible = !pk.taken;
       m.rotation.y = this.spin * (pk.kind === 'cash' ? 1.6 : 2.4) + k;
-      m.position.y = (pk.kind === 'cash' ? 1.0 : 1.5) + Math.sin(this.spin * 2.2 + k) * 0.12;
+      m.position.y = (pk.y ?? 0) + (pk.kind === 'cash' ? 1.0 : 1.5) + Math.sin(this.spin * 2.2 + k) * 0.12;
     });
     const player = race.player;
     if (player && player.nextCheckpoint < route.checkpoints.length) {
       const p = route.points[route.checkpoints[player.nextCheckpoint] as number] as RoutePoint;
-      this.beacon.position.set(p.x, 7, p.z);
+      this.beacon.position.set(p.x, (p.y ?? 0) + 7, p.z);
       this.beacon.visible = true;
     } else {
       this.beacon.visible = false;

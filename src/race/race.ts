@@ -40,6 +40,8 @@ export interface Racer {
 export interface Pickup {
   kind: 'cash' | 'teleport';
   x: number;
+  /** Altitude de la chaussée à cet endroit (m). */
+  y: number;
   z: number;
   /** Indice du point du tracé le plus proche. */
   index: number;
@@ -121,15 +123,15 @@ export class Race {
       { s: RACE.startLine - 8 - RACE.gridRowSpacing, lane: -RACE.gridLaneOffset },
       { s: RACE.startLine - 8 - RACE.gridRowSpacing, lane: RACE.gridLaneOffset },
     ];
-    const place = (slot: { s: number; lane: number }): { x: number; z: number; yaw: number; index: number } => {
+    const place = (slot: { s: number; lane: number }): { x: number; y: number; z: number; yaw: number; index: number } => {
       const p = at(slot.s);
-      return { x: p.x + p.tz * slot.lane, z: p.z - p.tx * slot.lane, yaw: Math.atan2(p.tx, p.tz), index: Math.round(slot.s / 3) };
+      return { x: p.x + p.tz * slot.lane, y: p.y ?? 0, z: p.z - p.tx * slot.lane, yaw: Math.atan2(p.tx, p.tz), index: Math.round(slot.s / 3) };
     };
     this.racers = [];
     drivers.slice(0, 3).forEach((level, k) => {
       const slot = slots[k] as (typeof slots)[number];
       const g = place(slot);
-      const car = new Vehicle(this.phys, this.spec, { x: g.x, y: REST_HEIGHT + 0.15, z: g.z, yaw: g.yaw });
+      const car = new Vehicle(this.phys, this.spec, { x: g.x, y: g.y + REST_HEIGHT + 0.15, z: g.z, yaw: g.yaw });
       // Chaque pilote a la physique de sa voiture (masse, roues motrices, empattement).
       const model = CAR_MODELS.find((m) => m.glb === level.glb);
       // Adversaires allégés : le joueur les pousse plus facilement qu'ils ne le poussent.
@@ -137,7 +139,7 @@ export class Race {
       this.racers.push(this.makeRacer(level.name, false, car, level, g.index, slot.lane * 0.35));
     });
     const pg = place(slots[3] as (typeof slots)[number]);
-    this.playerCar.teleport(pg.x, REST_HEIGHT + 0.15, pg.z, pg.yaw);
+    this.playerCar.teleport(pg.x, pg.y + REST_HEIGHT + 0.15, pg.z, pg.yaw);
     this.racers.push(this.makeRacer('Vous', true, this.playerCar, null, pg.index, 0));
     // — Objets à ramasser : mallettes régulières, téléporteur rare (toujours les mêmes pour un tracé) —
     const rng = new Rng(route.seed ^ 0x2545f491);
@@ -148,12 +150,12 @@ export class Race {
     for (let s = RACE.startLine + PICKUPS.cashSpacing * 0.6; s < lapLen - 60; s += PICKUPS.cashSpacing) {
       const p = at(s + rng.range(-40, 40));
       const side = rng.range(-3, 3);
-      this.pickups.push({ kind: 'cash', x: p.x + p.tz * side, z: p.z - p.tx * side, index: Math.round(p.s / 3), taken: false });
+      this.pickups.push({ kind: 'cash', x: p.x + p.tz * side, y: p.y ?? 0, z: p.z - p.tx * side, index: Math.round(p.s / 3), taken: false });
     }
     if (rng.chance(PICKUPS.teleporterChance)) {
       const p = at(lapLen * rng.range(0.35, 0.6));
       const side = rng.range(-2.5, 2.5);
-      this.pickups.push({ kind: 'teleport', x: p.x + p.tz * side, z: p.z - p.tx * side, index: Math.round(p.s / 3), taken: false });
+      this.pickups.push({ kind: 'teleport', x: p.x + p.tz * side, y: p.y ?? 0, z: p.z - p.tx * side, index: Math.round(p.s / 3), taken: false });
     }
     this.phase = 'countdown';
     this.countdown = RACE.countdownSeconds + 0.8; // petit temps mort pour regarder la grille
@@ -278,7 +280,7 @@ export class Race {
         if (r.stuckTime > 2.2) {
           if ((globalThis as { TRACE_RACE?: boolean }).TRACE_RACE) console.log(`   replacement ${r.name} t=${this.time.toFixed(1)} index=${r.index} perdu=${lost} dist=${Math.sqrt(bestD).toFixed(1)} v=${r.car.speed.toFixed(1)} y=${r.car.pos.y.toFixed(2)} courbure=${(pts[r.index] as RoutePoint).curvature.toFixed(3)}`);
           const q = pts[Math.min(pts.length - 1, r.index + 4)] as RoutePoint;
-          r.car.teleport(q.x, REST_HEIGHT + 0.2, q.z, Math.atan2(q.tx, q.tz));
+          r.car.teleport(q.x, (q.y ?? 0) + REST_HEIGHT + 0.2, q.z, Math.atan2(q.tx, q.tz));
           r.stuckTime = 0;
           r.resets++;
         }
@@ -325,7 +327,7 @@ export class Race {
     const q = pts[idx] as RoutePoint;
     const gained = q.s - player.progress;
     if (gained <= 1) return 0;
-    player.car.teleport(q.x, REST_HEIGHT + 0.15, q.z, Math.atan2(q.tx, q.tz), Math.max(8, player.car.speed));
+    player.car.teleport(q.x, (q.y ?? 0) + REST_HEIGHT + 0.15, q.z, Math.atan2(q.tx, q.tz), Math.max(8, player.car.speed));
     player.index = idx;
     player.progress = q.s;
     return gained;

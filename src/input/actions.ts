@@ -11,6 +11,8 @@ export interface DriveInput {
   steer: number;
   drift: boolean;
   nos: boolean;
+  /** Vue arrière tenue. */
+  lookBack: boolean;
   /** Vrai pendant un seul pas de simulation. */
   shiftUp: boolean;
   shiftDown: boolean;
@@ -23,6 +25,7 @@ export interface RawInput {
   steer: number;
   drift: boolean;
   nos: boolean;
+  lookBack: boolean;
 }
 
 /** Actions ponctuelles (un appui = un événement). */
@@ -49,6 +52,7 @@ export const emptyDriveInput = (): DriveInput => ({
   steer: 0,
   drift: false,
   nos: false,
+  lookBack: false,
   shiftUp: false,
   shiftDown: false,
 });

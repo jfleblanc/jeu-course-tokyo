@@ -297,7 +297,7 @@ async function boot(): Promise<void> {
 
   // ——— Course ———
   const race = new Race(phys, CAR_SPEC, car);
-  const tracks = buildTrackBank(city.graph);
+  const tracks = buildTrackBank(city.graph, city.mountain?.road);
   // ?barrieres : aperçu des rues transversales barrées (désactivé par défaut).
   const raceVisuals = new RaceVisuals(scene, mats, city.graph, params.has('barrieres'), tracks, testModel);
   const minimap = new Minimap(city, tracks.map((t) => ({ x: t.start.x, z: t.start.z, circuit: t.circuit })));
@@ -363,9 +363,24 @@ async function boot(): Promise<void> {
     card.show(track, drivers, kind === 'palier' ? { xp: 0, money: reward.money } : reward, difficulty, title, manual);
   };
 
+  /** Secteur où se trouve le joueur : −1 = ville principale, sinon le quartier. */
+  const sectorHere = (): number => {
+    for (const d of city.graph.districts) {
+      const out = (car.pos.x - d.cx) * d.outX + (car.pos.z - d.cz) * d.outZ;
+      // (la montagne, au-delà du village, compte pour les collines)
+      if (Math.hypot(car.pos.x - d.cx, car.pos.z - d.cz) < d.radius + 40 || (d.theme === 'collines' && out > d.radius * 0.6)) return d.id;
+    }
+    return -1;
+  };
+  const sectorOpen = (id: number): boolean => id < 0 || allDistrictsOpen || player.level >= (city.graph.districts[id]?.unlockLevel ?? 0);
+  /** Un tracé au hasard : dans le secteur où l'on se trouve s'il en a, sinon parmi les secteurs débloqués. */
   const pickTrack = (circuit: boolean): Track | null => {
-    const list = tracks.filter((t) => t.circuit === circuit);
-    const fallback = list.length ? list : tracks;
+    const open = tracks.filter((t) => sectorOpen(t.district));
+    const here = sectorHere();
+    const local = open.filter((t) => t.district === here);
+    const pool = local.length ? local : open;
+    const list = pool.filter((t) => t.circuit === circuit);
+    const fallback = list.length ? list : pool;
     return fallback[Math.floor(Math.random() * fallback.length)] ?? null;
   };
 
@@ -404,20 +419,20 @@ async function boot(): Promise<void> {
     if (race.active && race.route && pr) {
       const q = race.route.points[Math.max(0, pr.index - 2)];
       if (q) {
-        car.teleport(q.x, REST_HEIGHT + 0.2, q.z, Math.atan2(q.tx, q.tz));
+        car.teleport(q.x, (q.y ?? 0) + REST_HEIGHT + 0.2, q.z, Math.atan2(q.tx, q.tz));
         return;
       }
     }
     let best = city.respawns[0] ?? city.spawn;
     let bestD = Infinity;
     for (const r of city.respawns) {
-      const d = (r.x - car.pos.x) ** 2 + (r.z - car.pos.z) ** 2;
+      const d = (r.x - car.pos.x) ** 2 + (r.z - car.pos.z) ** 2 + ((r.y ?? 0) - car.pos.y) ** 2;
       if (d < bestD) {
         bestD = d;
         best = r;
       }
     }
-    car.teleport(best.x, REST_HEIGHT + 0.2, best.z, best.yaw);
+    car.teleport(best.x, (best.y ?? 0) + REST_HEIGHT + 0.2, best.z, best.yaw);
   };
 
   input.on((e) => {
@@ -580,7 +595,7 @@ async function boot(): Promise<void> {
         camera.position.set(visual.root.position.x + Math.sin(a) * 6.8, visual.root.position.y + 1.25 + Math.sin(titleTime * 0.2) * 0.25, visual.root.position.z + Math.cos(a) * 6.8);
         camera.lookAt(visual.root.position.x, visual.root.position.y + 0.25, visual.root.position.z);
       } else {
-        rig.update(frameDt, visual, car);
+        rig.update(frameDt, visual, car, input.drive.lookBack);
         if (titlePhase === 'glisse') {
           // Départ : la caméra glisse de l'écran titre jusqu'à sa place derrière la voiture.
           glide = Math.min(1, glide + frameDt / 2.4);

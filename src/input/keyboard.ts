@@ -53,5 +53,6 @@ export class KeyboardSource {
     out.steer = (this.any(bindings.codes('steerLeft')) ? 1 : 0) - (this.any(bindings.codes('steerRight')) ? 1 : 0);
     out.drift = this.any(bindings.codes('drift'));
     out.nos = this.any(bindings.codes('nos'));
+    out.lookBack = this.any(bindings.codes('lookBack'));
   }
 }

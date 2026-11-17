@@ -6,6 +6,10 @@ export type Rapier = typeof RAPIER;
 /** Groupes de collision : (appartenance << 16) | filtre. */
 export const GROUP_WORLD = (0x0001 << 16) | 0xffff;
 export const GROUP_CAR = (0x0002 << 16) | 0xffff;
+/** Glissières : les caisses les touchent, mais les rayons des roues passent au travers (voir WHEEL_RAY_GROUPS). */
+export const GROUP_BARRIER = (0x0004 << 16) | 0xffff;
+/** Filtre des rayons de suspension : tout sauf les glissières (sinon une roue large « monte » dessus). */
+export const WHEEL_RAY_GROUPS = (0xffff << 16) | (0xffff & ~0x0004);
 
 export interface PhysicsWorld {
   rapier: Rapier;

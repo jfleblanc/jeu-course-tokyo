@@ -47,7 +47,8 @@ export class CameraRig {
     visual.interior.visible = inside;
   }
 
-  update(dt: number, visual: CarVisual, car: Vehicle): void {
+  /** `lookBack` : vue arrière tant que c'est vrai (la vue normale reprend aussitôt après). */
+  update(dt: number, visual: CarVisual, car: Vehicle, lookBack = false): void {
     const root = visual.root;
     const speed = car.speed;
     const speedT = clamp(speed / 70, 0, 1);
@@ -66,7 +67,8 @@ export class CameraRig {
       this.camera.position.copy(_eye);
       // La caméra regarde vers −Z, la voiture avance vers +Z : demi-tour autour de Y.
       _q.setFromAxisAngle(WORLD_UP, Math.PI);
-      this.camera.quaternion.copy(this.interiorQuat).multiply(_q);
+      this.camera.quaternion.copy(this.interiorQuat);
+      if (!lookBack) this.camera.quaternion.multiply(_q);
       this.fov = damp(this.fov, 72 + speedT * 10, 4, dt);
     } else {
       _fwd.set(0, 0, 1).applyQuaternion(root.quaternion);
@@ -107,6 +109,13 @@ export class CameraRig {
       this.camera.position.x += Math.sin(this.shakeT * 1.7) * shake;
       this.camera.position.y += Math.sin(this.shakeT * 2.3 + 1.3) * shake;
       _m.lookAt(this.camera.position, this.lookAt, WORLD_UP);
+      if (lookBack) {
+        // Vue arrière : la caméra passe devant la voiture et regarde derrière elle. Les ressorts de
+        // la vue normale continuent de tourner : en relâchant, on la retrouve telle quelle.
+        this.camera.position.set(_target.x + Math.sin(carHeading) * dist, _target.y + height, _target.z + Math.cos(carHeading) * dist);
+        _look.set(_target.x - Math.sin(carHeading) * 5, _target.y + 0.75, _target.z - Math.cos(carHeading) * 5);
+        _m.lookAt(this.camera.position, _look, WORLD_UP);
+      }
       this.camera.quaternion.setFromRotationMatrix(_m);
       this.fov = damp(this.fov, 58 + speedT * 20, 3, dt);
     }

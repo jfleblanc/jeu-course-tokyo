@@ -16,6 +16,8 @@ export interface RoutePoint {
   s: number;
   /** Courbure (1/m) : sert à calculer la vitesse de passage. */
   curvature: number;
+  /** Altitude de la chaussée (m) ; absente = au niveau du sol. */
+  y?: number;
 }
 
 export interface RouteTurn {
@@ -41,14 +43,16 @@ export interface Route {
   /** Indices des points de passage ; le dernier est l'arrivée. */
   checkpoints: number[];
   turns: RouteTurn[];
+  /** Demi-largeur de la chaussée quand le tracé ne suit pas des rues (route du col). */
+  halfWidth?: number;
 }
 
 const KIND_WEIGHT = { boulevard: 3, avenue: 3, street: 1.4, alley: 0.6 } as const;
 const STEP = 3;
 
-function walk(graph: StreetGraph, rng: Rng, target: number): { edges: number[]; forward: boolean[] } | null {
+function walk(graph: StreetGraph, rng: Rng, target: number, district: number): { edges: number[]; forward: boolean[] } | null {
   // Départ sur une avenue assez longue pour la grille (pas sur le boulevard, encombré de piliers).
-  const candidates = graph.edges.filter((e) => e.district < 0 && e.kind === 'avenue' && e.length - e.trimA - e.trimB > 90);
+  const candidates = graph.edges.filter((e) => e.district === district && e.kind === 'avenue' && e.length - e.trimA - e.trimB > 90);
   if (candidates.length === 0) return null;
   const first = rng.pick(candidates);
   let forward = rng.chance(0.5);
@@ -114,6 +118,8 @@ function optionsAt(graph: StreetGraph, cur: GraphEdge, forward: boolean, visited
     const e = graph.edges[eid] as GraphEdge;
     const fwd = e.a === nodeId;
     if (visited.has(fwd ? e.b : e.a)) continue;
+    // Un tracé reste dans son secteur (ville principale ou quartier).
+    if (e.district !== cur.district) continue;
     pointAt(e, fwd ? 6 : e.length - 6, p);
     const cos = inx * (fwd ? p.tx : -p.tx) + inz * (fwd ? p.tz : -p.tz);
     if (cos < -0.35) continue;
@@ -126,8 +132,8 @@ function optionsAt(graph: StreetGraph, cur: GraphEdge, forward: boolean, visited
  * Circuit fermé : on part du milieu d'une avenue, on s'éloigne au hasard sur la moitié de la
  * longueur visée, puis on revient au point de départ par le plus court chemin encore libre.
  */
-function walkLoop(graph: StreetGraph, rng: Rng, target: number): { edges: number[]; forward: boolean[] } | null {
-  const candidates = graph.edges.filter((e) => e.district < 0 && e.kind === 'avenue' && !e.onRing && e.length - e.trimA - e.trimB > 90);
+function walkLoop(graph: StreetGraph, rng: Rng, target: number, district: number): { edges: number[]; forward: boolean[] } | null {
+  const candidates = graph.edges.filter((e) => e.district === district && e.kind === 'avenue' && !e.onRing && e.length - e.trimA - e.trimB > 90);
   if (candidates.length === 0) return null;
   const first = rng.pick(candidates);
   let forward = rng.chance(0.5);
@@ -225,13 +231,14 @@ function walkLoop(graph: StreetGraph, rng: Rng, target: number): { edges: number
  * Génère un tracé. Avec `laps` > 1, c'est un circuit fermé de `target` mètres par tour.
  * Renvoie null seulement si le réseau ne permet vraiment aucun parcours.
  */
-export function generateRoute(graph: StreetGraph, seed: number, target: number = RACE.targetLength, laps = 1): Route | null {
+/** `district` : −1 = ville principale, sinon le numéro du quartier où tracer la course. */
+export function generateRoute(graph: StreetGraph, seed: number, target: number = RACE.targetLength, laps = 1, district = -1): Route | null {
   const closed = laps > 1;
   let found: { edges: number[]; forward: boolean[] } | null = null;
   let used = seed;
   for (let attempt = 0; attempt < 300 && !found; attempt++) {
     used = seed + attempt * 7919;
-    found = closed ? walkLoop(graph, new Rng(used), target) : walk(graph, new Rng(used), target);
+    found = closed ? walkLoop(graph, new Rng(used), target, district) : walk(graph, new Rng(used), target, district);
   }
   if (!found) return null;
 
@@ -271,6 +278,29 @@ export function generateRoute(graph: StreetGraph, seed: number, target: number =
     const e = graph.edges[eid] as GraphEdge;
     return (found.forward[k] as boolean) ? e.b : e.a;
   });
+  return finishRoute(raw, found.edges, nodes, laps, used);
+}
+
+/**
+ * Tracé à partir d'une route hors du réseau de rues (le col de montagne) : `path` = points de l'axe
+ * avec leur altitude. Pas de rues transversales à barrer, pas de circulation.
+ */
+export function routeFromPath(path: { x: number; y: number; z: number }[], seed: number, halfWidth: number): Route {
+  const raw: number[] = [];
+  for (const p of path) raw.push(p.x, p.z);
+  const route = finishRoute(raw, [], [], 1, seed, 2);
+  // Altitude : celle du point d'axe le plus proche (on avance en même temps sur les deux listes).
+  let k = 0;
+  for (const q of route.points) {
+    while (k < path.length - 1 && Math.hypot((path[k + 1] as { x: number }).x - q.x, (path[k + 1] as { z: number }).z - q.z) <= Math.hypot((path[k] as { x: number }).x - q.x, (path[k] as { z: number }).z - q.z)) k++;
+    q.y = (path[k] as { y: number }).y;
+  }
+  route.halfWidth = halfWidth;
+  return route;
+}
+
+function finishRoute(raw: number[], edges: number[], nodes: number[], laps: number, used: number, smoothing = 14): Route {
+  const closed = laps > 1;
   // 2. Rééchantillonnage régulier puis lissage : les angles des carrefours deviennent des courbes.
   const resample = (pts: number[]): number[] => {
     const out: number[] = [pts[0] as number, pts[1] as number];
@@ -288,7 +318,7 @@ export function generateRoute(graph: StreetGraph, seed: number, target: number =
     return out;
   };
   let pts = resample(raw);
-  for (let pass = 0; pass < 14; pass++) {
+  for (let pass = 0; pass < smoothing; pass++) {
     const next = pts.slice();
     for (let k = 2; k < pts.length - 2; k += 2) {
       next[k] = ((pts[k - 2] as number) + 2 * (pts[k] as number) + (pts[k + 2] as number)) / 4;
@@ -374,5 +404,5 @@ export function generateRoute(graph: StreetGraph, seed: number, target: number =
       for (const t of lapTurns) turns.push({ index: t.index + off, s: t.s + sOff, angle: t.angle });
     }
   }
-  return { seed: used, edges: found.edges, nodes, laps: closed ? laps : 1, lapPoints, lapLength: length, points, length: length * (closed ? laps : 1), checkpoints, turns };
+  return { seed: used, edges, nodes, laps: closed ? laps : 1, lapPoints, lapLength: length, points, length: length * (closed ? laps : 1), checkpoints, turns };
 }

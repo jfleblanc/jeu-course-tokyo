@@ -11,8 +11,8 @@ export class InputManager {
   readonly keyboard: KeyboardSource;
   readonly gamepad: GamepadSource;
   private readonly listeners: Listener[] = [];
-  private readonly kb: RawInput = { throttle: 0, brake: 0, steer: 0, drift: false, nos: false };
-  private readonly gp: RawInput = { throttle: 0, brake: 0, steer: 0, drift: false, nos: false };
+  private readonly kb: RawInput = { throttle: 0, brake: 0, steer: 0, drift: false, nos: false, lookBack: false };
+  private readonly gp: RawInput = { throttle: 0, brake: 0, steer: 0, drift: false, nos: false, lookBack: false };
   private pendingUp = false;
   private pendingDown = false;
 
@@ -45,6 +45,7 @@ export class InputManager {
     d.steer = Math.abs(this.gp.steer) > Math.abs(this.kb.steer) ? this.gp.steer : this.kb.steer;
     d.drift = this.kb.drift || this.gp.drift;
     d.nos = this.kb.nos || this.gp.nos;
+    d.lookBack = this.kb.lookBack || this.gp.lookBack;
   }
 
   /** À appeler au début de chaque pas fixe : livre les changements de rapport une seule fois. */

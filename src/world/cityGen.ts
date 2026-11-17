@@ -163,6 +163,8 @@ export interface SpawnPoint {
   x: number;
   z: number;
   yaw: number;
+  /** Altitude (m) ; absente = au sol. */
+  y?: number;
 }
 
 /** Col de montagne : la route, le relief autour, et les repères utiles au décor. */
@@ -1540,6 +1542,11 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     B.x1 = Math.max(B.x1, d.cx + d.radius);
     B.z0 = Math.min(B.z0, d.cz - d.radius);
     B.z1 = Math.max(B.z1, d.cz + d.radius);
+  }
+  // Points de réapparition le long de la route du col (en altitude).
+  if (mountain) {
+    const ms = (mountain as Mountain).road.samples;
+    for (let i = 6; i < ms.length - 6; i += 10) { const sp = ms[i] as HighwaySample; respawns.push({ x: sp.x, y: sp.y, z: sp.z, yaw: Math.atan2(sp.tx, sp.tz) }); }
   }
   const margin = 60;
   const bounds: Rect = { x0: B.x0 - margin, x1: B.x1 + margin, z0: B.z0 - margin, z1: B.z1 + margin };

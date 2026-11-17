@@ -1,4 +1,4 @@
-import { GROUP_WORLD, type PhysicsWorld } from '../physics/physicsWorld';
+import { GROUP_WORLD, type PhysicsWorld, GROUP_BARRIER } from '../physics/physicsWorld';
 import type { CityData, Highway, HighwaySample } from './cityGen';
 
 /**
@@ -31,7 +31,8 @@ export function buildCityColliders(city: CityData, phys: PhysicsWorld): number {
         const oz = p.tx * side;
         const bh = hw.barrierHeight + (side === hw.outerSide ? 1.6 : 0.5);
         const low = p.y < 4 || side === hw.outerSide ? -0.2 : p.y - 0.9;
-        verts.push(p.x + ox * half, p.y + 0.02, p.z + oz * half);
+        // (le tablier se prolonge sous la glissière : une roue au ras du bord a toujours la route sous elle)
+        verts.push(p.x + ox * (half + 0.34), p.y + 0.02, p.z + oz * (half + 0.34));
         verts.push(p.x + ox * half, p.y + bh, p.z + oz * half);
         verts.push(p.x + ox * (half + 0.35), p.y + bh, p.z + oz * (half + 0.35));
         verts.push(p.x + ox * (half + 0.35), low, p.z + oz * (half + 0.35));
@@ -49,6 +50,39 @@ export function buildCityColliders(city: CityData, phys: PhysicsWorld): number {
       idx.push(a, b, c, a, c, d);
     };
     const segs = hw.closed ? n : n - 1;
+    // Glissières : des boîtes pleines à bords arrondis, bout à bout.
+    // Une paroi de triangles laissait la caisse s'enfoncer puis s'accrocher ; des boîtes bout à
+    // bout à angles vifs faisaient buter la caisse sur chaque jointure. Des bouts ronds qui se
+    // recouvrent donnent une paroi lisse : on glisse le long sans à-coup.
+    const RAD = 0.26, T = 0.3;
+    for (const side of [1, -1]) {
+      const bh = hw.barrierHeight + (side === hw.outerSide ? 1.6 : 0.5);
+      let k = 0;
+      while (k < segs) {
+        if (inGap(side, k)) { k++; continue; }
+        // Sur les portions presque droites, un élément couvre deux tronçons.
+        let span = 1;
+        if (k + 1 < segs && !inGap(side, k + 1)) {
+          const p0 = s[k] as HighwaySample, p2 = s[(k + 2) % n] as HighwaySample;
+          if (p0.tx * p2.tx + p0.tz * p2.tz > 0.9994 && Math.abs(p2.y - 2 * (s[(k + 1) % n] as HighwaySample).y + p0.y) < 0.02) span = 2;
+        }
+        const pa = s[k] as HighwaySample, pb = s[(k + span) % n] as HighwaySample;
+        const off = half + T;
+        const ax = pa.x - pa.tz * side * off, az = pa.z + pa.tx * side * off;
+        const bx = pb.x - pb.tz * side * off, bz = pb.z + pb.tx * side * off;
+        const dx = bx - ax, dy = pb.y - pa.y, dz = bz - az;
+        const len = Math.hypot(dx, dy, dz) || 1;
+        const yaw = Math.atan2(dx, dz), pitch = -Math.asin(dy / len);
+        const cy = Math.cos(yaw / 2), sy = Math.sin(yaw / 2), cp = Math.cos(pitch / 2), sp = Math.sin(pitch / 2);
+        // Boîte à bords arrondis : face plane côté route, bouts ronds qui recouvrent l'élément suivant.
+        world.createCollider(R.ColliderDesc.roundCuboid(T - RAD, bh / 2 + 0.3 - RAD, len / 2, RAD)
+          .setTranslation((ax + bx) / 2, (pa.y + pb.y) / 2 + bh / 2 - 0.3, (az + bz) / 2)
+          .setRotation({ x: cy * sp, y: sy * cp, z: -sy * sp, w: cy * cp })
+          .setFriction(0.3).setRestitution(0.05).setCollisionGroups(GROUP_BARRIER));
+        count++;
+        k += span;
+      }
+    }
     for (let k = 0; k < segs; k++) {
       const a = k * PER;
       const b = ((k + 1) % n) * PER;
@@ -56,24 +90,6 @@ export function buildCityColliders(city: CityData, phys: PhysicsWorld): number {
       for (const [o, side] of [[0, 1], [4, -1]] as const) {
         if (inGap(side, k)) continue; // ouverture pour une bretelle
         quad(a + o + 2, a + o + 3, b + o + 3, b + o + 2); // face extérieure / flanc
-        // Glissière : une boîte pleine par tronçon. (Une simple paroi de triangles laissait la
-        // caisse s'enfoncer dedans puis s'y accrocher : la voiture s'arrêtait net en la frôlant.)
-        {
-          const pa = s[k] as HighwaySample, pb = s[(k + 1) % n] as HighwaySample;
-          const dx = pb.x - pa.x, dy = pb.y - pa.y, dz = pb.z - pa.z;
-          const len = Math.hypot(dx, dy, dz) || 1;
-          const yaw = Math.atan2(dx, dz), pitch = -Math.asin(dy / len);
-          const bh = hw.barrierHeight + (side === hw.outerSide ? 1.6 : 0.5);
-          const T = 0.3;
-          const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2, mz = (pa.z + pb.z) / 2;
-          const ox = -(pa.tz + pb.tz) / 2 * side, oz = (pa.tx + pb.tx) / 2 * side;
-          const cy = Math.cos(yaw / 2), sy = Math.sin(yaw / 2), cp = Math.cos(pitch / 2), sp = Math.sin(pitch / 2);
-          world.createCollider(R.ColliderDesc.cuboid(T, bh / 2 + 0.3, len / 2 + 0.06)
-            .setTranslation(mx + ox * (half + T), my + bh / 2 - 0.3, mz + oz * (half + T))
-            .setRotation({ x: cy * sp, y: sy * cp, z: -sy * sp, w: cy * cp })
-            .setFriction(0.3).setRestitution(0.05).setCollisionGroups(GROUP_WORLD));
-          count++;
-        }
       }
       const sa = s[k] as HighwaySample;
       if (sa.y >= 4) quad(a + 3, b + 3, b + 7, a + 7); // dessous du tablier

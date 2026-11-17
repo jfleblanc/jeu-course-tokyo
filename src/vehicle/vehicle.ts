@@ -3,7 +3,7 @@ import { clamp, moveToward, lerp } from '../core/math';
 import { BASE_TRAITS, type CarTraits } from '../config/handling';
 import type { CarSpec, HandlingConfig } from '../config/handling';
 import type { DriveInput } from '../input/actions';
-import { GROUP_CAR, type PhysicsWorld } from '../physics/physicsWorld';
+import { GROUP_CAR, type PhysicsWorld, WHEEL_RAY_GROUPS } from '../physics/physicsWorld';
 import { Drivetrain } from './drivetrain';
 
 /**
@@ -334,6 +334,14 @@ export class Vehicle {
       yawImpulse += Math.sign(this.steerInput) * cfg.driftKick;
     }
     this.driftWasDown = driftDown;
+    // Frein à main façon arcade : à basse vitesse, espace + volant braqué fait pivoter la voiture
+    // sur place (demi-tour). Plus on va vite, moins il agit : au-delà, c'est le drift habituel.
+    // On en décide au moment où l'on appuie : un drift lancé vite reste un drift jusqu'au bout,
+    // même quand la vitesse retombe.
+    if (driftDown && !this.hbWasDown) this.hbLatch = clamp(2 - speedKmh / cfg.handbrakeSpeed, 0, 1);
+    this.hbWasDown = driftDown;
+    const handbrake = this.driftAmount * this.hbLatch * clamp((Math.abs(this.steerInput) - 0.3) / 0.5, 0, 1) * (planar > 2 ? 1 : 0);
+    yawImpulse += Math.sign(this.steerInput) * cfg.handbrakeYaw * handbrake * dt;
 
     // ——— Suspension : un rayon par roue ———
     const rayLen = spec.suspRestLength + spec.wheelRadius;
@@ -352,7 +360,7 @@ export class Vehicle {
       const rd = this.ray.dir;
       ro.x = ox; ro.y = oy; ro.z = oz;
       rd.x = -ux; rd.y = -uy; rd.z = -uz;
-      const hit = this.phys.world.castRayAndGetNormal(this.ray, rayLen, true, undefined, undefined, undefined, body);
+      const hit = this.phys.world.castRayAndGetNormal(this.ray, rayLen, true, undefined, WHEEL_RAY_GROUPS, undefined, body);
       const prevComp = w.compression;
       // Sur un maillage de triangles la normale peut pointer vers le bas : on la retourne face au rayon.
       let hnx = 0, hny = 1, hnz = 0;
@@ -557,7 +565,7 @@ export class Vehicle {
       // voiture qui retombe de haut s'enfonce dans la route en un pas de calcul et s'arrête net.
       const ro = this.ray.origin, rd = this.ray.dir;
       ro.x = p.x; ro.y = p.y; ro.z = p.z; rd.x = 0; rd.y = -1; rd.z = 0;
-      const hit = this.phys.world.castRayAndGetNormal(this.ray, AIR.cushionRange, true, undefined, undefined, undefined, body);
+      const hit = this.phys.world.castRayAndGetNormal(this.ray, AIR.cushionRange, true, undefined, WHEEL_RAY_GROUPS, undefined, body);
       if (hit) {
         const flip = hit.normal.y < 0 ? -1 : 1;
         const nx = hit.normal.x * flip, ny = hit.normal.y * flip, nz = hit.normal.z * flip;
@@ -585,6 +593,12 @@ export class Vehicle {
       body.applyImpulse(imp, true);
     }
 
+    if (contacts >= 2 && handbrake > 0.01 && speed > 1) {
+      // Roues arrière bloquées : la voiture perd de la vitesse pendant qu'elle pivote.
+      const k = -Math.min(cfg.handbrakeDecel * handbrake * dt, speed) * mass / speed;
+      imp.x = lv.x * k; imp.y = 0; imp.z = lv.z * k;
+      body.applyImpulse(imp, true);
+    }
     if (contacts >= 2) {
       const iy = this.inertiaY;
       // Amortissement du lacet (réduit pendant le drift pour laisser pivoter)
@@ -592,7 +606,8 @@ export class Vehicle {
       const brakeStab = 1 + 2.5 * this.brake * (1 - this.driftAmount);
       let yawTorque = -cfg.yawDamping * brakeStab * yawRate * iy * lerp(1, 0.35, this.driftAmount) * dt;
       // Limite d'angle de drift : au-delà, on ramène le nez vers la trajectoire.
-      const maxAngle = cfg.driftMaxAngleDeg * (Math.PI / 180);
+      // (pendant un demi-tour au frein à main, on laisse la voiture se mettre complètement en travers)
+      const maxAngle = lerp(cfg.driftMaxAngleDeg, 175, handbrake) * (Math.PI / 180);
       const excess = Math.abs(this.bodySlip) - maxAngle;
       if (excess > 0 && planar > 3) {
         const k = Math.min(1, excess / 0.12);
@@ -608,6 +623,8 @@ export class Vehicle {
   }
 
   private readonly bumpForce = [0, 0, 0, 0];
+  private hbLatch = 0;
+  private hbWasDown = false;
 
   /** À appeler juste après world.step() pour que le rendu ait l'état courant. */
   afterStep(): void {

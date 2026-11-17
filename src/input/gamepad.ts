@@ -43,6 +43,7 @@ export class GamepadSource {
         out.throttle = out.brake = out.steer = 0;
         out.drift = false;
         out.nos = false;
+        out.lookBack = false;
       }
       return false;
     }
@@ -77,6 +78,7 @@ export class GamepadSource {
       out.steer = steer;
       out.drift = GAMEPAD.driftButtons.some((i) => b[i]?.pressed ?? false);
       out.nos = GAMEPAD.nosButtons.some((i) => b[i]?.pressed ?? false);
+      out.lookBack = GAMEPAD.lookBackButtons.some((i) => b[i]?.pressed ?? false);
     }
     return true;
   }

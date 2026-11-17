@@ -67,6 +67,12 @@ export interface HandlingConfig {
   driftMaxAngleDeg: number;
   /** Coup de lacet au déclenchement du drift (rad/s). */
   driftKick: number;
+  /** Frein à main : rotation ajoutée quand on braque à fond à basse vitesse (rad/s²). Permet le demi-tour. */
+  handbrakeYaw: number;
+  /** Le frein à main agit pleinement sous cette vitesse (km/h) et plus du tout au double. */
+  handbrakeSpeed: number;
+  /** Freinage du frein à main pendant le demi-tour (m/s²). */
+  handbrakeDecel: number;
   /** Temps (s) pour retrouver l'adhérence en sortie de drift. */
   driftRecovery: number;
 
@@ -118,6 +124,9 @@ export const PRESET_A: HandlingConfig = {
   driftCarve: 0.6,
   driftMaxAngleDeg: 28,
   driftKick: 0.3,
+  handbrakeYaw: 5.5,
+  handbrakeSpeed: 45,
+  handbrakeDecel: 4,
   driftRecovery: 0.6,
 
   brakeForce: 21000,
@@ -202,6 +211,8 @@ export const HANDLING_SLIDERS: SliderGroup[] = [
       { key: 'driftCarve', label: 'Accroche en drift', min: 0, max: 1.2, step: 0.05, hint: '0 = plaque de glace. Plus haut = la voiture suit son nez dans le virage.' },
       { key: 'driftMaxAngleDeg', label: 'Angle de drift max. (°)', min: 15, max: 70, step: 1, hint: 'Au-delà, l’aide retient la voiture.' },
       { key: 'driftKick', label: 'Coup de lacet', min: 0, max: 1.5, step: 0.05, hint: 'Impulsion au déclenchement du drift.' },
+      { key: 'handbrakeYaw', label: 'Frein à main : rotation', min: 0, max: 12, step: 0.25, hint: 'Plus haut = la voiture pivote plus vite (demi-tour).' },
+      { key: 'handbrakeSpeed', label: 'Frein à main : vitesse (km/h)', min: 20, max: 140, step: 5, hint: 'Au-dessus, l’espace redevient un drift normal.' },
       { key: 'driftRecovery', label: 'Sortie de drift (s)', min: 0.1, max: 2, step: 0.05, hint: 'Temps pour retrouver l’adhérence.' },
     ],
   },

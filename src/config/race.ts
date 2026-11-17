@@ -54,7 +54,11 @@ export const AI_DRIVERS: AiLevel[] = [
 ];
 
 /** Tracés de la banque : mêmes graines = mêmes tracés à chaque partie. */
-export const TRACK_BANK: { name: string; seed: number; circuit: boolean }[] = [
+/**
+ * `district` : secteur du tracé (absent = ville principale ; 0 = baie, 1 = docks, 2 = collines).
+ * `col` : la route du col de montagne, dans un sens (1) ou dans l'autre (−1).
+ */
+export const TRACK_BANK: { name: string; seed: number; circuit: boolean; district?: number; col?: 1 | -1 }[] = [
   { name: 'Sprint de Shibuya', seed: 1101, circuit: false },
   { name: 'Traversée de Shinjuku', seed: 2203, circuit: false },
   { name: 'Les néons d’Akihabara', seed: 3307, circuit: false },
@@ -67,6 +71,19 @@ export const TRACK_BANK: { name: string; seed: number; circuit: boolean }[] = [
   { name: 'Anneau de Harajuku', seed: 9203, circuit: true },
   { name: 'Circuit d’Odaiba', seed: 9307, circuit: true },
   { name: 'Tour de Nakano', seed: 9401, circuit: true },
+  // Baie de Yokohama
+  { name: 'Front de mer de Yokohama', seed: 11003, circuit: false, district: 0 },
+  { name: 'Promenade des palmiers', seed: 11107, circuit: false, district: 0 },
+  { name: 'Tour de la grande roue', seed: 11201, circuit: true, district: 0 },
+  // Docks de Kawasaki
+  { name: 'Sprint des conteneurs', seed: 21001, circuit: false, district: 1 },
+  { name: 'Quai numéro 9', seed: 21107, circuit: false, district: 1 },
+  { name: 'Boucle des entrepôts', seed: 21203, circuit: true, district: 1 },
+  // Collines de Hakone
+  { name: 'Route des cèdres', seed: 31001, circuit: false, district: 2 },
+  { name: 'Tour du village', seed: 31103, circuit: true, district: 2 },
+  { name: 'Col de Hakone', seed: 31201, circuit: false, district: 2, col: 1 },
+  { name: 'Col de Hakone, versant est', seed: 31207, circuit: false, district: 2, col: -1 },
 ];
 
 /** Objets à ramasser sur le parcours. */

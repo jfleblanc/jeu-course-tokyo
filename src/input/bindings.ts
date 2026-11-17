@@ -18,6 +18,7 @@ export const BIND_LABELS: { action: BindAction; label: string }[] = [
   { action: 'steerRight', label: 'Tourner à droite' },
   { action: 'drift', label: 'Drift' },
   { action: 'nos', label: 'NOS' },
+  { action: 'lookBack', label: 'Vue arrière (tenir)' },
   { action: 'shiftUp', label: 'Rapport supérieur' },
   { action: 'shiftDown', label: 'Rapport inférieur' },
   { action: 'toggleGearbox', label: 'Boîte auto / manuelle' },
@@ -55,6 +56,11 @@ class Bindings {
         const saved = JSON.parse(raw) as Record<string, string[]>;
         for (const [action, codes] of Object.entries(saved)) {
           if (action in this.map && Array.isArray(codes)) this.map[action] = codes.filter((c) => typeof c === 'string');
+        }
+        // Maj est devenue la vue arrière : une ancienne sauvegarde qui y avait le NOS le déplace.
+        if (!('lookBack' in saved)) {
+          const nos = (this.map.nos ?? []).filter((c) => c !== 'ShiftLeft' && c !== 'ShiftRight');
+          this.map.nos = nos.length ? nos : defaults().nos ?? [];
         }
       }
     } catch {

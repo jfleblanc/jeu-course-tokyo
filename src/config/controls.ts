@@ -10,7 +10,9 @@ export const KEYBOARD = {
   steerLeft: ['KeyA'],
   steerRight: ['KeyD'],
   drift: ['Space'],
-  nos: ['ShiftLeft', 'ShiftRight'],
+  nos: ['KeyE', 'ControlLeft'],
+  /** Vue arrière : tant que la touche est tenue. */
+  lookBack: ['ShiftLeft', 'ShiftRight'],
 } as const;
 
 export const KEY_EVENTS: Record<string, ActionEvent> = {
@@ -41,6 +43,7 @@ export const GAMEPAD = {
   steerAxis: 0, // stick gauche, horizontal
   driftButtons: [0], // B
   nosButtons: [1], // A
+  lookBackButtons: [10], // clic du stick gauche
   deadzone: 0.14,
   events: {
     5: 'shiftUp', // R
