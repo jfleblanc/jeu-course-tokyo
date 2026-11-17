@@ -764,6 +764,8 @@ export function generateCity(seed: number = WORLD.seed): CityData {
       const offset = mergeGraph(graph, sub);
       // Route d'accès : de la chaussée de l'autoroute jusqu'au carrefour d'entrée.
       const ax = mid.x + nx * (ringway.halfWidth - 1.5), az = mid.z + nz * (ringway.halfWidth - 1.5);
+      const gdl = Math.hypot(entry.x - ax, entry.z - az) || 1;
+      const gdx = (entry.x - ax) / gdl, gdz = (entry.z - az) / gdl;
       if (def.bridge > 0) {
         // ——— Grand pont : on quitte la ville par-dessus une vallée, on arrive ailleurs ———
         const len = Math.hypot(entry.x - ax, entry.z - az) - entry.radius + 2;
@@ -881,7 +883,8 @@ export function generateCity(seed: number = WORLD.seed): CityData {
       }
       graph.districts.push({
         id: k, name: def.name, unlockLevel: def.unlockLevel, cx, cz, radius: radius + 60, polygon: sub.ringPolygon, entryNode: offset + sub.nodes.indexOf(entry),
-        gate: { x: edgeX + nx * 20, z: edgeZ + nz * 20, yaw: Math.atan2(nx, nz), width: D.accessWidth },
+        // (en travers de la route d'accès ou du pont, qui file vers le carrefour d'entrée — pas forcément droit devant)
+        gate: { x: ax + gdx * 21.5, z: az + gdz * 21.5, yaw: Math.atan2(gdx, gdz), width: D.accessWidth + 1.2 },
         theme: def.theme, outX: nx, outZ: nz,
       });
     });

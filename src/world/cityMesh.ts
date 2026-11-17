@@ -125,7 +125,7 @@ function addEntryMarker(solid: GeomBuilder, glow: GeomBuilder, x: number, y: num
     const f0 = 4 + k * 4.2;
     for (const sgn of [1, -1]) {
       // une branche du chevron : de l'extérieur (en arrière) vers la pointe (en avant)
-      glow.quad(P(sgn * w, f0), P(sgn * w, f0 + 1.1), P(0, f0 + 2.9), P(0, f0 + 1.8), [0, 1, 0], 0, 0, 1, 1, GREEN, [1, 3, 1, 0.75]);
+      glow.quad(P(sgn * w, f0), P(sgn * w, f0 + 0.45), P(0, f0 + 2.25), P(0, f0 + 1.8), [0, 1, 0], 0, 0, 1, 1, GREEN, [1, 3, 1, 0.5]);
     }
   }
 }
