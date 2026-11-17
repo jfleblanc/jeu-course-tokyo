@@ -196,6 +196,7 @@ async function boot(): Promise<void> {
     document.body.classList.add('titre');
   }
   const tutorial = new Tutorial();
+  let cheat = '';
   let cameraChanged = false;
   const leaveTitle = (): void => {
     if (titlePhase !== 'attente') return;
@@ -210,6 +211,20 @@ async function boot(): Promise<void> {
   };
   window.addEventListener('pointerdown', leaveTitle);
   window.addEventListener('keydown', (ev) => {
+    // Code secret : taper K I K I donne un million de yens (pour tout essayer sans compter).
+    cheat = (cheat + ev.code.replace('Key', '')).slice(-4);
+    if (cheat === 'KIKI') {
+      cheat = '';
+      player.money += 1_000_000;
+      player.save();
+      refreshProgress();
+      if (garage.open) {
+        garage.toggle();
+        garage.toggle();
+      }
+      sound.coin();
+      hud.toast('Code KIKI : +¥ 1 000 000');
+    }
     if (ev.code === 'Backspace') tutorial.skip();
     else if (titlePhase === 'attente' && (ev.code === 'Space' || bindings.isDriveKey(ev.code))) leaveTitle();
   });

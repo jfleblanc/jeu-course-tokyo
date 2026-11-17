@@ -137,6 +137,7 @@ pour les adversaires. Le chargement est dans `src/vehicle/glbCar.ts`.
   `?direct` le saute (essais automatiques).
 - **Tutoriel** au premier lancement (`src/ui/tutorial.ts`), sept consignes validées en les
   réalisant ; `Retour arrière` le passe.
+- **Code secret** : taper `K` `I` `K` `I` au clavier donne 1 000 000 ¥ (autant de fois qu'on veut).
 - **Paramètres** (`Échap` en balade, `src/ui/settingsMenu.ts`) : volumes, boîte de vitesses,
   qualité d'image, touches du clavier modifiables (`src/input/bindings.ts`), test de manette.
 
