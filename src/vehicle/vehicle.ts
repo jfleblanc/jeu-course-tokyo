@@ -613,7 +613,10 @@ export class Vehicle {
       const push = guide.push(rc, dt, this.railPush);
       if (push.touching) {
         this.scraping = true;
-        imp.x = push.dvx * mass; imp.y = 0; imp.z = push.dvz * mass;
+        // Frottement : on perd de la vitesse d'avance, d'autant plus qu'on s'appuie fort.
+        const pl = Math.hypot(lv.x, lv.z);
+        const slow = pl > 0.5 ? Math.min(push.slow, pl * 0.5) / pl : 0;
+        imp.x = (push.dvx - lv.x * slow) * mass; imp.y = 0; imp.z = (push.dvz - lv.z * slow) * mass;
         body.applyImpulse(imp, true);
         const tq = this.tmpTorque;
         tq.x = 0; tq.y = push.dyaw * this.inertiaY; tq.z = 0;
@@ -664,7 +667,7 @@ export class Vehicle {
   /** Vrai quand la voiture frotte une glissière (pour le son, les étincelles). */
   scraping = false;
   private readonly railCar: RailCar = { x: 0, y: 0, z: 0, fx: 0, fz: 1, halfWidth: 0.88, halfLength: 2.12, vx: 0, vz: 0 };
-  private readonly railPush: RailPush = { dvx: 0, dvz: 0, dyaw: 0, touching: false };
+  private readonly railPush: RailPush = { dvx: 0, dvz: 0, dyaw: 0, touching: false, slow: 0 };
   private hbLatch = 0;
   private hbWasDown = false;
 

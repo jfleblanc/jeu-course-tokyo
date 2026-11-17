@@ -101,6 +101,13 @@ export const PICKUPS = {
   radius: 3.4,
 } as const;
 
+/**
+ * Adversaires à la hauteur de la voiture du joueur : avec une voiture plus puissante ou qui tient
+ * mieux la route que la voiture de départ, ils reçoivent une part de cet avantage. 1 = ils
+ * suivent entièrement, 0 = ils restent des débutants quoi qu'on conduise.
+ */
+export const CAR_MATCH = { power: 0.9, grip: 0.85, topSpeed: 0.3 } as const;
+
 /** Effet élastique : les adversaires ralentissent un peu s'ils sont loin devant, accélèrent s'ils sont loin derrière. */
 export const RUBBER_BAND = { distance: 160, maxBoost: 0.1, maxSlow: 0.12 } as const;
 

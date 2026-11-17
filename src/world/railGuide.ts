@@ -9,7 +9,7 @@ export interface RailCar {
 }
 
 /** Réponse : variation de vitesse à appliquer au centre de la voiture, et variation de lacet (rad/s). */
-export interface RailPush { dvx: number; dvz: number; dyaw: number; touching: boolean }
+export interface RailPush { dvx: number; dvz: number; dyaw: number; touching: boolean; /** Vitesse perdue par frottement pendant ce pas (m/s). */ slow: number }
 
 const CELL = 14;
 export const RAIL = {
@@ -21,6 +21,13 @@ export const RAIL = {
   absorb: 1,
   /** Au-delà de cet enfoncement (m), la voiture est considérée sortie (ouverture, saut) : on ne la rappelle plus. */
   maxDepth: 0.9,
+  /**
+   * Frottement. `friction` : part du choc (vitesse vers le mur) perdue aussi en vitesse d'avance.
+   * `drag` : part de la vitesse perdue par seconde tant qu'on frotte (0,25 = 25 %/s) — rouler
+   * collé au mur plafonne vers 70 km/h. Sans cela, on gagnerait une course sans toucher au volant.
+   */
+  friction: 0.4,
+  drag: 0.25,
   /** Part du couple de redressement appliquée (la voiture se met parallèle au mur). */
   align: 0.5,
   /** Écart de hauteur toléré entre la voiture et la chaussée (m). */
@@ -61,7 +68,7 @@ export class RailGuide {
 
   /** Calcule la poussée pour une voiture pendant un pas `dt` ; renvoie `out` (réutilisé). */
   push(c: RailCar, dt: number, out: RailPush): RailPush {
-    out.dvx = 0; out.dvz = 0; out.dyaw = 0; out.touching = false;
+    out.dvx = 0; out.dvz = 0; out.dyaw = 0; out.touching = false; out.slow = 0;
     // Échantillon de route le plus proche, à la bonne hauteur.
     let best: HighwaySample | null = null, bestRoad: Highway | null = null, bestK = 0, bd = 20 * 20;
     const ci = Math.floor(c.x / CELL), cj = Math.floor(c.z / CELL);
@@ -98,6 +105,7 @@ export class RailGuide {
       const vOut = -(c.vx * nx + c.vz * nz); // vitesse vers le mur
       const dv = Math.max(0, vOut) * RAIL.absorb + RAIL.stiffness * depth * dt;
       out.dvx += nx * dv; out.dvz += nz * dv;
+      out.slow += RAIL.friction * Math.max(0, vOut) + RAIL.drag * Math.hypot(c.vx, c.vz) * dt;
       // Couple autour de la verticale : le coin touché est repoussé, la voiture se met parallèle.
       out.dyaw += (rz * nx - rx * nz) * dv * RAIL.align / (c.halfLength * c.halfLength);
     }

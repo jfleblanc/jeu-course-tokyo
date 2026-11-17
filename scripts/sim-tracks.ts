@@ -3,7 +3,9 @@ import { createPhysicsWorld } from '../src/physics/physicsWorld';
 import { Vehicle } from '../src/vehicle/vehicle';
 import { CAR_SPEC, PRESET_A } from '../src/config/handling';
 import { WORLD } from '../src/config/world';
-import { AI_DRIVERS } from '../src/config/race';
+import { AI_DRIVERS, CAR_MATCH } from '../src/config/race';
+import { CAR_MODELS } from '../src/config/cars';
+import { aiDifficulty } from '../src/config/progression';
 import { generateCity } from '../src/world/cityGen';
 import { buildCityColliders } from '../src/world/cityColliders';
 import { emptyDriveInput } from '../src/input/actions';
@@ -26,7 +28,11 @@ for (const track of bank.filter((t) => t.district >= 0 && (!only || t.name.inclu
   const d = city.graph.districts[track.district]!;
   const stray = track.route.edges.filter((id) => city.graph.edges[id]!.district !== track.district).length;
   const race = new Race(phys, CAR_SPEC, car);
-  race.start(track.route);
+  // VOITURE=gt300 : le « joueur » a cette voiture ; les adversaires se mettent à sa hauteur comme en jeu.
+  const mdl = CAR_MODELS.find((c) => c.id === process.env.VOITURE);
+  const pr = mdl ? mdl.power : 1, gr = mdl ? mdl.grip : 1;
+  const lvl = Number(process.env.NIVEAU ?? 5);
+  race.start(track.route, { difficulty: aiDifficulty(lvl) * (1 + (gr - 1) * CAR_MATCH.grip + (pr - 1) * CAR_MATCH.topSpeed), power: 1 + (pr - 1) * CAR_MATCH.power, grip: 1 + (gr - 1) * CAR_MATCH.grip });
   const me = AI_DRIVERS[1]!; let n = 0; let maxY = 0;
   while (n < 60 * 260 && !race.racers.every((r) => r.finished)) {
     if (race.phase === 'running' && !race.player!.finished) driveAlongRoute(car, race.route!, race.player!.index, me, 1, 0, input); else { input.throttle = 0; input.brake = 1; input.steer = 0; }

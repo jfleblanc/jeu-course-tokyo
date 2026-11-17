@@ -53,6 +53,10 @@ export type RaceEvent = { type: 'cash'; amount: number } | { type: 'teleport'; g
 export interface RaceOptions {
   /** Multiplicateur de niveau des adversaires (1 = normal). */
   difficulty?: number;
+  /** Puissance moteur des adversaires (1 = voiture de série). */
+  power?: number;
+  /** Adhérence et freins des adversaires (1 = voiture de série). */
+  grip?: number;
   /** Pilotes adverses (trois). Par défaut : tirés au sort d'après le tracé. */
   drivers?: AiLevel[];
   /** Valeur d'une mallette d'argent (¥). */
@@ -82,6 +86,11 @@ export class Race {
   generation = 0;
   /** Multiplicateur de niveau des adversaires (1 = normal). */
   difficulty = 1;
+  /** Puissance moteur des adversaires par rapport à une voiture de série (alignée sur celle du joueur). */
+  powerMatch = 1;
+  /** Adhérence et freins des adversaires par rapport à une voiture de série. */
+  gripMatch = 1;
+  private aiCfg: HandlingConfig | null = null;
   /** Objets à ramasser (mallettes, téléporteur). */
   pickups: Pickup[] = [];
   /** Argent ramassé pendant la course (ajouté à la récompense). */
@@ -111,6 +120,8 @@ export class Race {
   start(route: Route, options: RaceOptions = {}): boolean {
     this.stop();
     this.difficulty = options.difficulty ?? 1;
+    this.powerMatch = options.power ?? 1;
+    this.gripMatch = options.grip ?? 1;
     this.cashValue = options.cashValue ?? PICKUPS.cashBase;
     const drivers = options.drivers ?? pickDrivers(route.seed);
     this.route = route;
@@ -192,6 +203,10 @@ export class Race {
     const route = this.route;
     if (!route || this.phase === 'idle') return;
     const player = this.player;
+    // Réglage des adversaires : celui du joueur, avec l'adhérence et les freins de leur catégorie.
+    const ai = (this.aiCfg ??= { ...cfg });
+    Object.assign(ai, cfg);
+    ai.gripFront *= this.gripMatch; ai.gripRear *= this.gripMatch; ai.gripLong *= this.gripMatch; ai.brakeForce *= this.gripMatch;
     for (const r of this.racers) {
       if (r.isPlayer || !r.level) continue;
       if (this.phase === 'countdown') {
@@ -216,7 +231,7 @@ export class Race {
             // Pilotes agressifs : plus vite partout, encore plus quand ils sont derrière, et ils
             // ne lèvent presque plus le pied quand ils mènent.
             factor = (t > 0 ? 1 - RUBBER_BAND.maxSlow * 0.35 * t : 1 + AGGRESSIVE.chase * ag * -t) * (1 + AGGRESSIVE.pace * ag);
-            r.car.powerBoost = 1 + ag * (AGGRESSIVE.power + AGGRESSIVE.chasePower * Math.max(0, -t));
+            r.car.powerBoost = this.powerMatch * (1 + ag * (AGGRESSIVE.power + AGGRESSIVE.chasePower * Math.max(0, -t)));
             // Le joueur arrive derrière : on se met sur sa trajectoire.
             if (gap > 2 && gap < AGGRESSIVE.blockRange) {
               const q = route.points[Math.min(route.points.length - 1, r.index)] as RoutePoint;
@@ -225,7 +240,7 @@ export class Race {
               const room = (route.halfWidth ?? 7) - 2.3;
               blockAt = clamp(lat, -room, room) - r.lane;
             }
-          } else r.car.powerBoost = 1;
+          } else r.car.powerBoost = this.powerMatch;
         }
         // Circulation : on contourne la voiture ordinaire la plus proche devant soi.
         const hx = Math.sin(r.car.yaw), hz = Math.cos(r.car.yaw);
@@ -243,7 +258,7 @@ export class Race {
         else r.avoid += clamp(want - r.avoid, -7 * dt, 7 * dt);
         driveAlongRoute(r.car, route, r.index, r.level, factor * this.difficulty, r.lane + r.avoid, r.input);
       }
-      r.car.update(dt, r.input, cfg);
+      r.car.update(dt, r.input, ai);
     }
   }
 

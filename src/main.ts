@@ -4,7 +4,7 @@ import { CAR_SPEC, PRESET_A, type HandlingConfig } from './config/handling';
 import { TIER_TRIAL, aiDifficulty } from './config/progression';
 import { PlayerState } from './progression/playerState';
 import { GarageMenu } from './ui/garageMenu';
-import { RACE } from './config/race';
+import { CAR_MATCH, RACE } from './config/race';
 import { QUALITY, type Quality } from './config/render';
 import { WORLD } from './config/world';
 import { MusicPlayer } from './audio/musicPlayer';
@@ -374,17 +374,23 @@ async function boot(): Promise<void> {
   let garageTime = 0;
 
   // Course proposée (fiche affichée) en attente de confirmation.
-  let offered: { track: Track; kind: 'course' | 'circuit' | 'palier'; difficulty: number; drivers: AiLevel[] } | null = null;
+  let offered: { track: Track; kind: 'course' | 'circuit' | 'palier'; difficulty: number; drivers: AiLevel[]; power: number; grip: number } | null = null;
 
   /** Affiche la fiche d'un tracé : type, gains, pilotes adverses. */
   const offer = (track: Track, manual: boolean): void => {
-    const base = aiDifficulty(player.level);
+    // Les adversaires se mettent à la hauteur de la voiture du joueur (modèle et améliorations) :
+    // sinon une grosse voiture achetée tôt rend toutes les courses trop faciles.
+    const mine: HandlingConfig = { ...store.current };
+    player.applyTo(store.current, mine);
+    const powerRatio = mine.enginePower / store.current.enginePower, gripRatio = mine.gripRear / store.current.gripRear;
+    const aiPower = 1 + Math.max(0, powerRatio - 1) * CAR_MATCH.power;
+    const base = aiDifficulty(player.level) * (1 + Math.max(0, gripRatio - 1) * CAR_MATCH.grip + Math.max(0, powerRatio - 1) * CAR_MATCH.topSpeed);
     // Dernier niveau du palier, barre d'XP pleine : tout circuit devient l'épreuve de palier.
     const kind: 'course' | 'circuit' | 'palier' = track.circuit ? (player.trialPending ? 'palier' : 'circuit') : 'course';
     const difficulty = kind === 'palier' ? base + TIER_TRIAL.extraDifficulty : kind === 'circuit' ? base * RACE.circuit.difficulty : base;
     // Les adversaires changent d'une course à l'autre.
     const drivers = pickDrivers(track.route.seed + player.races * 131);
-    offered = { track, kind, difficulty, drivers };
+    offered = { track, kind, difficulty, drivers, power: aiPower, grip: 1 + Math.max(0, gripRatio - 1) * CAR_MATCH.grip };
     const reward = raceReward(player.level, 1, track.circuit);
     const title = kind === 'palier' ? 'Épreuve de palier — finir dans les deux premiers' : kind === 'circuit' ? 'Circuit' : 'Course';
     card.show(track, drivers, kind === 'palier' ? { xp: 0, money: reward.money } : reward, difficulty, title, manual);
@@ -418,7 +424,7 @@ async function boot(): Promise<void> {
     raceHud.title = o.kind === 'palier' ? 'Épreuve de palier' : '';
     raceHud.summary = null;
     nosCharge = NOS.seconds;
-    const ok = race.start(o.track.route, { difficulty: o.difficulty, drivers: o.drivers, cashValue: PICKUPS.cashBase + PICKUPS.cashPerLevel * player.level });
+    const ok = race.start(o.track.route, { difficulty: o.difficulty, power: o.power, grip: o.grip, drivers: o.drivers, cashValue: PICKUPS.cashBase + PICKUPS.cashPerLevel * player.level });
     card.hide();
     offered = null;
     hud.toast(!ok ? 'Impossible de lancer la course' : o.kind === 'palier' ? 'Épreuve de palier : finissez dans les deux premiers !' : o.track.name);
