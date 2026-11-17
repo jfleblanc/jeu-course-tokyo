@@ -238,10 +238,14 @@ async function boot(): Promise<void> {
   // ——— Garage en vrai (vu par une caméra de surveillance) et choix du joueur ———
   const garageScene = new GarageScene(scene, city.garage);
   let garageView = false;
+  let parkedFor = 0;
+  /** Vrai juste après avoir été posé dans l'atelier (début de partie, touche G) : la caméra de surveillance vient tout de suite. */
+  let justParked = false;
   /** Pose la voiture du joueur à sa place dans l'atelier, à l'arrêt. */
   const parkInGarage = (): void => {
     const b = garageScene.bayPose();
     car.teleport(b.x, b.y + REST_HEIGHT + 0.15, b.z, b.yaw);
+    justParked = true;
   };
   const cctv = document.createElement('div');
   cctv.id = 'cctv';
@@ -361,7 +365,7 @@ async function boot(): Promise<void> {
   const raceVisuals = new RaceVisuals(scene, mats, city.graph, params.has('barrieres'), tracks, testModel);
   const minimap = new Minimap(city, tracks.map((t) => ({ x: t.start.x, z: t.start.z, circuit: t.circuit })));
   const card = new RaceCard();
-  const fullMap = new FullMap(minimap.layers, city.graph.districts, tracks.map((t) => ({ x: t.start.x, z: t.start.z, circuit: t.circuit, name: t.name })));
+  const fullMap = new FullMap(minimap.layers, city.graph.districts, tracks.map((t) => ({ x: t.start.x, z: t.start.z, circuit: t.circuit, name: t.name })), city.garage);
   const raceHud = new RaceHud();
 
   let raceKind: 'course' | 'circuit' | 'palier' = 'course';
@@ -716,7 +720,10 @@ async function boot(): Promise<void> {
         }
         const bay = garageScene.bayPose();
         garageScene.showMechanic(menu || Math.hypot(car.pos.x - bay.x, car.pos.z - bay.z) < 2.5);
-        garageScene.update(frameDt, camera, menu || garage.open ? null : car.pos);
+        garageScene.update(frameDt, camera, null);
+        // Débogage : `window.__zoom = 20` resserre la caméra du garage (contrôle du personnage).
+        const zoom = (window as unknown as { __zoom?: number }).__zoom;
+        if (zoom) { camera.fov = zoom; camera.updateProjectionMatrix(); }
         garageTime += frameDt;
         cctvLabel.innerHTML = `<span class="cc-rec">●</span> REC · CAM 03 · GARAGE — ${cctvName} · ${new Date().toLocaleTimeString('fr-CA')}`;
       } else if (titlePhase === 'attente') {
@@ -727,6 +734,11 @@ async function boot(): Promise<void> {
         camera.lookAt(visual.root.position.x, visual.root.position.y + 0.25, visual.root.position.z);
       } else {
         rig.update(frameDt, visual, car, input.drive.lookBack);
+        // Dans l'atelier le plafond est bas : la caméra de poursuite descend dessous et reste entre les murs.
+        if (garageScene.contains(car.pos.x, car.pos.y, car.pos.z) && rig.mode === 'poursuite') {
+          garageScene.keepInside(camera.position);
+          camera.lookAt(visual.root.position.x, visual.root.position.y + 0.9, visual.root.position.z);
+        }
         if (titlePhase === 'glisse') {
           // Départ : la caméra glisse de l'écran titre jusqu'à sa place derrière la voiture.
           glide = Math.min(1, glide + frameDt / 2.4);
@@ -790,13 +802,21 @@ async function boot(): Promise<void> {
       // Vue par la caméra de l'atelier : dans les menus du garage, au choix du joueur, et quand
       // la voiture roule dans l'atelier (le plafond cacherait la vue habituelle).
       const menus = garage.open || titlePhase === 'profils';
-      const view = menus || (titlePhase === 'fini' && garageScene.contains(car.pos.x, car.pos.y, car.pos.z));
+      // Caméra de l'atelier : dans les menus, et tant que la voiture attend sur son plateau. Dès
+      // qu'on démarre, on repasse à la caméra de conduite (plus simple pour sortir).
+      const bayNow = garageScene.bayPose();
+      const waiting = titlePhase === 'fini' && garageScene.contains(car.pos.x, car.pos.y, car.pos.z) && Math.hypot(car.pos.x - bayNow.x, car.pos.z - bayNow.z) < 2.2 && car.speed < 0.6 && input.drive.throttle < 0.05 && input.drive.brake < 0.05;
+      parkedFor = waiting ? parkedFor + frameDt : 0;
+      const view = menus || (waiting && (garageView || parkedFor > 1.2 || justParked));
+      if (!waiting) justParked = false;
       if (view !== garageView) {
         garageView = view;
         document.body.classList.toggle('cctv', view);
         if (view) garageDirty = true;
         else rig.reset();
       }
+      // Le personnage est le joueur : dès qu'il conduit, il n'est plus à côté de la voiture.
+      if (!view) garageScene.showMechanic(false);
       document.body.classList.toggle('cctv-menu', menus);
       garageScene.setLights(view || garageScene.distance(car.pos.x, car.pos.z) < 90);
       // Dans les menus, inutile de dessiner la ville.

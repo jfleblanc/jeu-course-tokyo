@@ -1,3 +1,4 @@
+import { drawHouse } from './minimap';
 import type { District } from '../world/streetGraph';
 
 /** Ce que la grande carte reçoit de la mini-carte : le plan pré-dessiné et son échelle. */
@@ -33,6 +34,8 @@ export class FullMap {
     private readonly layers: MapLayers,
     private readonly districts: District[],
     private readonly markers: { x: number; z: number; circuit: boolean; name: string }[],
+    /** Garage du joueur (petite maison sur la carte). */
+    private readonly home: { x: number; z: number } | null = null,
   ) {
     this.canvas = document.createElement('canvas');
     this.canvas.id = 'fullmap';
@@ -102,6 +105,14 @@ export class FullMap {
     // Bornes de départ
     if (!s.racing) {
       c.font = '11px system-ui, sans-serif';
+      if (this.home) {
+        c.save();
+        c.translate(mx(this.home.x), mz(this.home.z));
+        drawHouse(c, 9);
+        c.restore();
+        c.fillStyle = '#ffd23e';
+        c.fillText('Garage', mx(this.home.x), mz(this.home.z) - 14);
+      }
       for (const m of this.markers) {
         c.fillStyle = m.circuit ? '#ff2d95' : '#2ee6ff';
         c.strokeStyle = '#0b0b16';

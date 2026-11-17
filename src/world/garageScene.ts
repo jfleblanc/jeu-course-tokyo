@@ -46,6 +46,13 @@ export class GarageScene {
   private readonly camPos = new THREE.Vector3();
   private readonly camAim = new THREE.Vector3();
   private readonly aim = new THREE.Vector3();
+  /** Personnage du joueur (modèle 3D articulé) : os utiles et leur orientation de repos. */
+  private readonly bones = new Map<string, { bone: THREE.Object3D; rest: THREE.Quaternion; side: number }>();
+  private hasCharacter = false;
+  private readonly qa = new THREE.Quaternion();
+  private readonly qb = new THREE.Quaternion();
+  private readonly qc = new THREE.Quaternion();
+  private readonly euler = new THREE.Euler();
 
   constructor(scene: THREE.Object3D, site: GarageSite | null) {
     // Sans emplacement en ville (ne devrait pas arriver) : l'atelier existe quand même, à l'écart.
@@ -213,6 +220,73 @@ export class GarageScene {
         g.add(holder);
       })
       .catch((err: unknown) => console.info('Mobilier du garage indisponible.', err));
+    // ——— Le personnage du joueur : « Kaku » (Cyrone, CC BY 4.0), à la place de la silhouette ———
+    loader
+      .loadAsync(new URL('models/kaku.glb', document.baseURI).href)
+      .then((gltf) => {
+        const model = gltf.scene;
+        model.updateMatrixWorld(true);
+        // Taille mesurée sur le squelette (un maillage articulé est dessiné d'après ses os, pas
+        // d'après la place de son nœud : sa boîte englobante peut être dans une autre unité).
+        const bb = new THREE.Box3();
+        const bp = new THREE.Vector3();
+        model.traverse((o) => {
+          if (/^CH_/.test(o.name)) bb.expandByPoint(bp.setFromMatrixPosition(o.matrixWorld));
+        });
+        // (des orteils au haut du crâne : un peu plus que du premier au dernier os)
+        const k = 1.62 / Math.max(0.01, bb.max.y - bb.min.y);
+        model.scale.multiplyScalar(k);
+        model.position.set(-((bb.min.x + bb.max.x) / 2) * k, -bb.min.y * k + 0.06, -((bb.min.z + bb.max.z) / 2) * k);
+        model.traverse((o) => {
+          const mesh = o as THREE.SkinnedMesh;
+          if (mesh.isMesh) mesh.frustumCulled = false; // (les os bougent : la boîte d'origine ne vaut plus)
+          const mt = /^CH_([A-Za-z]+\d?)_\d+$/.exec(o.name);
+          if (mt) this.bones.set(mt[1] as string, { bone: o, rest: o.quaternion.clone(), side: 0 });
+        });
+        for (const b of [...this.mech.children]) this.mech.remove(b);
+        this.mech.add(model);
+        this.mech.rotation.set(0, 0, 0);
+        this.mech.updateMatrixWorld(true);
+        // De quel côté est chaque bras (x du personnage) : sert au sens des rotations.
+        const inv = new THREE.Matrix4().copy(this.mech.matrixWorld).invert();
+        const v = new THREE.Vector3();
+        for (const e of this.bones.values()) e.side = Math.sign(v.setFromMatrixPosition(e.bone.matrixWorld).applyMatrix4(inv).x) || 1;
+        this.hasCharacter = true;
+      })
+      .catch((err: unknown) => console.info('Personnage indisponible, silhouette conservée.', err));
+  }
+
+  /**
+   * Tourne un os d'un angle donné dans le repère du personnage (x = sa droite/gauche, y = haut,
+   * z = devant lui), par-dessus sa pose de repos — quels que soient les axes propres de l'os.
+   */
+  private turn(name: string, rx: number, ry: number, rz: number): void {
+    const e = this.bones.get(name);
+    if (!e || !e.bone.parent) return;
+    // orientation du parent dans le repère du personnage
+    this.mech.getWorldQuaternion(this.qa).invert();
+    e.bone.parent.getWorldQuaternion(this.qb);
+    this.qa.multiply(this.qb);
+    this.qc.setFromEuler(this.euler.set(rx, ry, rz * e.side, 'XYZ'));
+    // os = parent⁻¹ · rotation · parent · repos
+    e.bone.quaternion.copy(this.qa).invert().multiply(this.qc).multiply(this.qa).multiply(e.rest);
+  }
+
+  /** Pose du personnage : au travail (penché, bras en avant, il serre) ou en marche. */
+  private poseCharacter(working: boolean, t: number): void {
+    const step = Math.sin(t * 9);
+    this.turn('Spine', working ? 0.38 + Math.sin(t * 1.3) * 0.04 : 0.03, 0, 0);
+    this.mech.updateMatrixWorld(true);
+    for (const [arm, fore, leg, shin, ph] of [['LeftArm', 'LeftForeArm', 'LeftUpLeg', 'LeftLeg', 1], ['RightArm', 'RightForeArm', 'RightUpLeg', 'RightLeg', -1]] as const) {
+      const work = Math.sin(t * 7 + ph);
+      // bras : de la pose en croix vers le bas (autour de z), puis vers l'avant (autour de x)
+      this.turn(arm, working ? -0.62 + work * 0.1 : step * ph * 0.45, 0, -1.3);
+      this.turn(leg, working ? -0.12 : -step * ph * 0.5, 0, 0);
+      this.mech.updateMatrixWorld(true);
+      this.turn(fore, working ? -0.55 + work * 0.3 : -0.25, 0, 0);
+      this.turn(shin, working ? 0.22 : Math.max(0, step * ph) * 0.6, 0, 0);
+    }
+    this.turn('Head', working ? 0.25 : 0, 0, 0);
   }
 
   /** Le mécano n'est là que si une voiture est sur le plateau. */
@@ -230,6 +304,16 @@ export class GarageScene {
     if (y > -1) return false;
     const [lx, lz] = garageToLocal(this.site, x, z);
     return Math.abs(lx) < G.halfW + 0.3 && Math.abs(lz) < G.halfD + 0.3;
+  }
+
+  /** Ramène un point (la caméra) à l'intérieur de l'atelier : sous le plafond, entre les murs. */
+  keepInside(p: THREE.Vector3): void {
+    this.room.updateMatrixWorld();
+    this.room.worldToLocal(p);
+    p.x = Math.max(-G.halfW + 0.5, Math.min(G.halfW - 0.5, p.x));
+    p.z = Math.max(-G.halfD + 0.5, Math.min(G.halfD - 0.5, p.z));
+    p.y = Math.min(p.y, H - 0.7);
+    this.room.localToWorld(p);
   }
 
   /** Distance à plat entre ce point et le garage. */
@@ -317,9 +401,15 @@ export class GarageScene {
     this.mech.position.lerpVectors(this.from, this.to, e);
     const working = phase > move;
     this.mech.rotation.y = working ? yawNow : Math.atan2(this.to.x - this.from.x, this.to.z - this.from.z);
-    this.mech.rotation.x = working ? 0.32 + Math.sin(t * 1.3) * 0.04 : 0;
-    this.mech.position.y = working ? -0.05 : Math.abs(Math.sin(t * 9)) * 0.03;
-    this.arm.rotation.x = working ? -1.2 + Math.sin(t * 7) * 0.35 : Math.sin(t * 9) * 0.5;
+    if (this.hasCharacter) {
+      this.mech.position.y = working ? 0 : Math.abs(Math.sin(t * 9)) * 0.02;
+      this.mech.updateMatrixWorld(true);
+      this.poseCharacter(working, t);
+    } else {
+      this.mech.rotation.x = working ? 0.32 + Math.sin(t * 1.3) * 0.04 : 0;
+      this.mech.position.y = working ? -0.05 : Math.abs(Math.sin(t * 9)) * 0.03;
+      this.arm.rotation.x = working ? -1.2 + Math.sin(t * 7) * 0.35 : Math.sin(t * 9) * 0.5;
+    }
     // Caméra de surveillance : en hauteur dans le coin près de la porte ; elle balaie lentement,
     // ou accompagne la voiture qui roule.
     this.group.updateMatrixWorld();

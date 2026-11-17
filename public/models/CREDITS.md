@@ -35,3 +35,9 @@ Le mobilier de l'atelier (plateau tournant, servantes, établi et outils, pannea
 par DevPoly3D (https://sketchfab.com/DevPoly3D), sous licence CC BY-NC 4.0
 (http://creativecommons.org/licenses/by-nc/4.0/) : auteur crédité, **pas d'usage commercial**.
 Fichier `garage.glb` : textures réduites ; la coque du bâtiment n'est pas affichée.
+
+## Personnage du joueur
+
+« Kaku » (https://sketchfab.com/3d-models/kaku-f75d4da8eff545519e8e550b786f0d4c) par Cyrone
+(https://sketchfab.com/Cyrone), sous licence CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/).
+Fichier `kaku.glb` : modèle d'origine, textures intégrées ; les poses sont calculées par le jeu.

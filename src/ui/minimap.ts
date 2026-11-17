@@ -200,6 +200,16 @@ export class Minimap {
     c.scale(zoom, zoom);
     c.translate(-this.mx(car.pos.x), -this.mz(car.pos.z));
     c.drawImage(this.base, 0, 0);
+    // Le garage du joueur : une petite maison, toujours droite.
+    const home = this.city.garage;
+    if (home) {
+      c.save();
+      c.translate(this.mx(home.x), this.mz(home.z));
+      c.rotate(-(car.yaw - Math.PI));
+      c.scale(1 / zoom, 1 / zoom);
+      drawHouse(c, 8);
+      c.restore();
+    }
     if (!race.active) {
       for (const m of this.markers) {
         c.fillStyle = m.circuit ? '#ff2d95' : '#2ee6ff';
@@ -270,4 +280,26 @@ export class Minimap {
     c.arc(half, half, half - 2, 0, Math.PI * 2);
     c.stroke();
   }
+}
+
+/** Dessine une petite maison centrée sur l'origine (repère du garage sur les cartes). */
+export function drawHouse(c: CanvasRenderingContext2D, size: number): void {
+  const s = size;
+  c.beginPath();
+  c.moveTo(0, -s);
+  c.lineTo(s, -s * 0.1);
+  c.lineTo(s * 0.68, -s * 0.1);
+  c.lineTo(s * 0.68, s * 0.8);
+  c.lineTo(-s * 0.68, s * 0.8);
+  c.lineTo(-s * 0.68, -s * 0.1);
+  c.lineTo(-s, -s * 0.1);
+  c.closePath();
+  c.fillStyle = '#ffd23e';
+  c.strokeStyle = '#0b0b16';
+  c.lineWidth = Math.max(1.2, s * 0.18);
+  c.lineJoin = 'round';
+  c.stroke();
+  c.fill();
+  c.fillStyle = '#0b0b16';
+  c.fillRect(-s * 0.2, s * 0.2, s * 0.4, s * 0.6);
 }
