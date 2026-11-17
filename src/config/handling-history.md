@@ -54,4 +54,29 @@ sans freiner la rotation.
 Mesures, drift de 4 s lancé à 110 km/h, volant braqué : la trajectoire tourne de 84° sans
 accroche (ancienne version), 114° en A, 160° en B ; la vitesse finit à 114, 87 et 63 km/h.
 
+**Retour des joueurs (2026-11-16, version 26424a1) :** le drift est trop prononcé ; et quand
+on freine en tournant, la voiture perd son virage et continue tout droit.
+
+## 2026-11-16 — Quatrième essai : drift adouci et freinage en virage
+
+Corrections communes à A et B :
+
+- **Freinage en virage** (`trailBraking`, 0.75) : au freinage, les pneus gardent presque toute
+  leur tenue latérale. Mesure, plein braquage + frein à fond à 120 km/h : la trajectoire tourne
+  de 34° en 1,5 s, contre 22° avant (40° sans freiner).
+- **Stabilité au freinage** : l'amortissement du lacet augmente avec le frein (l'arrière allégé
+  ne passe plus devant à mi-frein).
+- **Contrôle de stabilité** : hors drift, l'antipatinage coupe les gaz si la voiture part en
+  travers (elle ne reste plus coincée à tourner en rond plein gaz).
+- **Drift adouci** : coup de lacet 0.55 → 0.3, adhérence arrière en drift 0.42 → 0.55,
+  accroche 0.6. Le drift se referme seul en 1 à 1,5 s volant droit.
+
+| | A — base | B — « Drift encore plus sage » |
+|---|---|---|
+| Angle de drift max. (`driftMaxAngleDeg`) | 28° | 22° |
+| Adhérence arrière en drift (`driftRearGrip`) | 0.55 | 0.68 |
+
+Mesures, drift tenu volant braqué à 110 km/h : angle stabilisé 30° (A) et 24° (B), contre 40°
+avant.
+
 _Choix retenu : à remplir après les essais._

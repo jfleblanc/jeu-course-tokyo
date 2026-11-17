@@ -349,7 +349,11 @@ export class Vehicle {
     const rl = this.wheels[2] as WheelState;
     const rr = this.wheels[3] as WheelState;
     const sliding = Math.abs(this.bodySlip) > 0.3 || this.driftAmount > 0.5;
-    const driveForce = dt_.update(dt, vF, this.throttle, cfg.enginePower, cfg.engineBrake, sliding);
+    // Contrôle de stabilité : hors drift, si la voiture part en travers, l'antipatinage coupe
+    // une partie des gaz pour qu'elle se remette en ligne au lieu de tourner en rond.
+    const slideExcess = clamp((Math.abs(this.bodySlip) - 0.2) / 0.3, 0, 1) * (1 - this.driftAmount);
+    const powerCut = 1 - cfg.tractionControl * slideExcess * (vF > 0 ? 1 : 0);
+    const driveForce = dt_.update(dt, vF, this.throttle * powerCut, cfg.enginePower, cfg.engineBrake, sliding);
     const drivenContacts = (rl.inContact ? 1 : 0) + (rr.inContact ? 1 : 0);
 
     // ——— Pneus ———
@@ -424,7 +428,11 @@ export class Vehicle {
       else curve = Math.sign(n) * (cfg.slideGrip + (1 - cfg.slideGrip) * Math.exp(-(an - 1) * 1.2));
       const muLat = (w.front ? cfg.gripFront : cfg.gripRear * rearGripFactor);
       // Cercle d'adhérence : ce qui est pris en long n'est plus disponible en latéral.
-      const latScale = Math.sqrt(Math.max(0.04, 1 - longRatio * longRatio * 0.85));
+      // Au freinage, l'aide « freinage en virage » laisse aux pneus presque toute leur tenue latérale
+      // (sinon, frein à fond = la voiture file tout droit).
+      const isBraking = fLong * vLong < 0;
+      const coupling = isBraking ? 0.85 * (1 - cfg.trailBraking) : 0.85;
+      const latScale = Math.sqrt(Math.max(0.04, 1 - longRatio * longRatio * coupling));
       const latLimit = muLat * load * latScale;
       let fLat = -latLimit * curve;
       // À basse vitesse, on ne dépasse jamais la force qui annule la vitesse latérale (pas d'oscillation).
@@ -481,7 +489,9 @@ export class Vehicle {
     if (contacts >= 2) {
       const iy = spec.inertia.y;
       // Amortissement du lacet (réduit pendant le drift pour laisser pivoter)
-      let yawTorque = -cfg.yawDamping * yawRate * iy * lerp(1, 0.35, this.driftAmount) * dt;
+      // Au freinage le poids passe à l'avant et l'arrière s'allège : on stabilise davantage (façon ESP).
+      const brakeStab = 1 + 2.5 * this.brake * (1 - this.driftAmount);
+      let yawTorque = -cfg.yawDamping * brakeStab * yawRate * iy * lerp(1, 0.35, this.driftAmount) * dt;
       // Limite d'angle de drift : au-delà, on ramène le nez vers la trajectoire.
       const maxAngle = cfg.driftMaxAngleDeg * (Math.PI / 180);
       const excess = Math.abs(this.bodySlip) - maxAngle;

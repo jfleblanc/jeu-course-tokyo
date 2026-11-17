@@ -92,16 +92,31 @@ async function run(name: string, cfg: HandlingConfig) {
   }
   // Sans drift : lever de pied + braquage brusque à 130 (la voiture doit rester saine)
   input.steer = 0;
-  step(60 * 20, () => { input.throttle = kmh() < 130 ? 1 : 0; });
-  input.throttle = 0; input.steer = 1; let pk = 0;
+  car.teleport(0, 0.8, 0, 0); input.drift = false;
+  step(60 * 20, () => { input.throttle = kmh() < 130 ? 1 : 0; input.brake = kmh() > 136 ? 0.5 : 0; });
+  input.brake = 0; input.throttle = 0; input.steer = 1; let pk = 0;
   step(60 * 2, () => { pk = Math.max(pk, Math.abs(car.bodySlip)); });
   input.steer = -1; step(60 * 2, () => { pk = Math.max(pk, Math.abs(car.bodySlip)); });
   console.log(`chicane brusque à 130 sans drift: dérive max ${(pk * 57.3).toFixed(0)}°  v=${kmh().toFixed(0)}`);
+  // Freiner en tournant : la trajectoire doit continuer à tourner
+  for (const brake of [0, 0.5, 1]) {
+    input.steer = 0; input.brake = 0; input.drift = false; input.throttle = 0;
+    car.teleport(0, 0.8, 0, 0); // le sol du banc d'essai n'est pas infini
+    step(60 * 25, () => { input.throttle = kmh() < 120 ? 1 : 0; input.brake = kmh() > 126 ? 0.5 : 0; });
+    if (process.env.TRACE) console.log(`  avant: v=${kmh().toFixed(0)} rapport=${car.drivetrain.gearLabel} rpm=${car.drivetrain.rpm.toFixed(0)} y=${car.pos.y.toFixed(2)} dérive=${(car.bodySlip*57.3).toFixed(0)}`);
+    input.throttle = 0; input.brake = brake; input.steer = 1;
+    let prev = Math.atan2(car.body.linvel().x, car.body.linvel().z), turned = 0, slip = 0; const v0 = kmh();
+    step(90, () => { const lv = car.body.linvel(); if (car.speed > 2) { const d = Math.atan2(lv.x, lv.z); let dd = d - prev; dd = Math.atan2(Math.sin(dd), Math.cos(dd)); turned += dd; prev = d; } slip = Math.max(slip, Math.abs(car.bodySlip)); });
+    console.log(`virage + frein ${brake * 100} % depuis ${v0.toFixed(0)} km/h: trajectoire tournée de ${(Math.abs(turned) * 57.3).toFixed(0)}° en 1,5 s, v fin ${kmh().toFixed(0)}, dérive max ${(slip * 57.3).toFixed(0)}°`);
+    input.brake = 0; input.steer = 0;
+  }
   // Plein gaz en 1re en braquant (antipatinage)
-  input.steer = 0; input.throttle = 0; input.brake = 1; step(60 * 6); input.brake = 0; step(30);
+  car.teleport(0, 0.8, 0, 0); input.steer = 0; input.throttle = 0; input.brake = 1; step(60 * 6); input.brake = 0; step(30);
   car.drivetrain.setGear(1); input.throttle = 1; input.steer = 1; pk = 0;
   step(60 * 4, () => { pk = Math.max(pk, Math.abs(car.bodySlip)); });
   console.log(`départ plein gaz braqué: dérive max ${(pk * 57.3).toFixed(0)}°  v=${kmh().toFixed(0)}`);
+  input.steer = 0; step(60 * 4);
+  console.log(`   puis volant droit, toujours plein gaz, 4 s: dérive ${(car.bodySlip * 57.3).toFixed(0)}°  v=${kmh().toFixed(0)}`);
 }
 
 // ——— Essais dans la vraie ville : rampe d'autoroute, trottoir, mur ———

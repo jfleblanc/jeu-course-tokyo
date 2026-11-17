@@ -52,6 +52,8 @@ export interface HandlingConfig {
   yawDamping: number;
   /** Aide au contre-braquage : la voiture contre-braque en partie toute seule. */
   counterSteer: number;
+  /** Freinage en virage : 0 = freiner fort fait perdre la direction, 1 = on garde toute la direction en freinant. */
+  trailBraking: number;
 
   // ——— Drift (espace) ———
   /** Adhérence arrière pendant le drift (fraction de l'adhérence normale). */
@@ -82,8 +84,8 @@ export interface HandlingConfig {
 }
 
 /**
- * Préréglage A — base actuelle (choisie par les joueurs le 2026-11-16) :
- * arrière joueur + braquage nerveux. Son drift glisse beaucoup (peu d'accroche).
+ * Préréglage A — base actuelle (2026-11-16) : arrière joueur, braquage nerveux,
+ * drift adouci (angle max 28°, déclenchement plus progressif, bonne accroche).
  */
 export const PRESET_A: HandlingConfig = {
   enginePower: 1.0,
@@ -109,11 +111,12 @@ export const PRESET_A: HandlingConfig = {
 
   yawDamping: 1.2,
   counterSteer: 0.45,
+  trailBraking: 0.75,
 
-  driftRearGrip: 0.42,
-  driftCarve: 0.3,
-  driftMaxAngleDeg: 38,
-  driftKick: 0.55,
+  driftRearGrip: 0.55,
+  driftCarve: 0.6,
+  driftMaxAngleDeg: 28,
+  driftKick: 0.3,
   driftRecovery: 0.6,
 
   brakeForce: 21000,
@@ -124,15 +127,15 @@ export const PRESET_A: HandlingConfig = {
 };
 
 /**
- * Préréglage B — « Drift qui accroche ».
+ * Préréglage B — « Drift encore plus sage ».
  * Identique à A sauf DEUX réglages de drift :
- *   - driftCarve        0.3 → 0.75  (la trajectoire suit le nez : on prend vraiment le virage)
- *   - driftMaxAngleDeg  38  → 32    (angle un peu plus fermé, plus facile à tenir)
+ *   - driftMaxAngleDeg  28   → 22    (glisse plus fermée)
+ *   - driftRearGrip     0.55 → 0.68  (l'arrière décroche moins, on ressort plus vite)
  */
 export const PRESET_B: HandlingConfig = {
   ...PRESET_A,
-  driftCarve: 0.75,
-  driftMaxAngleDeg: 32,
+  driftMaxAngleDeg: 22,
+  driftRearGrip: 0.68,
 };
 
 export interface SliderDef {
@@ -185,6 +188,7 @@ export const HANDLING_SLIDERS: SliderGroup[] = [
     title: 'Aides à la conduite',
     sliders: [
       { key: 'yawDamping', label: 'Stabilité (lacet)', min: 0, max: 6, step: 0.1, hint: 'Calme les tête-à-queue. 0 = aucune aide.' },
+      { key: 'trailBraking', label: 'Freinage en virage', min: 0, max: 1, step: 0.05, hint: 'Plus haut = la voiture continue de tourner quand on freine.' },
       { key: 'counterSteer', label: 'Aide au contre-braquage', min: 0, max: 1, step: 0.05, hint: 'La voiture rattrape en partie la glisse seule.' },
     ],
   },
