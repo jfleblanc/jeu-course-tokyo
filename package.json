@@ -1,0 +1,27 @@
+{
+  "name": "jeu-course-tokyo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Jeu de course 3D de nuit dans une ville style Tokyo (Three.js WebGPU + Rapier). Projet père-fils, usage privé.",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "sim": "sh scripts/run-sim.sh"
+  },
+  "dependencies": {
+    "@dimforge/rapier3d-compat": "0.19.3",
+    "three": "0.187.0"
+  },
+  "devDependencies": {
+    "@types/three": "0.187.0",
+    "esbuild": "0.28.2",
+    "typescript": "6.0.3",
+    "vite": "8.3.8"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}
