@@ -39,8 +39,10 @@ const browser = await chromium.launch({
 const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
 const problems = [];
 page.on('console', (m) => {
-  // Le rendu logiciel signale sa lenteur (« GPU stall ») : ce n'est pas une erreur du jeu.
-  if (m.type() === 'error' || (m.type() === 'warning' && !m.text().includes('GPU stall'))) problems.push(`[${m.type()}] ${m.text()}`);
+  // Le pilote graphique logiciel commente sa propre lenteur (« GL Driver Message … Performance ») :
+  // ce ne sont pas des erreurs du jeu, on les ignore.
+  if (m.text().includes('GL Driver Message') && m.text().includes('Performance')) return;
+  if (m.type() === 'error' || m.type() === 'warning') problems.push(`[${m.type()}] ${m.text()}`);
 });
 page.on('pageerror', (e) => problems.push(`[exception] ${e.message}`));
 page.on('response', (r) => {
