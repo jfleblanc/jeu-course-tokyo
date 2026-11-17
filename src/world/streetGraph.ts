@@ -12,6 +12,8 @@ import { WORLD, type RoadKind } from '../config/world';
  * petites rues. Chaque ligne est ensuite lissée par une courbe passant par ses carrefours.
  */
 export interface GraphNode {
+  /** Quartier extérieur auquel appartient ce carrefour ; −1 = ville principale. */
+  district: number;
   id: number;
   x: number;
   z: number;
@@ -40,9 +42,30 @@ export interface GraphEdge {
   trimA: number;
   trimB: number;
   onRing: boolean;
+  /** Quartier extérieur auquel appartient cette rue ; −1 = ville principale. */
+  district: number;
+}
+
+/** Quartier extérieur, au-delà de l'autoroute de ceinture, débloqué à un certain niveau. */
+export interface District {
+  id: number;
+  name: string;
+  unlockLevel: number;
+  cx: number;
+  cz: number;
+  /** Rayon approximatif (m), bâtiments compris. */
+  radius: number;
+  /** Contour de son périphérique : x0, z0, x1, z1… */
+  polygon: number[];
+  /** Carrefour d'entrée (là où arrive la route d'accès). */
+  entryNode: number;
+  /** Barrière de chantier tant que le quartier est verrouillé : position, direction de la route, largeur. */
+  gate: { x: number; z: number; yaw: number; width: number };
 }
 
 export interface StreetGraph {
+  /** Quartiers extérieurs (vide tant que la ville n'a pas été étendue). */
+  districts: District[];
   nodes: GraphNode[];
   edges: GraphEdge[];
   /** Arêtes du boulevard central, d'ouest en est. */
@@ -124,11 +147,24 @@ interface Chain {
 const SUBDIV = 9;
 const MAX_CORNER = 34;
 
-export function generateStreetGraph(seed: number): StreetGraph {
+/** Options d'un quartier extérieur : petit réseau posé ailleurs, dans son propre repère. */
+export interface GraphOptions {
+  district: number;
+  lines: number;
+  spacing: number;
+  cx: number;
+  cz: number;
+  /** Axe local +z (unitaire) dans le monde : pointe vers l'extérieur de la ville. */
+  ezx: number;
+  ezz: number;
+}
+
+export function generateStreetGraph(seed: number, opt?: GraphOptions): StreetGraph {
   const rng = new Rng(seed);
-  const N = WORLD.lines;
+  const N = opt?.lines ?? WORLD.lines;
   const mid = Math.floor(N / 2);
-  const half = ((N - 1) / 2) * WORLD.spacing;
+  const half = ((N - 1) / 2) * (opt?.spacing ?? WORLD.spacing);
+  const district = opt?.district ?? -1;
 
   // ——— 1. Positions des lignes (irrégulières), puis des carrefours ———
   const linePos = (): number[] => {
@@ -168,7 +204,13 @@ export function generateStreetGraph(seed: number): StreetGraph {
         x += rng.range(-1, 1) * WORLD.jitter;
         z += rng.range(-1, 1) * WORLD.jitter;
       }
-      nodes.push({ id: id(i, j), x, z, edges: [], radius: 0, corners: [], outline: [], onRing: edge });
+      if (opt) {
+        // Repère du quartier : +z local vers l'extérieur de la ville.
+        const lx = x, lz = z;
+        x = opt.cx + lx * opt.ezz + lz * opt.ezx;
+        z = opt.cz - lx * opt.ezx + lz * opt.ezz;
+      }
+      nodes.push({ id: id(i, j), x, z, edges: [], radius: 0, corners: [], outline: [], onRing: edge, district });
     }
   }
 
@@ -188,7 +230,8 @@ export function generateStreetGraph(seed: number): StreetGraph {
   for (let j = 1; j < N - 1; j++) {
     const row: number[] = [];
     for (let i = 0; i < N; i++) row.push(id(i, j));
-    if (j === mid) chains.push({ nodes: row, kind: 'boulevard', closed: false, role: 'boulevard' });
+    if (j === mid && !opt) chains.push({ nodes: row, kind: 'boulevard', closed: false, role: 'boulevard' });
+    else if (j === mid) chains.push({ nodes: row, kind: 'avenue', closed: false, role: 'line' });
     else chains.push({ nodes: row, kind: kindOfLine(j, rowShift), closed: false, role: 'line' });
   }
   for (let i = 1; i < N - 1; i++) {
@@ -196,6 +239,7 @@ export function generateStreetGraph(seed: number): StreetGraph {
     for (let j = 0; j < N; j++) col.push(id(i, j));
     chains.push({ nodes: col, kind: i === mid ? 'avenue' : kindOfLine(i, colShift), closed: false, role: 'line' });
   }
+  if (!opt) {
   // Deux avenues en diagonale qui se jettent dans le boulevard (carrefours en Y).
   const diag1: number[] = [];
   for (let k = 0; k <= mid - 1; k++) diag1.push(id(k, k + 1));
@@ -212,6 +256,12 @@ export function generateStreetGraph(seed: number): StreetGraph {
   for (let k = 0; k <= 3; k++) diag4.push(id(N - 1 - k, 1 + k));
   chains.push({ nodes: diag3, kind: 'avenue', closed: false, role: 'diagonal' });
   chains.push({ nodes: diag4, kind: 'street', closed: false, role: 'diagonal' });
+  } else {
+    // Quartier : une seule diagonale, d'un coin vers le centre.
+    const d: number[] = [];
+    for (let k = 0; k <= mid; k++) d.push(id(k, k));
+    chains.push({ nodes: d, kind: 'avenue', closed: false, role: 'diagonal' });
+  }
 
   // ——— 3. Arêtes brutes, puis suppression de petites rues sans couper le réseau ———
   interface Raw {
@@ -312,6 +362,7 @@ export function generateStreetGraph(seed: number): StreetGraph {
       trimA: 0,
       trimB: 0,
       onRing: c.role === 'ring',
+      district,
     };
     edges.push(e);
     (nodes[r.a] as GraphNode).edges.push(e.id);
@@ -401,5 +452,23 @@ export function generateStreetGraph(seed: number): StreetGraph {
   for (let k = 0; k < ringPolygon.length; k += 2) radius += Math.hypot(ringPolygon[k] as number, ringPolygon[k + 1] as number);
   radius /= ringPolygon.length / 2;
 
-  return { nodes, edges, boulevard, ring, ringPolygon, radius };
+  return { nodes, edges, boulevard, ring, ringPolygon, radius, districts: [] };
+}
+
+/** Ajoute un quartier (réseau indépendant) au réseau principal. Renvoie le décalage des numéros de carrefours. */
+export function mergeGraph(main: StreetGraph, sub: StreetGraph): number {
+  const nodeOffset = main.nodes.length;
+  const edgeOffset = main.edges.length;
+  for (const n of sub.nodes) {
+    n.id += nodeOffset;
+    n.edges = n.edges.map((e) => e + edgeOffset);
+    main.nodes.push(n);
+  }
+  for (const e of sub.edges) {
+    e.id += edgeOffset;
+    e.a += nodeOffset;
+    e.b += nodeOffset;
+    main.edges.push(e);
+  }
+  return nodeOffset;
 }

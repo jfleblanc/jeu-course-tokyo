@@ -48,7 +48,7 @@ const STEP = 3;
 
 function walk(graph: StreetGraph, rng: Rng, target: number): { edges: number[]; forward: boolean[] } | null {
   // Départ sur une avenue assez longue pour la grille (pas sur le boulevard, encombré de piliers).
-  const candidates = graph.edges.filter((e) => e.kind === 'avenue' && e.length - e.trimA - e.trimB > 90);
+  const candidates = graph.edges.filter((e) => e.district < 0 && e.kind === 'avenue' && e.length - e.trimA - e.trimB > 90);
   if (candidates.length === 0) return null;
   const first = rng.pick(candidates);
   let forward = rng.chance(0.5);
@@ -127,7 +127,7 @@ function optionsAt(graph: StreetGraph, cur: GraphEdge, forward: boolean, visited
  * longueur visée, puis on revient au point de départ par le plus court chemin encore libre.
  */
 function walkLoop(graph: StreetGraph, rng: Rng, target: number): { edges: number[]; forward: boolean[] } | null {
-  const candidates = graph.edges.filter((e) => e.kind === 'avenue' && !e.onRing && e.length - e.trimA - e.trimB > 90);
+  const candidates = graph.edges.filter((e) => e.district < 0 && e.kind === 'avenue' && !e.onRing && e.length - e.trimA - e.trimB > 90);
   if (candidates.length === 0) return null;
   const first = rng.pick(candidates);
   let forward = rng.chance(0.5);
