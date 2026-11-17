@@ -1,4 +1,4 @@
-import { KEYBOARD, KEY_EVENTS } from '../config/controls';
+import { bindings, keyCapture } from './bindings';
 import type { ActionEvent, RawInput } from './actions';
 
 export class KeyboardSource {
@@ -11,7 +11,15 @@ export class KeyboardSource {
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
       const target = ev.target as HTMLElement | null;
       if (target && (target.tagName === 'TEXTAREA' || (target.tagName === 'INPUT' && (target as HTMLInputElement).type === 'text'))) return;
-      const action = KEY_EVENTS[ev.code];
+      if (keyCapture.handler) {
+        // Remappage en cours : la touche va au menu.
+        ev.preventDefault();
+        const h = keyCapture.handler;
+        keyCapture.handler = null;
+        h(ev.code);
+        return;
+      }
+      const action = bindings.eventOf(ev.code);
       if (action) {
         ev.preventDefault(); // F1 ouvrirait l'aide du navigateur, les flèches feraient défiler la page
         if (!ev.repeat) this.emit(action);
@@ -31,10 +39,7 @@ export class KeyboardSource {
   }
 
   private isDriveKey(code: string): boolean {
-    for (const list of Object.values(KEYBOARD)) {
-      if ((list as readonly string[]).includes(code)) return true;
-    }
-    return false;
+    return bindings.isDriveKey(code);
   }
 
   private any(codes: readonly string[]): boolean {
@@ -43,10 +48,10 @@ export class KeyboardSource {
   }
 
   read(out: RawInput): void {
-    out.throttle = this.any(KEYBOARD.throttle) ? 1 : 0;
-    out.brake = this.any(KEYBOARD.brake) ? 1 : 0;
-    out.steer = (this.any(KEYBOARD.steerLeft) ? 1 : 0) - (this.any(KEYBOARD.steerRight) ? 1 : 0);
-    out.drift = this.any(KEYBOARD.drift);
-    out.nos = this.any(KEYBOARD.nos);
+    out.throttle = this.any(bindings.codes('throttle')) ? 1 : 0;
+    out.brake = this.any(bindings.codes('brake')) ? 1 : 0;
+    out.steer = (this.any(bindings.codes('steerLeft')) ? 1 : 0) - (this.any(bindings.codes('steerRight')) ? 1 : 0);
+    out.drift = this.any(bindings.codes('drift'));
+    out.nos = this.any(bindings.codes('nos'));
   }
 }

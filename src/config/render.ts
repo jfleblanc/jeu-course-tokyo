@@ -9,6 +9,8 @@ export interface RenderConfig {
   wetness: number;
   /** Volume de la musique (0 = coupée). */
   musicVolume: number;
+  /** Volume des bruitages (moteur, pneus, vent). */
+  sfxVolume: number;
 }
 
 export const RENDER_DEFAULTS: RenderConfig = {
@@ -20,6 +22,7 @@ export const RENDER_DEFAULTS: RenderConfig = {
   neon: 1.0,
   wetness: 0.85,
   musicVolume: 0.6,
+  sfxVolume: 0.55,
 };
 
 export const RENDER_SLIDERS: { key: keyof RenderConfig; label: string; min: number; max: number; step: number }[] = [
@@ -31,6 +34,7 @@ export const RENDER_SLIDERS: { key: keyof RenderConfig; label: string; min: numb
   { key: 'neon', label: 'Intensité des néons', min: 0.3, max: 2, step: 0.05 },
   { key: 'wetness', label: 'Reflets chaussée mouillée', min: 0, max: 1.6, step: 0.05 },
   { key: 'musicVolume', label: 'Volume de la musique', min: 0, max: 1, step: 0.05 },
+  { key: 'sfxVolume', label: 'Volume des bruitages', min: 0, max: 1, step: 0.05 },
 ];
 
 export type Quality = 'bas' | 'moyen' | 'haut';

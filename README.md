@@ -75,7 +75,8 @@ Règle : ne changer que deux ou trois réglages à la fois entre A et B.
 ## Phases
 
 Voir le brief du projet. Phases 1 (conduite + une ville), 2 (courses), 3 (progression) et
-4 (contenu de course) : faites. Ensuite : phase 5 (finition).
+4 (contenu de course) : faites. Phase 5 (finition) : en grande partie faite (son, écran titre,
+tutoriel, paramètres) ; restent le garage comme lieu, l'habitacle détaillé et le flou de vitesse.
 
 ## Progression
 
@@ -106,23 +107,38 @@ palier. La mini-carte tourne avec la voiture et montre le tracé, les objets et 
 L'option d'adresse `?barrieres` affiche un aperçu des rues transversales barrées (désactivé par
 défaut). Réglages : `src/config/race.ts` (pilotes, banque, objets).
 
-## Vrais modèles 3D de voitures (essai)
+## Voitures : vrais modèles 3D
 
-Ajouter `?modele=datsun-240k` à l'adresse remplace la voiture procédurale (joueur et
-adversaires) par un vrai modèle : peinture réglable, feux de frein, roues qui tournent et
-braquent, vue « capot » à la place de la vue intérieure. Les fichiers sont dans
-`public/models/` (crédits et licences : `public/models/CREDITS.md`).
+Treize voitures, chacune avec son modèle 3D (`public/models/<id>.glb`, crédits et licences dans
+`public/models/CREDITS.md`). Elles s'achètent au garage (`src/config/cars.ts`) et les pilotes
+adverses ont chacun la leur (`src/config/race.ts`). La peinture se change sur toutes, sauf le
+van Kansai et la Supra GT300, qui gardent leur livrée. La vue intérieure est une vue « capot ».
+`?modele=<id>` impose un modèle à tout le monde ; `?modele=aucun` revient à la voiture procédurale.
 
-Pour convertir un modèle Sketchfab (glTF décompressé) en GLB léger avec deux niveaux de détail :
+Ajouter une voiture :
 
-```sh
-MESHOPT_JS=<dossier js de meshoptimizer> TEX_DIR=<textures réduites> \
-  node tools/convert-car.mjs <dossier du modèle> datsun-240k public/models/datsun-240k.glb
-```
+1. télécharger le modèle en glTF sur Sketchfab, le décompresser, vérifier sa licence ;
+2. ajouter une entrée dans `tools/cars.config.mjs` (longueur réelle, matériau de peinture) ;
+3. convertir : `MODELS=<dossier des modèles> MESHOPT_JS=<meshoptimizer/js> SHARP=<node_modules avec sharp> sh tools/convert-all.sh <id>` ;
+4. l'ajouter dans `src/config/cars.ts` et `public/models/CREDITS.md`.
 
-Chaque voiture a une entrée dans `CARS` (en tête de `tools/convert-car.mjs`) : nom des pièces
-de roue, matériaux à regrouper, part de triangles gardée. Le chargement est dans
-`src/vehicle/glbCar.ts`, qui remplace les matériaux du fichier par ceux du jeu d'après leur nom.
+L'outil trouve les roues tout seul (pièces rondes posées au sol), range les matériaux en
+quelques familles (peinture, vitres, chromes, feux…), garde les textures utiles (plaques,
+livrées) et produit deux niveaux de détail : environ 70 000 triangles pour le joueur, 20 000
+pour les adversaires. Le chargement est dans `src/vehicle/glbCar.ts`.
+
+## Son, écran titre, tutoriel, paramètres
+
+- **Musique** générée par code (`src/audio/music.ts`, pistes dans `src/config/music.ts`) :
+  quatre pistes synthwave / dreamwave / retrowave.
+- **Bruitages** générés par code (`src/audio/sfx.ts`) : moteur selon le régime, crissement des
+  pneus, vent, NOS, décompte, mallettes, téléporteur, chocs.
+- **Écran titre** : la caméra tourne autour de la voiture, puis glisse derrière elle au départ.
+  `?direct` le saute (essais automatiques).
+- **Tutoriel** au premier lancement (`src/ui/tutorial.ts`), sept consignes validées en les
+  réalisant ; `Retour arrière` le passe.
+- **Paramètres** (`Échap` en balade, `src/ui/settingsMenu.ts`) : volumes, boîte de vitesses,
+  qualité d'image, touches du clavier modifiables (`src/input/bindings.ts`), test de manette.
 
 ## La ville
 

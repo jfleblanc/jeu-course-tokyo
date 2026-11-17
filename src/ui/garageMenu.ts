@@ -22,6 +22,7 @@ export class GarageMenu {
   ) {
     this.root = document.createElement('aside');
     this.root.id = 'garage';
+    this.root.className = 'side-menu';
     document.body.append(this.root);
     this.root.addEventListener('click', (ev) => {
       const t = (ev.target as HTMLElement).closest('[data-act]') as HTMLElement | null;

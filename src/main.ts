@@ -15,6 +15,11 @@ import { createPhysicsWorld } from './physics/physicsWorld';
 import { Race, pickDrivers } from './race/race';
 import { buildTrackBank, type Track } from './race/trackBank';
 import { RaceCard } from './ui/raceCard';
+import { SettingsMenu } from './ui/settingsMenu';
+import { Tutorial } from './ui/tutorial';
+import { Sfx } from './audio/sfx';
+import { emptyDriveInput } from './input/actions';
+import { bindings } from './input/bindings';
 import { PICKUPS } from './config/race';
 import type { AiLevel } from './config/race';
 import { raceReward } from './config/progression';
@@ -138,6 +143,9 @@ async function boot(): Promise<void> {
     console.info('Carte d’environnement indisponible, on continue sans.', err);
   }
 
+  let sfx: Sfx | undefined;
+  let lastBeep = -1;
+  const idleInput = emptyDriveInput();
   // ——— Réglages, commandes, interface ———
   const store = new TuningStore();
   const input = new InputManager();
@@ -155,6 +163,7 @@ async function boot(): Promise<void> {
     onRender: (cfg) => {
       ctx.apply(cfg);
       music.setVolume(cfg.musicVolume);
+      sfx?.setVolume(cfg.sfxVolume);
     },
     onQuality: (q) => {
       try {
@@ -169,6 +178,75 @@ async function boot(): Promise<void> {
   });
   ctx.apply(store.render);
   const music = new MusicPlayer(store.musicTrack, store.musicOn, store.render.musicVolume);
+  sfx = new Sfx(store.render.sfxVolume);
+  const sound = sfx;
+
+  // ——— Écran titre, tutoriel, paramètres ———
+  const direct = params.has('direct'); // ?direct : sans écran titre ni tutoriel (essais automatiques)
+  let titlePhase: 'attente' | 'glisse' | 'fini' = direct ? 'fini' : 'attente';
+  let titleTime = 0;
+  let glide = 0;
+  const glideFrom = new THREE.Vector3();
+  const glideQuat = new THREE.Quaternion();
+  const titleEl = document.createElement('div');
+  titleEl.id = 'title';
+  titleEl.innerHTML = `<div class="t-name">COURSE DE NUIT<span>東京</span></div><div class="t-go">APPUYEZ SUR <kbd>ENTRÉE</kbd></div><div class="t-sub">ou sur un bouton de la manette</div>`;
+  if (titlePhase === 'attente') {
+    document.body.append(titleEl);
+    document.body.classList.add('titre');
+  }
+  const tutorial = new Tutorial();
+  let cameraChanged = false;
+  const leaveTitle = (): void => {
+    if (titlePhase !== 'attente') return;
+    titlePhase = 'glisse';
+    glide = 0;
+    glideFrom.copy(camera.position);
+    glideQuat.copy(camera.quaternion);
+    titleEl.classList.add('hidden');
+    document.body.classList.remove('titre');
+    window.setTimeout(() => titleEl.remove(), 1200);
+    if (Tutorial.needed) tutorial.start();
+  };
+  window.addEventListener('pointerdown', leaveTitle);
+  window.addEventListener('keydown', (ev) => {
+    if (ev.code === 'Backspace') tutorial.skip();
+    else if (titlePhase === 'attente' && (ev.code === 'Space' || bindings.isDriveKey(ev.code))) leaveTitle();
+  });
+  const settings = new SettingsMenu({
+    musicVolume: () => store.render.musicVolume,
+    setMusicVolume: (v) => {
+      store.render.musicVolume = v;
+      music.setVolume(v);
+      store.save();
+    },
+    sfxVolume: () => store.render.sfxVolume,
+    setSfxVolume: (v) => {
+      store.render.sfxVolume = v;
+      sound.setVolume(v);
+      store.save();
+    },
+    quality: () => quality,
+    setQuality: (q) => {
+      if (q === quality) return;
+      try {
+        localStorage.setItem('jeu-course-tokyo.qualite', q);
+      } catch {
+        // tant pis
+      }
+      const url = new URL(location.href);
+      url.searchParams.delete('q');
+      location.href = url.href;
+    },
+    gearbox: () => car.drivetrain.mode,
+    setGearbox: (m) => {
+      car.drivetrain.mode = m;
+    },
+    padPressed: () => input.gamepad.pressed,
+    padName: () => input.gamepad.name,
+    replayTutorial: () => tutorial.start(),
+    click: () => sound.click(),
+  });
 
   // ——— Course ———
   const race = new Race(phys, CAR_SPEC, car);
@@ -286,8 +364,15 @@ async function boot(): Promise<void> {
   };
 
   input.on((e) => {
+    // Écran titre : n'importe quelle commande lance le jeu.
+    if (titlePhase === 'attente') {
+      leaveTitle();
+      return;
+    }
+    if (settings.open && e !== 'raceQuit') return;
     switch (e) {
       case 'camera':
+        cameraChanged = true;
         hud.toast(rig.toggle(visual) === 'interieure' ? 'Caméra intérieure' : 'Caméra de poursuite');
         break;
       case 'toggleGearbox':
@@ -321,7 +406,9 @@ async function boot(): Promise<void> {
         }
         break;
       case 'raceQuit':
-        if (garage.open) {
+        if (settings.open) {
+          settings.toggle();
+        } else if (garage.open) {
           garage.toggle();
         } else if (card.shown) {
           card.hide();
@@ -330,6 +417,9 @@ async function boot(): Promise<void> {
           const wasFinished = race.phase === 'finished';
           race.stop();
           hud.toast(wasFinished ? 'Balade libre' : 'Course abandonnée');
+        } else {
+          // Rien à fermer : Échap ouvre les paramètres (jeu en pause).
+          settings.toggle();
         }
         break;
       case 'musicNext':
@@ -355,7 +445,14 @@ async function boot(): Promise<void> {
   const loop = new FixedLoop({
     fixedUpdate(dt) {
       input.beginStep();
-      if (garage.open) return; // jeu en pause dans le garage
+      if (garage.open || settings.open) return; // jeu en pause dans les menus
+      if (titlePhase === 'attente') {
+        // Écran titre : la voiture attend, moteur au ralenti.
+        car.update(dt, idleInput, tuned);
+        phys.world.step();
+        car.afterStep();
+        return;
+      }
       // NOS : surpuissance tant qu'il en reste ; se recharge seulement en balade libre.
       const hasNos = player.car.nos;
       const boosting = hasNos && input.drive.nos && nosCharge > 0 && input.drive.throttle > 0.2 && race.phase !== 'countdown';
@@ -387,9 +484,55 @@ async function boot(): Promise<void> {
         const a = car.yaw + 2.4 + garageTime * 0.25;
         camera.position.set(visual.root.position.x + Math.sin(a) * 6.2, visual.root.position.y + 1.7, visual.root.position.z + Math.cos(a) * 6.2);
         camera.lookAt(visual.root.position.x, visual.root.position.y + 0.3, visual.root.position.z);
+      } else if (titlePhase === 'attente') {
+        // Écran titre : la caméra tourne lentement autour de la voiture.
+        titleTime += frameDt;
+        const a = car.yaw + 0.7 + titleTime * 0.12;
+        camera.position.set(visual.root.position.x + Math.sin(a) * 6.8, visual.root.position.y + 1.25 + Math.sin(titleTime * 0.2) * 0.25, visual.root.position.z + Math.cos(a) * 6.8);
+        camera.lookAt(visual.root.position.x, visual.root.position.y + 0.25, visual.root.position.z);
       } else {
         rig.update(frameDt, visual, car);
+        if (titlePhase === 'glisse') {
+          // Départ : la caméra glisse de l'écran titre jusqu'à sa place derrière la voiture.
+          glide = Math.min(1, glide + frameDt / 2.4);
+          const k = glide * glide * (3 - 2 * glide);
+          camera.position.lerpVectors(glideFrom, camera.position, k);
+          camera.quaternion.slerpQuaternions(glideQuat, camera.quaternion, k);
+          if (glide >= 1) titlePhase = 'fini';
+        }
       }
+      if (settings.open) settings.update();
+      // Bruitages
+      sound.update(frameDt, {
+        rpm: car.drivetrain.rpm,
+        redline: CAR_SPEC.redlineRpm,
+        throttle: car.throttle,
+        speed: car.speed,
+        slip: car.bodySlip,
+        drifting: input.drive.drift,
+        nos: car.powerBoost > 1,
+        active: !garage.open && !settings.open,
+      });
+      // Décompte : un bip par seconde, un plus aigu au départ.
+      if (race.phase === 'countdown') {
+        const n = Math.ceil(race.countdown);
+        if (n !== lastBeep && n >= 1 && n <= 3) sound.beep(false);
+        lastBeep = n;
+      } else if (lastBeep !== -1) {
+        if (race.phase === 'running') sound.beep(true);
+        lastBeep = -1;
+      }
+      tutorial.update(frameDt, {
+        kmh: car.speed * 3.6,
+        steer: input.drive.steer,
+        brake: input.drive.brake,
+        drifting: input.drive.drift && Math.abs(car.bodySlip) > 0.12,
+        cameraChanged,
+        garageOpen: garage.open,
+        cardShown: card.shown !== null,
+        racing: race.active,
+        pad: input.activeSource === 'manette',
+      });
       // Fin de course : récompenses.
       if (race.phase !== lastPhase) {
         if (race.phase === 'finished') {
@@ -397,6 +540,7 @@ async function boot(): Promise<void> {
           const place = me ? race.ranking().indexOf(me) + 1 : 4;
           raceHud.summary = player.finishRace(place, raceKind !== 'course', raceKind === 'palier', race.bonusMoney);
           refreshProgress();
+          sound.finish(place === 1);
         }
         lastPhase = race.phase;
       }
@@ -408,6 +552,8 @@ async function boot(): Promise<void> {
       while (race.events.length) {
         const ev = race.events.shift();
         if (!ev) break;
+        if (ev.type === 'cash') sound.coin();
+        else sound.warp();
         if (ev.type === 'cash') hud.toast(`Mallette : +¥ ${ev.amount.toLocaleString('fr-CA')}`);
         else hud.toast(ev.gained > 0 ? `Téléporteur : +${Math.round(ev.gained)} m !` : 'Téléporteur : vous êtes déjà en tête');
       }

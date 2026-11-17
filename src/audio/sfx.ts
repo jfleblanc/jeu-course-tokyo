@@ -1,0 +1,242 @@
+/**
+ * Bruitages générés par code (Web Audio), sans fichier : moteur, pneus, vent, NOS, et petits
+ * sons ponctuels (décompte, mallette, téléporteur, arrivée, choc).
+ *
+ * Le moteur est un son continu dont la hauteur suit le régime : deux oscillateurs (fréquence
+ * d'allumage d'un quatre-cylindres et son octave inférieure) passés dans une saturation douce
+ * et un filtre qui s'ouvre avec l'accélérateur.
+ */
+export interface SfxState {
+  rpm: number;
+  redline: number;
+  /** 0..1 */
+  throttle: number;
+  /** m/s */
+  speed: number;
+  /** Glissement latéral de la voiture (rad), en valeur absolue. */
+  slip: number;
+  drifting: boolean;
+  nos: boolean;
+  /** Faux : tout est coupé (menus, pause). */
+  active: boolean;
+}
+
+export class Sfx {
+  private ctx: AudioContext | null = null;
+  private master: GainNode | null = null;
+  private engine: { a: OscillatorNode; b: OscillatorNode; c: OscillatorNode; filter: BiquadFilterNode; gain: GainNode } | null = null;
+  private tire: { filter: BiquadFilterNode; gain: GainNode } | null = null;
+  private wind: { filter: BiquadFilterNode; gain: GainNode } | null = null;
+  private nos: { gain: GainNode } | null = null;
+  private volume = 0.7;
+  private lastSpeed = 0;
+  private thudCooldown = 0;
+  enabled = true;
+
+  constructor(volume: number) {
+    this.volume = volume;
+    const unlock = (): void => {
+      this.ensure();
+      if (this.ctx && this.ctx.state === 'running') {
+        window.removeEventListener('keydown', unlock);
+        window.removeEventListener('pointerdown', unlock);
+      }
+    };
+    window.addEventListener('keydown', unlock);
+    window.addEventListener('pointerdown', unlock);
+    document.addEventListener('visibilitychange', () => {
+      if (!this.ctx) return;
+      if (document.hidden) void this.ctx.suspend();
+      else void this.ctx.resume();
+    });
+  }
+
+  private ensure(): void {
+    if (this.ctx) {
+      if (this.ctx.state !== 'running') void this.ctx.resume();
+      return;
+    }
+    try {
+      const ctx = new AudioContext({ latencyHint: 'interactive' });
+      this.ctx = ctx;
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -16;
+      comp.ratio.value = 3;
+      this.master = ctx.createGain();
+      this.master.gain.value = this.volume;
+      this.master.connect(comp).connect(ctx.destination);
+
+      // Bruit blanc en boucle, partagé par les pneus, le vent et le NOS.
+      const noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+      const data = noise.getChannelData(0);
+      let seed = 24680;
+      for (let i = 0; i < data.length; i++) {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        data[i] = seed / 2147483648 - 1;
+      }
+      const noiseSrc = (): AudioBufferSourceNode => {
+        const s = ctx.createBufferSource();
+        s.buffer = noise;
+        s.loop = true;
+        s.start();
+        return s;
+      };
+
+      // — Moteur —
+      const shaper = ctx.createWaveShaper();
+      const curve = new Float32Array(257);
+      for (let i = 0; i < 257; i++) {
+        const x = i / 128 - 1;
+        curve[i] = Math.tanh(2.2 * x);
+      }
+      shaper.curve = curve;
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.Q.value = 1.4;
+      filter.frequency.value = 400;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      const mk = (type: OscillatorType, level: number): OscillatorNode => {
+        const o = ctx.createOscillator();
+        o.type = type;
+        o.frequency.value = 30;
+        const g = ctx.createGain();
+        g.gain.value = level;
+        o.connect(g).connect(shaper);
+        o.start();
+        return o;
+      };
+      const a = mk('sawtooth', 0.5);
+      const b = mk('square', 0.35);
+      const c = mk('sawtooth', 0.25);
+      c.detune.value = 9;
+      shaper.connect(filter).connect(gain).connect(this.master);
+      this.engine = { a, b, c, filter, gain };
+
+      // — Pneus qui crissent —
+      const tf = ctx.createBiquadFilter();
+      tf.type = 'bandpass';
+      tf.frequency.value = 1200;
+      tf.Q.value = 5;
+      const tg = ctx.createGain();
+      tg.gain.value = 0;
+      noiseSrc().connect(tf).connect(tg).connect(this.master);
+      this.tire = { filter: tf, gain: tg };
+
+      // — Vent et roulement —
+      const wf = ctx.createBiquadFilter();
+      wf.type = 'lowpass';
+      wf.frequency.value = 300;
+      const wg = ctx.createGain();
+      wg.gain.value = 0;
+      noiseSrc().connect(wf).connect(wg).connect(this.master);
+      this.wind = { filter: wf, gain: wg };
+
+      // — Sifflement du NOS —
+      const nf = ctx.createBiquadFilter();
+      nf.type = 'highpass';
+      nf.frequency.value = 3800;
+      const ng = ctx.createGain();
+      ng.gain.value = 0;
+      noiseSrc().connect(nf).connect(ng).connect(this.master);
+      this.nos = { gain: ng };
+    } catch (err) {
+      console.info('Bruitages indisponibles :', err);
+      this.enabled = false;
+    }
+  }
+
+  setVolume(v: number): void {
+    this.volume = v;
+    if (this.master && this.ctx) this.master.gain.setTargetAtTime(v, this.ctx.currentTime, 0.05);
+  }
+
+  /** À appeler à chaque image avec l'état de la voiture. */
+  update(dt: number, s: SfxState): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.engine || !this.tire || !this.wind || !this.nos) return;
+    const t = ctx.currentTime;
+    const on = s.active && this.enabled ? 1 : 0;
+    // Fréquence d'allumage d'un quatre-cylindres : deux explosions par tour.
+    const f = Math.max(18, (s.rpm / 60) * 2);
+    const e = this.engine;
+    e.a.frequency.setTargetAtTime(f, t, 0.03);
+    e.b.frequency.setTargetAtTime(f / 2, t, 0.03);
+    e.c.frequency.setTargetAtTime(f * 1.5, t, 0.03);
+    const rev = Math.min(1, s.rpm / s.redline);
+    e.filter.frequency.setTargetAtTime(260 + rev * 900 + s.throttle * (900 + rev * 1600), t, 0.05);
+    e.gain.gain.setTargetAtTime(on * (0.05 + s.throttle * 0.1 + rev * 0.05), t, 0.06);
+
+    const kmh = s.speed * 3.6;
+    // Crissement : dès que la voiture glisse de travers à bonne vitesse.
+    const slide = Math.min(1, Math.max(0, (Math.abs(s.slip) - 0.1) / 0.35)) * Math.min(1, kmh / 45);
+    this.tire.gain.gain.setTargetAtTime(on * slide * (s.drifting ? 0.16 : 0.11), t, 0.07);
+    this.tire.filter.frequency.setTargetAtTime(900 + slide * 500 + Math.min(400, kmh * 2), t, 0.1);
+
+    const air = Math.min(1, kmh / 200);
+    this.wind.gain.gain.setTargetAtTime(on * air * air * 0.22, t, 0.2);
+    this.wind.filter.frequency.setTargetAtTime(250 + air * 1300, t, 0.2);
+
+    this.nos.gain.gain.setTargetAtTime(on && s.nos ? 0.07 : 0, t, 0.05);
+
+    // Choc : la vitesse chute brutalement.
+    this.thudCooldown -= dt;
+    const drop = this.lastSpeed - s.speed;
+    if (on && drop > 4.5 && this.thudCooldown <= 0 && dt < 0.1) {
+      this.thud(Math.min(1, drop / 14));
+      this.thudCooldown = 0.35;
+    }
+    this.lastSpeed = s.speed;
+  }
+
+  // ——— Sons ponctuels ———
+  private tone(freq: number, start: number, dur: number, level: number, type: OscillatorType = 'sine', slideTo?: number): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master || !this.enabled) return;
+    const t = ctx.currentTime + start;
+    const o = ctx.createOscillator();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(level, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g).connect(this.master);
+    o.start(t);
+    o.stop(t + dur + 0.02);
+  }
+
+  /** Bip du décompte ; `go` = départ. */
+  beep(go: boolean): void {
+    this.tone(go ? 880 : 440, 0, go ? 0.5 : 0.16, 0.16, 'square');
+  }
+
+  /** Mallette ramassée. */
+  coin(): void {
+    this.tone(988, 0, 0.1, 0.14);
+    this.tone(1319, 0.08, 0.3, 0.14);
+  }
+
+  /** Téléporteur. */
+  warp(): void {
+    this.tone(220, 0, 0.45, 0.16, 'sawtooth', 1760);
+    this.tone(1760, 0.4, 0.3, 0.1);
+  }
+
+  /** Fin de course : petite phrase montante (plus longue pour une victoire). */
+  finish(win: boolean): void {
+    const notes = win ? [523, 659, 784, 1047] : [523, 659];
+    notes.forEach((n, k) => this.tone(n, k * 0.13, k === notes.length - 1 ? 0.6 : 0.16, 0.14, 'triangle'));
+  }
+
+  /** Clic de menu. */
+  click(): void {
+    this.tone(660, 0, 0.05, 0.07, 'triangle');
+  }
+
+  private thud(strength: number): void {
+    this.tone(95, 0, 0.22, 0.3 * strength + 0.1, 'sine', 40);
+    this.tone(180, 0, 0.06, 0.12 * strength, 'square', 70);
+  }
+}

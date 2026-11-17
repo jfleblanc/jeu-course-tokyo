@@ -2,7 +2,7 @@ import type { Race } from '../race/race';
 import type { RouteTurn } from '../race/route';
 import type { RaceSummary } from '../progression/playerState';
 
-const IDLE_HINT = '<kbd>Entrée</kbd> course · <kbd>T</kbd> circuit · ou arrêtez-vous sur une borne de départ';
+const IDLE_HINT = '<kbd>Entrée</kbd> course · <kbd>T</kbd> circuit · <kbd>G</kbd> garage · <kbd>Échap</kbd> paramètres';
 
 const fmtTime = (t: number): string => {
   const m = Math.floor(t / 60);
