@@ -1,7 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { GeomBuilder, type Vec3 } from '../render/geomBuilder';
 import type { CityMaterials } from '../render/materials';
-import type { Building, CityData, HighwaySample } from './cityGen';
+import type { Building, CityData, Connector, Highway, HighwaySample } from './cityGen';
 import { pointAt, type GraphEdge, type GraphNode, type PathPoint } from './streetGraph';
 
 /**
@@ -9,7 +9,7 @@ import { pointAt, type GraphEdge, type GraphNode, type PathPoint } from './stree
  * une poignée de draw calls pour tout le quartier.
  */
 
-const ROAD_KIND = { intersection: 0, alley: 1, street: 2, avenue: 3, boulevard: 4, highway: 5 } as const;
+const ROAD_KIND = { intersection: 0, alley: 1, street: 2, avenue: 3, boulevard: 4, highway: 5, ringway: 6, connector: 7 } as const;
 const SIDEWALK: Vec3 = [0.075, 0.078, 0.09];
 const CONCRETE: Vec3 = [0.085, 0.088, 0.095];
 const DARK_METAL: Vec3 = [0.035, 0.037, 0.042];
@@ -57,7 +57,7 @@ function addBuilding(gb: GeomBuilder, glow: GeomBuilder, b: Building): void {
 const CURB: Vec3 = [0.11, 0.115, 0.125];
 
 /** Chaussée d'une rue : ruban qui suit la courbe, entre les deux carrefours. */
-function addRoadEdge(gb: GeomBuilder, solid: GeomBuilder, e: GraphEdge): void {
+function addRoadEdge(gb: GeomBuilder, solid: GeomBuilder, e: GraphEdge, skipCurb: (x: number, z: number) => boolean): void {
   const half = e.width / 2;
   const s0 = e.trimA, s1 = e.length - e.trimB;
   const usable = s1 - s0;
@@ -78,6 +78,7 @@ function addRoadEdge(gb: GeomBuilder, solid: GeomBuilder, e: GraphEdge): void {
       // Bordure de trottoir (visuelle) de chaque côté
       for (const side of [1, -1]) {
         const a = side > 0 ? pl : pr, b = side > 0 ? l : r;
+        if (e.onRing && skipCurb((a[0] + b[0]) / 2, (a[2] + b[2]) / 2)) continue;
         const ox = p.tz * side * 0.3, oz = -p.tx * side * 0.3;
         const a2: Vec3 = [a[0] + ox, 0.09, a[2] + oz], b2: Vec3 = [b[0] + ox, 0.09, b[2] + oz];
         const a1: Vec3 = [a[0], 0.09, a[2]], b1: Vec3 = [b[0], 0.09, b[2]];
@@ -104,50 +105,59 @@ function addJunction(gb: GeomBuilder, n: GraphNode): void {
   }
 }
 
-function addHighway(city: CityData, road: GeomBuilder, solid: GeomBuilder, glow: GeomBuilder): void {
-  const hw = city.highway;
+function addHighway(hw: Highway, road: GeomBuilder, solid: GeomBuilder, glow: GeomBuilder, roadKind: number): void {
   const s = hw.samples;
   const half = hw.halfWidth;
   const bh = hw.barrierHeight;
   const thick = 0.9;
+  const n = s.length;
+  const inGap = (side: number, k: number): boolean => {
+    for (const g of hw.gaps) {
+      if (g.side !== side) continue;
+      // Les indices d'ouverture peuvent dépasser la boucle : on compare modulo n.
+      const rel = (((k - g.from) % n) + n) % n;
+      if (rel <= g.to - g.from) return true;
+    }
+    return false;
+  };
   const edge = (p: HighwaySample, side: number, lift = 0): Vec3 => [p.x + -p.tz * side * half, p.y + lift, p.z + p.tx * side * half];
   const edgeOut = (p: HighwaySample, side: number, lift: number, out: number): Vec3 => [p.x + -p.tz * side * (half + out), p.y + lift, p.z + p.tx * side * (half + out)];
-  for (let k = 0; k < s.length - 1; k++) {
+  const segs = hw.closed ? n : n - 1;
+  for (let k = 0; k < segs; k++) {
     const a = s[k] as HighwaySample;
-    const b = s[k + 1] as HighwaySample;
-    const len = b.s - a.s;
-    // Chaussée (gauche = +1 : côté −tz, +tx tourné de 90°)
+    const b = s[(k + 1) % n] as HighwaySample;
+    const len = Math.hypot(b.x - a.x, b.z - a.z);
+    const va = a.s, vb = a.s + len;
     const aL = edge(a, 1, 0.02), aR = edge(a, -1, 0.02), bL = edge(b, 1, 0.02), bR = edge(b, -1, 0.02);
-    const data = [ROAD_KIND.highway, 1e6, half, 0] as const;
-    road.quadUv(aL, bL, bR, aR, [0, 1, 0], [half, a.s, half, b.s, -half, b.s, -half, a.s], [1, 1, 1], data);
-    // Dessous et flancs du tablier ; sous 4 m, le flanc descend jusqu'au sol (rampe pleine).
-    const lowA = Math.max(0, a.y - thick) * (a.y < 4 ? 0 : 1);
-    const lowB = Math.max(0, b.y - thick) * (b.y < 4 ? 0 : 1);
+    const data = [roadKind, 1e6, half, 0] as const;
+    road.quadUv(aL, bL, bR, aR, [0, 1, 0], [half, va, half, vb, -half, vb, -half, va], [1, 1, 1], data);
     for (const side of [1, -1]) {
+      // Flanc : sous 4 m (rampe) et sur le côté extérieur de la ville, il descend jusqu'au sol.
+      const toGround = side === hw.outerSide;
+      const lowA = toGround || a.y < 4 ? 0 : a.y - thick;
+      const lowB = toGround || b.y < 4 ? 0 : b.y - thick;
       const topA = edgeOut(a, side, 0.02, 0.35), topB = edgeOut(b, side, 0.02, 0.35);
       const botA: Vec3 = [topA[0], lowA, topA[2]];
       const botB: Vec3 = [topB[0], lowB, topB[2]];
-      const n: Vec3 = [-a.tz * side, 0, a.tx * side];
-      if (side > 0) solid.quad(botB, botA, topA, topB, n, 0, 0, len, 1, CONCRETE);
-      else solid.quad(botA, botB, topB, topA, n, 0, 0, len, 1, CONCRETE);
-      // Glissière : muret plein + liseré lumineux
+      const nrm: Vec3 = [-a.tz * side, 0, a.tx * side];
+      const open = inGap(side, k);
+      if (a.y > 0.05 || b.y > 0.05) solid.quad(botB, botA, topA, topB, nrm, 0, 0, len, 1, CONCRETE);
+      if (open) continue;
+      // Glissière : muret plein + liseré lumineux (le mur extérieur est plus haut).
+      const h = toGround ? bh + 1.6 : bh;
       const inA = edge(a, side, 0.02), inB = edge(b, side, 0.02);
-      const inTopA = edge(a, side, bh), inTopB = edge(b, side, bh);
-      const outTopA = edgeOut(a, side, bh, 0.35), outTopB = edgeOut(b, side, bh, 0.35);
+      const inTopA = edge(a, side, h), inTopB = edge(b, side, h);
+      const outTopA = edgeOut(a, side, h, 0.35), outTopB = edgeOut(b, side, h, 0.35);
       const nin: Vec3 = [a.tz * side, 0, -a.tx * side];
-      if (side > 0) {
-        solid.quad(inA, inB, inTopB, inTopA, nin, 0, 0, len, bh, CONCRETE);
-        solid.quad(inTopA, inTopB, outTopB, outTopA, [0, 1, 0], 0, 0, len, 0.35, CONCRETE);
-        solid.quad(topB, topA, outTopA, outTopB, n, 0, 0, len, bh, CONCRETE);
-        glow.quad([inA[0], inA[1] + 0.5, inA[2]], [inB[0], inB[1] + 0.5, inB[2]], [inB[0], inB[1] + 0.62, inB[2]], [inA[0], inA[1] + 0.62, inA[2]], nin, 0, 0, len, 0.12, [1.0, 0.5, 0.12], [1, 3, 1, 0.9]);
-      } else {
-        solid.quad(inB, inA, inTopA, inTopB, nin, 0, 0, len, bh, CONCRETE);
-        solid.quad(inTopB, inTopA, outTopA, outTopB, [0, 1, 0], 0, 0, len, 0.35, CONCRETE);
-        solid.quad(topA, topB, outTopB, outTopA, n, 0, 0, len, bh, CONCRETE);
-        glow.quad([inB[0], inB[1] + 0.5, inB[2]], [inA[0], inA[1] + 0.5, inA[2]], [inA[0], inA[1] + 0.62, inA[2]], [inB[0], inB[1] + 0.62, inB[2]], nin, 0, 0, len, 0.12, [1.0, 0.5, 0.12], [1, 3, 1, 0.9]);
-      }
+      solid.quad(inA, inB, inTopB, inTopA, nin, 0, 0, len, h, CONCRETE);
+      solid.quad(inTopA, inTopB, outTopB, outTopA, [0, 1, 0], 0, 0, len, 0.35, CONCRETE);
+      solid.quad(topB, topA, outTopA, outTopB, nrm, 0, 0, len, h, CONCRETE);
+      const stripColor: Vec3 = toGround ? [0.15, 0.6, 1.0] : [1.0, 0.5, 0.12];
+      const y0 = toGround ? h - 0.35 : 0.5;
+      glow.quad([inA[0], inA[1] + y0, inA[2]], [inB[0], inB[1] + y0, inB[2]], [inB[0], inB[1] + y0 + 0.12, inB[2]], [inA[0], inA[1] + y0 + 0.12, inA[2]], nin, 0, 0, len, 0.12, stripColor, [1, 3, 1, 0.9]);
     }
     if (a.y >= 4 || b.y >= 4) {
+      const lowA = a.y - thick, lowB = b.y - thick;
       const uaL = edgeOut(a, 1, 0, 0.35), uaR = edgeOut(a, -1, 0, 0.35), ubL = edgeOut(b, 1, 0, 0.35), ubR = edgeOut(b, -1, 0, 0.35);
       solid.quad([uaL[0], lowA, uaL[2]], [ubL[0], lowB, ubL[2]], [ubR[0], lowB, ubR[2]], [uaR[0], lowA, uaR[2]], [0, -1, 0], 0, 0, 1, 1, CONCRETE);
     }
@@ -158,6 +168,32 @@ function addHighway(city: CityData, road: GeomBuilder, solid: GeomBuilder, glow:
     solid.box(p.x, h - 0.35, p.z, half * 2 + 0.4, 0.9, 2.0, p.yaw, CONCRETE, [0, 0, 0, 0], true, true);
     // Néon bleu sous le tablier, de chaque côté du pilier
     glow.box(p.x, h - 0.85, p.z, half * 1.6, 0.08, 0.14, p.yaw, [0.2, 0.55, 1.0], [1, 3, 1, 1.2], false, true);
+  }
+}
+
+/** Bretelle au sol : ruban posé juste au-dessus de la chaussée qu'elle rejoint. */
+function addConnector(gb: GeomBuilder, c: Connector): void {
+  const half = c.width / 2;
+  const count = c.pts.length / 2;
+  const data = [ROAD_KIND.connector, 1e6, half, 0] as const;
+  let pl: Vec3 = [0, 0, 0], pr: Vec3 = [0, 0, 0], v = 0;
+  for (let k = 0; k < count; k++) {
+    const x = c.pts[k * 2] as number, z = c.pts[k * 2 + 1] as number;
+    const a = Math.max(0, k - 1), b = Math.min(count - 1, k + 1);
+    let tx = (c.pts[b * 2] as number) - (c.pts[a * 2] as number), tz = (c.pts[b * 2 + 1] as number) - (c.pts[a * 2 + 1] as number);
+    const l = Math.hypot(tx, tz) || 1;
+    tx /= l;
+    tz /= l;
+    const y = 0.035;
+    const lp: Vec3 = [x + tz * half, y, z - tx * half];
+    const rp: Vec3 = [x - tz * half, y, z + tx * half];
+    if (k > 0) {
+      const pv = v;
+      v += Math.hypot(x - (c.pts[k * 2 - 2] as number), z - (c.pts[k * 2 - 1] as number));
+      gb.quadUv(pr, rp, lp, pl, [0, 1, 0], [-half, pv, -half, v, half, v, half, pv], [1, 1, 1], data);
+    }
+    pl = lp;
+    pr = rp;
   }
 }
 
@@ -199,7 +235,16 @@ export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes
     tile(x1, z0, G, z1);
   }
   const roads = new GeomBuilder();
-  for (const e of city.graph.edges) addRoadEdge(roads, solid, e);
+  // Pas de bordure de trottoir en travers d'une bretelle.
+  const nearConnector = (x: number, z: number): boolean => {
+    for (const c of city.connectors) {
+      for (let k = 0; k < c.pts.length; k += 2) {
+        if (Math.hypot((c.pts[k] as number) - x, (c.pts[k + 1] as number) - z) < c.width / 2 + 1.2) return true;
+      }
+    }
+    return false;
+  };
+  for (const e of city.graph.edges) addRoadEdge(roads, solid, e, nearConnector);
   for (const n of city.graph.nodes) addJunction(roads, n);
 
   // ——— Parcs, arbres, mobilier ———
@@ -233,7 +278,10 @@ export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes
 
   // ——— Autoroute surélevée ———
   const hwRoad = new GeomBuilder();
-  addHighway(city, hwRoad, solid, glow);
+  addHighway(city.highway, hwRoad, solid, glow, ROAD_KIND.highway);
+  addHighway(city.ringway, hwRoad, solid, glow, ROAD_KIND.ringway);
+  const connectorGeo = new GeomBuilder();
+  for (const c of city.connectors) addConnector(connectorGeo, c);
 
   // ——— Flaques de lumière au sol (plans additifs, pas de vraies lumières) ———
   const pools = new GeomBuilder();
@@ -263,6 +311,7 @@ export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes
     [solid, mats.solid, 'mobilier'],
     [glow, mats.glow, 'lumineux'],
     [hwRoad, mats.highwayRoad, 'autoroute'],
+    [connectorGeo, mats.connectorRoad, 'bretelles'],
   ] as const) {
     const geo = builder.build();
     triangles += tri(geo);

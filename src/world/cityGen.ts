@@ -139,6 +139,19 @@ export interface Highway {
   halfWidth: number;
   barrierHeight: number;
   pillars: { x: number; z: number; top: number; yaw: number }[];
+  /** Vrai pour une boucle fermée (autoroute de ceinture). */
+  closed: boolean;
+  /** Côté extérieur de la ville (+1 ou −1), 0 s'il n'y en a pas : le flanc y descend jusqu'au sol. */
+  outerSide: number;
+  /** Ouvertures dans la glissière (là où une bretelle rejoint l'autoroute), en indices d'échantillons. */
+  gaps: { side: number; from: number; to: number }[];
+}
+
+/** Bretelle au sol entre le périphérique et l'autoroute de ceinture. */
+export interface Connector {
+  /** Points de l'axe : x0, z0, x1, z1… */
+  pts: number[];
+  width: number;
 }
 
 export interface SpawnPoint {
@@ -164,7 +177,11 @@ export interface CityData {
   parks: Obb[];
   /** Murs invisibles derrière le périphérique. */
   walls: Wall[];
+  /** Autoroute surélevée du boulevard central. */
   highway: Highway;
+  /** Autoroute de ceinture. */
+  ringway: Highway;
+  connectors: Connector[];
   spawn: SpawnPoint;
   /** Points de réapparition sur la chaussée (milieu de chaque rue). */
   respawns: SpawnPoint[];
@@ -391,8 +408,185 @@ function buildHighway(graph: StreetGraph): Highway {
     next = sp.s + H.pillarSpacing;
     if (sp.y > 3) pillars.push({ x: sp.x, z: sp.z, top: sp.y, yaw: Math.atan2(sp.tx, sp.tz) });
   }
-  return { samples, halfWidth: H.deckHalfWidth, barrierHeight: H.barrierHeight, pillars };
+  return { samples, halfWidth: H.deckHalfWidth, barrierHeight: H.barrierHeight, pillars, closed: false, outerSide: 0, gaps: [] };
 }
+
+/**
+ * Autoroute de ceinture : une boucle large qui entoure la ville, à l'extérieur du périphérique.
+ * Elle alterne des portions au sol et des portions surélevées. Dans chaque portion au sol,
+ * deux bretelles en pente douce la relient au périphérique : on y entre et on en sort à pleine vitesse.
+ * Son flanc extérieur est un mur plein : c'est la limite visible de la ville.
+ */
+function buildRingway(graph: StreetGraph, rng: Rng): { ringway: Highway; connectors: Connector[] } {
+  const C = WORLD.ringway;
+  const poly = graph.ringPolygon;
+  const n = poly.length / 2;
+  const px = (k: number): number => poly[(((k % n) + n) % n) * 2] as number;
+  const pz = (k: number): number => poly[(((k % n) + n) % n) * 2 + 1] as number;
+
+  // Périphérique : distances cumulées et normale sortante en chaque point.
+  const aveCum: number[] = [0];
+  for (let k = 1; k <= n; k++) aveCum.push((aveCum[k - 1] as number) + Math.hypot(px(k) - px(k - 1), pz(k) - pz(k - 1)));
+  const aveLen = aveCum[n] as number;
+  const outward = (k: number): [number, number] => {
+    let tx = px(k + 1) - px(k - 1), tz = pz(k + 1) - pz(k - 1);
+    const l = Math.hypot(tx, tz) || 1;
+    tx /= l;
+    tz /= l;
+    let nx = tz, nz = -tx;
+    if (nx * px(k) + nz * pz(k) < 0) {
+      nx = -nx;
+      nz = -nz;
+    }
+    return [nx, nz];
+  };
+  /** Point du périphérique à la distance s (boucle), avec sa normale sortante. */
+  const avePoint = (s: number): { x: number; z: number; nx: number; nz: number } => {
+    const d = ((s % aveLen) + aveLen) % aveLen;
+    let k = 0;
+    while (k < n - 1 && (aveCum[k + 1] as number) < d) k++;
+    const t = (d - (aveCum[k] as number)) / ((aveCum[k + 1] as number) - (aveCum[k] as number) || 1);
+    const [n0x, n0z] = outward(k);
+    const [n1x, n1z] = outward(k + 1);
+    let nx = n0x + (n1x - n0x) * t, nz = n0z + (n1z - n0z) * t;
+    const l = Math.hypot(nx, nz) || 1;
+    nx /= l;
+    nz /= l;
+    return { x: px(k) + (px(k + 1) - px(k)) * t, z: pz(k) + (pz(k + 1) - pz(k)) * t, nx, nz };
+  };
+
+  // 1. Décalage du périphérique vers l'extérieur, puis lissage.
+  let ox: number[] = [], oz: number[] = [];
+  for (let k = 0; k < n; k++) {
+    const [nx, nz] = outward(k);
+    ox.push(px(k) + nx * C.offset);
+    oz.push(pz(k) + nz * C.offset);
+  }
+  for (let pass = 0; pass < 10; pass++) {
+    const sx: number[] = [], sz: number[] = [];
+    for (let k = 0; k < n; k++) {
+      const a = (k - 1 + n) % n, b = (k + 1) % n;
+      sx.push(((ox[a] as number) + 2 * (ox[k] as number) + (ox[b] as number)) / 4);
+      sz.push(((oz[a] as number) + 2 * (oz[k] as number) + (oz[b] as number)) / 4);
+    }
+    ox = sx;
+    oz = sz;
+  }
+  // 2. Rééchantillonnage tous les 3 m.
+  const cum: number[] = [0];
+  for (let k = 1; k <= n; k++) cum.push((cum[k - 1] as number) + Math.hypot((ox[k % n] as number) - (ox[k - 1] as number), (oz[k % n] as number) - (oz[k - 1] as number)));
+  const total = cum[n] as number;
+  const count = Math.round(total / 3);
+  const samples: HighwaySample[] = [];
+  let seg = 0;
+  for (let i = 0; i < count; i++) {
+    const d = (total * i) / count;
+    while (seg < n - 1 && (cum[seg + 1] as number) < d) seg++;
+    const t = (d - (cum[seg] as number)) / ((cum[seg + 1] as number) - (cum[seg] as number) || 1);
+    const a = seg, b = (seg + 1) % n;
+    samples.push({ x: (ox[a] as number) + ((ox[b] as number) - (ox[a] as number)) * t, y: 0, z: (oz[a] as number) + ((oz[b] as number) - (oz[a] as number)) * t, tx: 1, tz: 0, s: d });
+  }
+  for (let i = 0; i < count; i++) {
+    const a = samples[(i - 1 + count) % count] as HighwaySample;
+    const b = samples[(i + 1) % count] as HighwaySample;
+    const cur = samples[i] as HighwaySample;
+    const l = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+    cur.tx = (b.x - a.x) / l;
+    cur.tz = (b.z - a.z) / l;
+  }
+  // Côté extérieur : addHighway décale de (−tz, tx)·côté.
+  const s0 = samples[0] as HighwaySample;
+  const outerSide = -s0.tz * s0.x + s0.tx * s0.z > 0 ? 1 : -1;
+
+  // 3. Profil en long : portions au sol réparties sur la boucle, le reste surélevé.
+  const centers: number[] = [];
+  const phase = rng.range(0, 1);
+  for (let k = 0; k < C.groundSections; k++) centers.push(((k + phase + rng.range(-0.08, 0.08)) / C.groundSections) * total);
+  for (const sp of samples) {
+    let d = Infinity;
+    for (const c of centers) {
+      const diff = Math.abs(sp.s - c);
+      d = Math.min(d, diff, total - diff);
+    }
+    const r = Math.max(0, Math.min(1, (d - C.groundHalf) / C.rampLength));
+    sp.y = C.height * r * r * (3 - 2 * r);
+  }
+
+  // 4. Bretelles : deux par portion au sol, en S très allongé (entrée et sortie à pleine vitesse).
+  const nearestSample = (x: number, z: number): number => {
+    let best = 0, bd = Infinity;
+    for (let i = 0; i < count; i++) {
+      const sp = samples[i] as HighwaySample;
+      const d = (sp.x - x) ** 2 + (sp.z - z) ** 2;
+      if (d < bd) {
+        bd = d;
+        best = i;
+      }
+    }
+    return best;
+  };
+  const nearestAveArc = (x: number, z: number): number => {
+    let best = 0, bd = Infinity;
+    for (let k = 0; k < n; k++) {
+      const d = (px(k) - x) ** 2 + (pz(k) - z) ** 2;
+      if (d < bd) {
+        bd = d;
+        best = k;
+      }
+    }
+    return aveCum[best] as number;
+  };
+  const connectors: Connector[] = [];
+  const gaps: Highway['gaps'] = [];
+  const aveHalf = WORLD.roadWidth.avenue / 2;
+  const w = C.connectorWidth;
+  for (const c of centers) {
+    const mid = samples[Math.round((c / total) * count) % count] as HighwaySample;
+    const sAve = nearestAveArc(mid.x, mid.z);
+    for (const dir of [1, -1]) {
+      const pts: number[] = [];
+      let gFrom = Infinity, gTo = -Infinity, prevIdx = -1;
+      const steps = 44;
+      for (let q = 0; q <= steps; q++) {
+        const u = q / steps;
+        // Départ loin du centre de la portion au sol, arrivée près du centre.
+        const s = sAve - dir * (C.connectorLength + 24) + dir * u * C.connectorLength;
+        const a = avePoint(s);
+        const ax = a.x + a.nx * (aveHalf - w / 2), az = a.z + a.nz * (aveHalf - w / 2);
+        const idx = nearestSample(ax, az);
+        const h = samples[idx] as HighwaySample;
+        // Bord intérieur de l'autoroute : vers la ville = −(côté extérieur)
+        const inx = -(-h.tz) * outerSide, inz = -h.tx * outerSide;
+        const bx = h.x + inx * (C.halfWidth - w / 2 - 0.6), bz = h.z + inz * (C.halfWidth - w / 2 - 0.6);
+        const k = u * u * (3 - 2 * u);
+        pts.push(ax + (bx - ax) * k, az + (bz - az) * k);
+        if (u > 0.3) {
+          // Indices « déroulés » pour gérer le passage par zéro de la boucle.
+          let unwrapped = idx;
+          if (prevIdx >= 0) {
+            while (unwrapped - prevIdx > count / 2) unwrapped -= count;
+            while (prevIdx - unwrapped > count / 2) unwrapped += count;
+          }
+          prevIdx = unwrapped;
+          gFrom = Math.min(gFrom, unwrapped);
+          gTo = Math.max(gTo, unwrapped);
+        }
+      }
+      connectors.push({ pts, width: w });
+      gaps.push({ side: -outerSide, from: gFrom - 3, to: gTo + 4 });
+    }
+  }
+
+  // 5. Piliers sous les portions surélevées.
+  const pillars: Highway['pillars'] = [];
+  const every = Math.round(C.pillarSpacing / 3);
+  for (let i = 0; i < count; i += every) {
+    const sp = samples[i] as HighwaySample;
+    if (sp.y > 3.2) pillars.push({ x: sp.x, z: sp.z, top: sp.y, yaw: Math.atan2(sp.tx, sp.tz) });
+  }
+  return { ringway: { samples, halfWidth: C.halfWidth, barrierHeight: WORLD.highway.barrierHeight, pillars, closed: true, outerSide, gaps }, connectors };
+}
+
 
 export function generateCity(seed: number = WORLD.seed): CityData {
   const graph = generateStreetGraph(seed);
@@ -425,6 +619,23 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     const r = n.radius + 1.5;
     roadHash.insert(n.x - r, n.z - r, n.x + r, n.z + r, { x: n.x, z: n.z, r, slack: 0.4, kind: 'street' });
   }
+  // Autoroute de ceinture et bretelles : rien ne se construit dessus ni dessous.
+  const { ringway, connectors } = buildRingway(graph, rng);
+  for (let i = 0; i < ringway.samples.length; i += 2) {
+    const sp = ringway.samples[i] as HighwaySample;
+    const r = ringway.halfWidth + 3;
+    roadHash.insert(sp.x - r, sp.z - r, sp.x + r, sp.z + r, { x: sp.x, z: sp.z, r, slack: 0.4, kind: 'alley' });
+  }
+  const connectorHash = new SpatialHash<{ x: number; z: number; r: number }>(40);
+  for (const c of connectors) {
+    const r = c.width / 2 + 1.5;
+    for (let k = 0; k < c.pts.length; k += 2) {
+      const x = c.pts[k] as number, z = c.pts[k + 1] as number;
+      roadHash.insert(x - r, z - r, x + r, z + r, { x, z, r, slack: 0.3, kind: 'alley' });
+      connectorHash.insert(x - r, z - r, x + r, z + r, { x, z, r });
+    }
+  }
+  const onConnector = (x: number, z: number): boolean => connectorHash.some(x - 8, z - 8, x + 8, z + 8, (q) => Math.hypot(q.x - x, q.z - z) < q.r + 1.5);
   const occupied = new SpatialHash<Obb>(40);
 
   const hitsRoad = (o: Obb): boolean => {
@@ -585,23 +796,32 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     buildings.push(b);
   }
 
-  // ——— Murs invisibles derrière le trottoir extérieur du périphérique ———
-  for (const eid of graph.ring) {
-    const e = graph.edges[eid] as GraphEdge;
-    pointAt(e, e.length / 2, p);
-    const side = (p.x + p.tz) ** 2 + (p.z - p.tx) ** 2 > p.x ** 2 + p.z ** 2 ? 1 : -1;
-    const off = e.width / 2 + WORLD.sidewalk[e.kind] + 1.2;
-    const count = Math.max(1, Math.ceil(e.length / 9));
-    let px = 0, pz = 0;
-    for (let k = 0; k <= count; k++) {
-      pointAt(e, (e.length * k) / count, p);
-      const x = p.x + p.tz * side * off, z = p.z - p.tx * side * off;
-      if (k > 0) {
-        const len = Math.hypot(x - px, z - pz);
-        walls.push({ x: (x + px) / 2, z: (z + pz) / 2, yaw: Math.atan2(x - px, z - pz), halfLength: len / 2 + 0.6 });
-      }
-      px = x;
-      pz = z;
+  // ——— Limite de la ville : mur invisible le long du flanc extérieur de l'autoroute de ceinture ———
+  // (le flanc lui-même est un mur plein bien visible ; ceci empêche seulement de sauter par-dessus)
+  {
+    const rs = ringway.samples;
+    const off = (ringway.halfWidth + 0.9) * ringway.outerSide;
+    const stepW = 3;
+    for (let i = 0; i < rs.length; i += stepW) {
+      const a = rs[i] as HighwaySample, b = rs[(i + stepW) % rs.length] as HighwaySample;
+      const axx = a.x - a.tz * off, azz = a.z + a.tx * off;
+      const bxx = b.x - b.tz * off, bzz = b.z + b.tx * off;
+      const len = Math.hypot(bxx - axx, bzz - azz);
+      walls.push({ x: (axx + bxx) / 2, z: (azz + bzz) / 2, yaw: Math.atan2(bxx - axx, bzz - azz), halfLength: len / 2 + 0.5 });
+    }
+    // Immeubles de décor juste derrière le mur (sans collision : on ne peut pas les atteindre).
+    let i = 0;
+    while (i < rs.length) {
+      const sp = rs[i] as HighwaySample;
+      const wB = rng.range(22, 44), dB = rng.range(22, 36);
+      const nx = -sp.tz * ringway.outerSide, nz = sp.tx * ringway.outerSide;
+      const dist = ringway.halfWidth + 7 + dB / 2;
+      const fp: Obb = { cx: sp.x + nx * dist, cz: sp.z + nz * dist, w: wB, d: dB, yaw: Math.atan2(-nx, -nz) };
+      const bd = makeBuilding(rng, fp, [{ cx: sp.x + nx * (ringway.halfWidth + 7), cz: sp.z + nz * (ringway.halfWidth + 7), nx: -nx, nz: -nz, length: wB, kind: 'avenue' }], 1, 1.7);
+      bd.backdrop = true;
+      buildings.push(bd);
+      addSigns(rng, bd, signs);
+      i += Math.max(4, Math.round((wB + rng.range(1, 6)) / 3));
     }
   }
 
@@ -634,6 +854,7 @@ export function generateCity(seed: number = WORLD.seed): CityData {
         const off = e.width / 2 + 0.7;
         const nx = p.tz * side, nz = -p.tx * side;
         const x = p.x + nx * off, z = p.z + nz * off;
+        if (onConnector(x, z)) continue;
         const arm = e.kind === 'street' ? 1.6 : 3.2;
         lamps.push({ x, z, dx: -nx, dz: -nz, height: e.kind === 'street' ? 6.5 : 9, arm, color });
         pools.push({ x: x - nx * (arm + 1.5), z: z - nz * (arm + 1.5), radius: e.kind === 'street' ? 8 : 11, color, intensity: 0.5 });
@@ -673,7 +894,13 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     }
   });
 
+  for (const sp of ringway.samples) {
+    B.x0 = Math.min(B.x0, sp.x);
+    B.x1 = Math.max(B.x1, sp.x);
+    B.z0 = Math.min(B.z0, sp.z);
+    B.z1 = Math.max(B.z1, sp.z);
+  }
   const margin = 60;
   const bounds: Rect = { x0: B.x0 - margin, x1: B.x1 + margin, z0: B.z0 - margin, z1: B.z1 + margin };
-  return { seed, graph, bounds, buildings, signs, lamps, pools, props, glowBoxes, trees, parks, walls, highway, spawn, respawns };
+  return { seed, graph, bounds, buildings, signs, lamps, pools, props, glowBoxes, trees, parks, walls, highway, ringway, connectors, spawn, respawns };
 }

@@ -84,16 +84,17 @@ export interface HandlingConfig {
 }
 
 /**
- * Préréglage A — base actuelle (2026-11-16) : arrière joueur, braquage nerveux,
- * drift adouci (angle max 28°, déclenchement plus progressif, bonne accroche).
+ * Préréglage A — base actuelle (2026-11-16) : arrière joueur, braquage nerveux, drift adouci,
+ * freinage en virage à 1, et davantage d'adhérence qu'avant (les joueurs trouvaient la
+ * chaussée trop glissante à haute vitesse).
  */
 export const PRESET_A: HandlingConfig = {
   enginePower: 1.0,
   engineBrake: 0.35,
 
-  gripFront: 1.64,
-  gripRear: 1.52,
-  gripLong: 1.5,
+  gripFront: 1.9,
+  gripRear: 1.78,
+  gripLong: 1.75,
   peakSlipDeg: 7,
   slideGrip: 0.82,
   tractionControl: 0.7,
@@ -102,7 +103,7 @@ export const PRESET_A: HandlingConfig = {
   suspStiffness: 34000,
   suspDamping: 3600,
   antiRoll: 8000,
-  downforce: 1.6,
+  downforce: 3.2,
 
   steerMaxDeg: 32,
   steerMinDeg: 7,
@@ -127,15 +128,17 @@ export const PRESET_A: HandlingConfig = {
 };
 
 /**
- * Préréglage B — « Drift encore plus sage ».
- * Identique à A sauf DEUX réglages de drift :
- *   - driftMaxAngleDeg  28   → 22    (glisse plus fermée)
- *   - driftRearGrip     0.55 → 0.68  (l'arrière décroche moins, on ressort plus vite)
+ * Préréglage B — « Encore plus de grip ».
+ * Identique à A sauf TROIS réglages :
+ *   - gripFront  1.90 → 2.12
+ *   - gripRear   1.78 → 2.00
+ *   - downforce  3.2  → 4.6   (la voiture colle davantage à haute vitesse)
  */
 export const PRESET_B: HandlingConfig = {
   ...PRESET_A,
-  driftMaxAngleDeg: 22,
-  driftRearGrip: 0.68,
+  gripFront: 2.12,
+  gripRear: 2.0,
+  downforce: 4.6,
 };
 
 export interface SliderDef {

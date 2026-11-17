@@ -169,6 +169,52 @@ async function cityTest() {
   drive(car, 60 * 8, () => { const q = car.rot; minUp = Math.min(minUp, 1 - 2 * (q.x * q.x + q.z * q.z)); hitSpeed = Math.max(hitSpeed, car.speed * 3.6); });
   console.log(`mur de face: v max ${hitSpeed.toFixed(0)} km/h, inclinaison max ${(Math.acos(Math.max(-1, minUp)) * 57.3).toFixed(1)}°, fin y=${car.pos.y.toFixed(2)} distance parcourue ${Math.hypot(car.pos.x - st.x, car.pos.z - st.z).toFixed(1)} m (demi-largeur ${e.width / 2} + trottoir)`);
   phys.world.removeRigidBody(car.body);
+  // 3 bis) Bretelle puis tour complet de l'autoroute de ceinture, en pilote automatique
+  {
+    const con = city.connectors[0]!;
+    const rs = city.ringway.samples;
+    const path: { x: number; z: number }[] = [];
+    for (let k = 0; k < con.pts.length; k += 2) path.push({ x: con.pts[k]!, z: con.pts[k + 1]! });
+    // Rejoint la boucle au point le plus proche de la fin de la bretelle, dans le sens de la bretelle.
+    const endP = path[path.length - 1]!, prevP = path[path.length - 6]!;
+    let near = 0, nd = 1e9;
+    rs.forEach((q, i) => { const d = (q.x - endP.x) ** 2 + (q.z - endP.z) ** 2; if (d < nd) { nd = d; near = i; } });
+    const dirSign = (endP.x - prevP.x) * rs[near]!.tx + (endP.z - prevP.z) * rs[near]!.tz > 0 ? 1 : -1;
+    // Voie proche du bord intérieur, pour passer devant toutes les ouvertures de bretelles.
+    const lane = -(city.ringway.halfWidth - 4) * city.ringway.outerSide;
+    for (let k = 4; k < rs.length + 30; k++) { const q = rs[(((near + dirSign * k) % rs.length) + rs.length) % rs.length]!; path.push({ x: q.x - q.tz * lane, z: q.z + q.tx * lane }); }
+    const p0 = path[0]!, p1 = path[2]!;
+    car = mk(p0.x, p0.z, Math.atan2(p1.x - p0.x, p1.z - p0.z));
+    let idx = 0, maxY2 = 0, minUp2 = 1, vmax = 0, lap = -1, stuck = 0;
+    input.brake = 0; input.drift = false;
+    drive(car, 60 * 150, (i) => {
+      // point visé : ~14 m devant
+      while (idx < path.length - 1 && (path[idx]!.x - car.pos.x) ** 2 + (path[idx]!.z - car.pos.z) ** 2 < 14 * 14) idx++;
+      const tgt = path[idx]!;
+      let d = Math.atan2(tgt.x - car.pos.x, tgt.z - car.pos.z) - car.yaw; d = Math.atan2(Math.sin(d), Math.cos(d));
+      input.steer = Math.max(-1, Math.min(1, d * 2.5));
+      input.throttle = lap >= 0 ? 0 : car.forwardSpeed * 3.6 < 190 ? 1 : 0.3;
+      if (process.env.TRACE2 && i % 20 === 0 && i / 60 > 17 && i / 60 < 24) {
+        let ni = 0, nd2 = 1e9; rs.forEach((q, k) => { const d = (q.x - car.pos.x) ** 2 + (q.z - car.pos.z) ** 2; if (d < nd2) { nd2 = d; ni = k; } });
+        const q = rs[ni]!; const lat = (car.pos.x - q.x) * -q.tz + (car.pos.z - q.z) * q.tx;
+        const up = 1 - 2 * (car.rot.x ** 2 + car.rot.z ** 2);
+        console.log(`  t=${(i / 60).toFixed(2)} éch=${ni} route y=${q.y.toFixed(2)} voiture y=${car.pos.y.toFixed(2)} lat=${lat.toFixed(1)} v=${(car.speed * 3.6).toFixed(0)} vF=${(car.forwardSpeed * 3.6).toFixed(0)} tilt=${(Math.acos(up) * 57.3).toFixed(0)} contacts=${car.wheels.map((w) => (w.inContact ? 1 : 0)).join('')} steer=${input.steer.toFixed(2)}`);
+      }
+      maxY2 = Math.max(maxY2, car.pos.y); vmax = Math.max(vmax, car.speed * 3.6);
+      const q = car.rot; minUp2 = Math.min(minUp2, 1 - 2 * (q.x * q.x + q.z * q.z));
+      if (car.speed < 2 && i > 300 && lap < 0) {
+        if (stuck === 0 && process.env.TRACE) {
+          let ni = 0, nd2 = 1e9; rs.forEach((q, k) => { const d = (q.x - car.pos.x) ** 2 + (q.z - car.pos.z) ** 2; if (d < nd2) { nd2 = d; ni = k; } });
+          const q = rs[ni]!; const lat = (car.pos.x - q.x) * -q.tz + (car.pos.z - q.z) * q.tx;
+          console.log(`  bloqué à t=${(i / 60).toFixed(1)} s, échantillon ${ni}/${rs.length}, hauteur route ${q.y.toFixed(2)}, voiture y=${car.pos.y.toFixed(2)}, écart latéral ${lat.toFixed(1)} (demi-largeur ${city.ringway.halfWidth}, côté ext ${city.ringway.outerSide}), ouvertures ${JSON.stringify(city.ringway.gaps)}`);
+        }
+        stuck++;
+      }
+      if (lap < 0 && idx >= path.length - 1) lap = i / 60;
+    });
+    console.log(`autoroute de ceinture (${(rs[rs.length - 1]!.s / 1000).toFixed(2)} km, ${city.connectors.length} bretelles): tour ${lap < 0 ? 'NON TERMINÉ (point ' + idx + '/' + path.length + ')' : 'en ' + lap.toFixed(0) + ' s'}, hauteur max ${maxY2.toFixed(2)} m, v max ${vmax.toFixed(0)} km/h, inclinaison max ${(Math.acos(minUp2) * 57.3).toFixed(1)}°, pas bloqué: ${stuck === 0}`);
+    phys.world.removeRigidBody(car.body);
+  }
   // 4) Statistiques du réseau
   const g = city.graph;
   const byKind: Record<string, number> = {};

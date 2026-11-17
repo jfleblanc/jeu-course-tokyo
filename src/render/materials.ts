@@ -58,6 +58,8 @@ export interface CityMaterials {
   building: THREE.Material;
   road: THREE.Material;
   highwayRoad: THREE.Material;
+  /** Bretelles : posées sur une autre chaussée, donc dessinées avec un léger décalage de profondeur. */
+  connectorRoad: THREE.Material;
   solid: THREE.Material;
   glow: THREE.Material;
   pool: THREE.Material;
@@ -230,7 +232,10 @@ export function createCityMaterials(quality: { reflections: boolean; reflectionS
   // Chaussée mouillée : asphalte, marquages, flaques, reflets (miroir plan).
   // uv = (position en travers, distance le long), aData = (type, longueur, demi-largeur, -)
   // ————————————————————————————————————————————————————————————————
-  let reflectorTarget: THREE.Object3D = new THREE.Object3D();
+  // Un seul miroir pour toutes les chaussées au sol (il coûte un rendu de scène par image).
+  const refl = quality.reflections ? reflector({ resolutionScale: quality.reflectionScale, bounces: false }) : null;
+  const reflectorTarget: THREE.Object3D = refl ? refl.target : new THREE.Object3D();
+  if (refl) refl.target.rotateX(-Math.PI / 2);
   const makeRoad = (withReflection: boolean): THREE.Material => {
     const m = new THREE.MeshStandardNodeMaterial();
     const kind = aData.x;
@@ -251,12 +256,15 @@ export function createCityMaterials(quality: { reflections: boolean; reflectionS
     const avenue = max(max(band(0.22, 0.13), band(4.0, 0.14).mul(dash(9, 0.4))), edgeLine);
     const boulevard = max(max(band(6.0, 0.16), band(10.5, 0.14).mul(dash(9, 0.4))), edgeLine);
     const highway = max(band(0, 0.14).mul(dash(10, 0.5)), band(half.sub(0.35) as N, 0.16));
+    // Autoroute de ceinture : double ligne centrale, trois voies par sens.
+    const ringway = max(max(band(0.28, 0.15), max(band(4.3, 0.15), band(8.4, 0.15)).mul(dash(12, 0.42))), band(half.sub(0.45) as N, 0.18));
+    const connector = band(half.sub(0.35) as N, 0.15);
     // Passages piétons et ligne d'arrêt près des carrefours
     const dEnd = min(v, len.sub(v));
     const zebra = step(1.0, dEnd).mul(step(dEnd, float(4.2))).mul(step(0.5, fract(u.mul(0.9).add(0.25)))).mul(step(au, half.sub(0.7)));
     const stopLine = step(5.6, dEnd).mul(step(dEnd, float(6.0))).mul(step(au, half.sub(0.7)));
     const crossings = max(zebra, stopLine);
-    let paint = street.mul(is(2)).add(avenue.mul(is(3))).add(boulevard.mul(is(4))).add(highway.mul(is(5)));
+    let paint = street.mul(is(2)).add(avenue.mul(is(3))).add(boulevard.mul(is(4))).add(highway.mul(is(5))).add(ringway.mul(is(6))).add(connector.mul(is(7)));
     paint = max(paint, crossings.mul(is(2).add(is(3)).add(is(4))));
     // Peinture usée
     const wear = mx_noise_float(wp.xz.mul(1.7)).mul(0.5).add(0.5);
@@ -274,22 +282,24 @@ export function createCityMaterials(quality: { reflections: boolean; reflectionS
     // Les reflets viennent du miroir ci-dessous : on coupe la carte d'environnement pour ne pas blanchir la route.
     m.envMapIntensity = 0.12;
 
-    if (withReflection) {
-      const refl = reflector({ resolutionScale: quality.reflectionScale, bounces: false });
-      reflectorTarget = refl.target;
-      refl.target.rotateX(-Math.PI / 2);
+    if (withReflection && refl) {
       // Petites ondulations de l'eau : on déforme le miroir, davantage hors des flaques.
       const ripple = vec2(mx_noise_float(wp.xz.mul(7.0)), mx_noise_float(wp.xz.mul(7.0).add(vec2(31.0, 7.0))));
-      refl.uvNode = (refl.uvNode as any).add(ripple.mul(mix(float(0.012), float(0.003), puddle)));
+      const mirror = (refl as any).sample((refl.uvNode as any).add(ripple.mul(mix(float(0.012), float(0.003), puddle))));
       const fresnel = float(1).sub(dot(normalView, positionViewDirection).clamp(0, 1)).pow(2.2).mul(0.85).add(0.15);
       const strength = mix(float(0.2), float(0.68), puddle).mul(fresnel).mul(float(1).sub(paint.mul(0.5)));
-      m.emissiveNode = (refl as any).rgb.mul(strength).mul(wetU);
+      m.emissiveNode = mirror.rgb.mul(strength).mul(wetU);
     }
     return m;
   };
   const road = makeRoad(quality.reflections);
   const highwayRoad = makeRoad(false);
   highwayRoad.side = THREE.DoubleSide;
+  // Pas de miroir ici : un seul matériau peut lire le miroir, sinon il se lirait lui-même pendant son propre rendu.
+  const connectorRoad = makeRoad(false);
+  connectorRoad.polygonOffset = true;
+  connectorRoad.polygonOffsetFactor = -2;
+  connectorRoad.polygonOffsetUnits = -4;
 
   // ————————————————————————————————————————————————————————————————
   // Trottoirs, poteaux, béton : couleur par sommet, dallage discret, halo des néons au sol.
@@ -336,5 +346,5 @@ export function createCityMaterials(quality: { reflections: boolean; reflectionS
     sky.depthWrite = false;
   }
 
-  return { building, road, highwayRoad, solid, glow, pool, ground, sky, reflectorTarget, tuning };
+  return { building, road, highwayRoad, connectorRoad, solid, glow, pool, ground, sky, reflectorTarget, tuning };
 }

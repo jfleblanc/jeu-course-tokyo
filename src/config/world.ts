@@ -22,6 +22,23 @@ export const WORLD = {
     barrierHeight: 0.95,
     pillarSpacing: 27,
   },
+  /** Autoroute de ceinture : fait le tour de la ville, tantôt au sol, tantôt surélevée. */
+  ringway: {
+    /** Distance entre le périphérique et l'axe de l'autoroute (m). */
+    offset: 64,
+    halfWidth: 12.5,
+    height: 8.5,
+    /** Nombre de portions au sol (chacune a deux bretelles vers le périphérique). */
+    groundSections: 4,
+    /** Demi-longueur d'une portion au sol (m). */
+    groundHalf: 130,
+    /** Longue rampe : à 250 km/h la voiture doit rester collée à la route au sommet. */
+    rampLength: 200,
+    /** Largeur et longueur d'une bretelle (m). */
+    connectorWidth: 9,
+    connectorLength: 110,
+    pillarSpacing: 30,
+  },
 } as const;
 
 export type RoadKind = keyof typeof WORLD.roadWidth;

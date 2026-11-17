@@ -205,6 +205,13 @@ export function generateStreetGraph(seed: number): StreetGraph {
   const dedupe = (list: number[]): number[] => list.filter((v, k) => k === 0 || v !== list[k - 1]);
   chains.push({ nodes: dedupe(diag1), kind: 'avenue', closed: false, role: 'diagonal' });
   chains.push({ nodes: dedupe(diag2), kind: 'avenue', closed: false, role: 'diagonal' });
+  // Deux autres diagonales, dans l'autre sens, qui partent du périphérique et s'arrêtent en ville.
+  const diag3: number[] = [];
+  for (let k = 0; k <= 3; k++) diag3.push(id(k, N - 2 - k));
+  const diag4: number[] = [];
+  for (let k = 0; k <= 3; k++) diag4.push(id(N - 1 - k, 1 + k));
+  chains.push({ nodes: diag3, kind: 'avenue', closed: false, role: 'diagonal' });
+  chains.push({ nodes: diag4, kind: 'street', closed: false, role: 'diagonal' });
 
   // ——— 3. Arêtes brutes, puis suppression de petites rues sans couper le réseau ———
   interface Raw {

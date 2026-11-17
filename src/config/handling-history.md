@@ -82,3 +82,21 @@ avant.
 **Choix retenu (2026-11-16, version 22c9b0e) : A**, avec « Freinage en virage » monté à 1.
 B (« drift encore plus sage ») reste en place pour être essayé par le deuxième joueur ;
 on réajustera plus tard.
+
+## 2026-11-16 — Cinquième essai : plus d'adhérence
+
+Retour des joueurs (version dec9f09) : la chaussée paraît trop mouillée, pas assez de grip,
+surtout à haute vitesse.
+
+Base A relevée : adhérence avant 1.64 → 1.90, arrière 1.52 → 1.78, motricité/freinage
+1.5 → 1.75, appui aéro 1.6 → 3.2. Mesure : rayon de virage à 100 km/h, 53 m → 41 m.
+
+| | A — base | B — « Encore plus de grip » |
+|---|---|---|
+| Adhérence avant (`gripFront`) | 1.90 | 2.12 |
+| Adhérence arrière (`gripRear`) | 1.78 | 2.00 |
+| Appui aéro (`downforce`) | 3.2 | 4.6 |
+
+Mesures : virage à 100 km/h, 41 m de rayon (A) et 35 m (B) ; freinage 257 → 0 km/h en 157 m.
+
+_Choix retenu : à remplir après les essais._

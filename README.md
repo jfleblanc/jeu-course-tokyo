@@ -74,6 +74,9 @@ puis phase 2 (une course avec points de passage, 3 IA, décompte et classement).
 
 Générée par code à partir d'une graine (`src/config/world.ts`) : un treillis de lignes arrondi en
 galet, ondulé et décalé, avec deux avenues en diagonale. Chaque ligne devient une courbe lisse.
-On obtient environ 19 km de rues : un périphérique, un boulevard central surmonté de l'autoroute,
-de larges avenues courbes, et des rues et ruelles qui servent de raccourcis. Les immeubles sont
+On obtient environ 20 km de rues : un périphérique, un boulevard central surmonté d'une autoroute,
+de larges avenues courbes et en diagonale, et des rues et ruelles qui servent de raccourcis.
+Autour, une autoroute de ceinture de 3,6 km (25 m de large) alterne portions au sol et portions
+surélevées ; huit bretelles en pente douce la relient au périphérique. Son mur extérieur est la
+limite de la ville. Les immeubles sont
 posés le long des rues, orientés selon la courbe ; les cœurs d'îlots sont remplis ensuite.
