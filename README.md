@@ -1,0 +1,68 @@
+# Course de nuit — Tokyo
+
+Jeu de course 3D de nuit dans une ville inspirée de Tokyo. Projet père-fils, usage privé.
+Three.js (WebGPU, repli WebGL2 automatique) + TSL, physique Rapier, TypeScript, Vite.
+
+**Jouer :** https://jfleblanc.github.io/jeu-course-tokyo/ (mis à jour à chaque push sur `main`).
+Le numéro de version (hash du commit) est affiché en haut à droite.
+
+## Commandes
+
+| Action | Clavier | Manette Switch Pro / Switch 2 Pro |
+|---|---|---|
+| Accélérer / freiner (et reculer) | `W` / `S` | `ZR` / `ZL` (lissées) |
+| Tourner | `A` `D` | stick gauche |
+| Drift | `Espace` | `B` ou `A` |
+| Boîte auto ↔ manuelle | `M` | `Y` |
+| Monter / descendre un rapport (manuelle) | `↑` / `↓` | `R` / `L` |
+| Caméra poursuite ↔ intérieure | `C` | `X` |
+| Panneau de réglage A/B | `F1` | `−` |
+| Basculer conduite A ↔ B | `B` | `+` |
+| Replacer la voiture | `R` | clic du stick gauche |
+| Afficher / masquer l'aide | `H` | |
+
+## Développer
+
+```sh
+npm install
+npm run dev        # serveur local
+npm run build      # vérification des types + build de production
+npm run sim        # banc d'essai physique sans affichage (0-100, virages, drift…)
+```
+
+Options d'adresse : `?q=bas|moyen|haut` (qualité), `?webgl` (forcer WebGL2), `?graine=1234` (autre ville).
+
+## Organisation du code
+
+```
+src/
+  config/     tous les réglages : conduite (A/B), monde, rendu, touches
+  core/       boucle à pas fixe (60 Hz), PRNG à graine, maths
+  input/      actions abstraites ← clavier + manette
+  physics/    monde Rapier
+  vehicle/    simulation (sans Three.js), moteur/boîte, modèle 3D procédural
+  world/      graphe de rues → données de la ville → maillages et collisions
+  render/     rendu WebGPU, matériaux TSL, bloom, caméras
+  ui/         HUD et panneau A/B
+  debug/      stockage des réglages A/B
+scripts/      banc d'essai physique
+```
+
+La simulation ne dépend pas du rendu : `vehicle.ts`, `drivetrain.ts`, `streetGraph.ts` et
+`cityGen.ts` ne connaissent pas Three.js. Le modèle de la voiture (`carModel.ts`) expose des
+emplacements (carrosserie, roues, intérieur, point de vue du conducteur) pour brancher plus
+tard un vrai modèle glTF déposé dans `public/models/`.
+
+## Régler la conduite (itération A/B)
+
+1. `F1` ouvre le panneau : deux préréglages, **A** et **B**, et un curseur par réglage.
+2. `B` (ou le bouton ⇄) bascule entre A et B en roulant. Le panneau liste ce qui diffère.
+3. « Exporter JSON » copie les deux réglages ; on les colle dans `src/config/handling.ts`
+   (`PRESET_A` / `PRESET_B`) et on note le choix dans `src/config/handling-history.md`.
+
+Règle : ne changer que deux ou trois réglages à la fois entre A et B.
+
+## Phases
+
+Voir le brief du projet. Phase 1 (conduite + un quartier) : faite. Suivante : phase 2, une course
+avec points de passage, 3 IA, décompte et classement.
