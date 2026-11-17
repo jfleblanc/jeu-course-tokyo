@@ -215,6 +215,34 @@ async function cityTest() {
     console.log(`autoroute de ceinture (${(rs[rs.length - 1]!.s / 1000).toFixed(2)} km, ${city.connectors.length} bretelles): tour ${lap < 0 ? 'NON TERMINÉ (point ' + idx + '/' + path.length + ')' : 'en ' + lap.toFixed(0) + ' s'}, hauteur max ${maxY2.toFixed(2)} m, v max ${vmax.toFixed(0)} km/h, inclinaison max ${(Math.acos(minUp2) * 57.3).toFixed(1)}°, pas bloqué: ${stuck === 0}`);
     phys.world.removeRigidBody(car.body);
   }
+  // 3 ter) Courses : tracés générés, puis trois adversaires sur de vrais tracés (le joueur reste sur la grille)
+  {
+    const { generateRoute } = await import('../src/race/route');
+    const { Race } = await import('../src/race/race');
+    let ok = 0; const lens: number[] = []; const turns: number[] = [];
+    for (let sd = 1; sd <= 40; sd++) { const r = generateRoute(city.graph, sd * 101); if (r) { ok++; lens.push(r.length); turns.push(r.turns.length); } }
+    console.log(`tracés: ${ok}/40 générés, longueur ${Math.min(...lens).toFixed(0)}–${Math.max(...lens).toFixed(0)} m, virages fléchés ${Math.min(...turns)}–${Math.max(...turns)}`);
+    (globalThis as any).TRACE_RACE = !!process.env.TRACE_RACE;
+    for (const seed of [7, 4242, 990017]) {
+      const me = mk(0, 0, 0);
+      const race = new Race(phys, city.graph, CAR_SPEC, me);
+      race.start(seed);
+      const route = race.route!;
+      let steps = 0;
+      const idle = emptyDriveInput(); idle.brake = 1;
+      while (steps < 60 * 260 && race.racers.some((r) => !r.isPlayer && !r.finished)) {
+        me.update(FIXED_DT, idle, PRESET_A);
+        race.beforeStep(FIXED_DT, PRESET_A);
+        phys.world.step();
+        me.afterStep();
+        race.afterStep(FIXED_DT);
+        steps++;
+      }
+      console.log(`course graine ${seed}: tracé ${route.length.toFixed(0)} m, ${route.checkpoints.length} points de passage, ${route.turns.length} virages fléchés — ` + race.racers.filter((r) => !r.isPlayer).map((r) => `${r.name.split(' ')[0]} ${r.finished ? r.finishTime.toFixed(1) + ' s (' + ((route.length / r.finishTime) * 3.6).toFixed(0) + ' km/h moy.)' : 'NON ARRIVÉ à ' + r.progress.toFixed(0) + ' m'}, ${r.resets} replacement(s)`).join(' ; '));
+      race.stop();
+      phys.world.removeRigidBody(me.body);
+    }
+  }
   // 4) Statistiques du réseau
   const g = city.graph;
   const byKind: Record<string, number> = {};

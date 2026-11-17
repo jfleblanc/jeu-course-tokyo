@@ -7,11 +7,14 @@ import { FixedLoop } from './core/loop';
 import { TuningStore } from './debug/tuningStore';
 import { InputManager } from './input/input';
 import { createPhysicsWorld } from './physics/physicsWorld';
+import { Race } from './race/race';
+import { RaceVisuals } from './race/raceVisuals';
 import { CameraRig } from './render/cameras';
 import { createCityMaterials } from './render/materials';
 import { createRenderer, type RenderContextInternal } from './render/renderer';
 import { AbPanel } from './ui/abPanel';
 import { Hud } from './ui/hud';
+import { RaceHud } from './ui/raceHud';
 import { createCarVisual, syncCarVisual } from './vehicle/carModel';
 import { REST_HEIGHT, Vehicle } from './vehicle/vehicle';
 import { buildCityColliders } from './world/cityColliders';
@@ -118,7 +121,21 @@ async function boot(): Promise<void> {
   ctx.apply(store.render);
   const music = new MusicPlayer(store.musicTrack, store.musicOn, store.render.musicVolume);
 
+  // ——— Course ———
+  const race = new Race(phys, city.graph, CAR_SPEC, car);
+  const raceVisuals = new RaceVisuals(scene, mats, city.graph);
+  const raceHud = new RaceHud();
+
   const respawn = (): void => {
+    // En course : on revient sur le tracé, au dernier point atteint.
+    const pr = race.player;
+    if (race.active && race.route && pr) {
+      const q = race.route.points[Math.max(0, pr.index - 2)];
+      if (q) {
+        car.teleport(q.x, REST_HEIGHT + 0.2, q.z, Math.atan2(q.tx, q.tz));
+        return;
+      }
+    }
     let best = city.respawns[0] ?? city.spawn;
     let bestD = Infinity;
     for (const r of city.respawns) {
@@ -153,6 +170,19 @@ async function boot(): Promise<void> {
       case 'toggleHelp':
         hud.toggleHelp();
         break;
+      case 'raceStart':
+        if (race.phase === 'idle' || race.phase === 'finished') {
+          if (race.start(Math.floor(Math.random() * 1e9))) hud.toast('Course !');
+          else hud.toast('Impossible de tracer une course');
+        }
+        break;
+      case 'raceQuit':
+        if (race.active) {
+          const wasFinished = race.phase === 'finished';
+          race.stop();
+          hud.toast(wasFinished ? 'Balade libre' : 'Course abandonnée');
+        }
+        break;
       case 'musicNext':
         hud.toast(`♪ ${music.next()}`);
         store.musicTrack = music.trackIndex;
@@ -176,9 +206,11 @@ async function boot(): Promise<void> {
   const loop = new FixedLoop({
     fixedUpdate(dt) {
       input.beginStep();
-      car.update(dt, input.drive, store.current);
+      car.update(dt, race.playerInput(input.drive), store.current);
+      race.beforeStep(dt, store.current);
       phys.world.step();
       car.afterStep();
+      race.afterStep(dt);
       // Filet de sécurité : sortie de carte ou chute sous le sol.
       const b = city.bounds;
       if (car.pos.y < -6 || car.pos.x < b.x0 || car.pos.x > b.x1 || car.pos.z < b.z0 || car.pos.z > b.z1) respawn();
@@ -188,6 +220,8 @@ async function boot(): Promise<void> {
       visual.root.updateMatrixWorld(true);
       rig.update(frameDt, visual, car);
       sky.position.copy(camera.position);
+      raceVisuals.update(race, alpha);
+      raceHud.update(frameDt, race);
       hud.update(frameDt, car, CAR_SPEC.redlineRpm);
 
       panel.update(frameDt, car, input, perfText);
@@ -209,7 +243,7 @@ async function boot(): Promise<void> {
   });
 
   // Accès console pour le débogage : window.__jeu
-  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, visual, input, meshes, colliderCount };
+  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, visual, input, meshes, colliderCount, race };
 
   setBoot('Prêt !');
   // Une première image avant de retirer l'écran de chargement (compile les shaders).

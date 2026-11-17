@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import {
   abs,
   attribute,
+  cameraPosition,
   dot,
   exp,
   float,
@@ -132,7 +133,13 @@ export function createCityMaterials(quality: { reflections: boolean; reflectionS
     // Store à moitié baissé sur certaines fenêtres
     const blind = mix(float(1), step(fy, float(0.55)), step(0.7, hash1(h.mul(37.0))));
     const upper = step(3.4, p.y); // au-dessus du rez-de-chaussée
-    const windowLight = winColor.mul(bright).mul(shade).mul(on).mul(blind).mul(inWindow).mul(isWall).mul(upper);
+    const detailed = winColor.mul(bright).mul(shade).mul(on).mul(blind).mul(inWindow);
+    // Au loin, les fenêtres deviennent plus petites qu'un pixel et scintillent quand on roule
+    // (« flashs blancs »). On fond donc le détail vers une lueur moyenne avec la distance.
+    const camDist = positionWorld.sub(cameraPosition).length();
+    const far = smoothstep(110, 330, camDist);
+    const average = mix(warm, cool, coolBias).mul(lit).mul(0.17);
+    const windowLight = mix(detailed, average, far).mul(isWall).mul(upper);
 
     // Rez-de-chaussée : vitrines éclairées ou rideaux de fer
     const shopCell = floor(along.div(5.2).add(seed.mul(0.5)));
@@ -196,22 +203,20 @@ export function createCityMaterials(quality: { reflections: boolean; reflectionS
     const glyph = bit.mul(inside);
     const inverted = step(0.5, hash1(seed.mul(0.41)));
     // Soit glyphes colorés sur fond sombre, soit glyphes blancs sur fond coloré.
-    const glyphSign = mix(vColor.mul(glyph.mul(2.3).add(0.06)), mix(vColor.mul(0.8), vec3(1.9, 1.85, 1.8), glyph), inverted);
+    const glyphSign = mix(vColor.mul(glyph.mul(2.1).add(0.06)), mix(vColor.mul(0.75), vec3(1.35, 1.32, 1.28), glyph), inverted);
 
     // — Type 1 : écran publicitaire, gros pixels qui changent —
     const pxSize = 0.6;
     const sx = floor(st.x.div(pxSize));
     const sy = floor(st.y.div(pxSize));
-    const tick = floor(time.mul(0.6).add(seed.mul(0.1)));
+    const tick = floor(time.mul(0.22).add(seed.mul(0.1)));
     const sweep = sin(st.x.mul(0.5).add(st.y.mul(0.35)).add(time.mul(0.8)).add(seed.mul(0.2))).mul(0.5).add(0.5);
     const pix = hash2(sx.add(tick.mul(3.1)), sy.add(seed.mul(0.77)));
     const screenColor = mix(vColor, neonFrom(hash1(tick.add(seed.mul(0.9)))), sweep);
-    const screen = screenColor.mul(pix.mul(0.8).add(0.3)).mul(1.0);
+    const screen = screenColor.mul(pix.mul(0.55).add(0.35)).mul(0.8);
 
-    // — Type 2 : tube néon uni, parfois défaillant —
-    const flickerOn = step(hash1(seed.mul(0.13)), float(0.12));
-    const flick = mix(float(1), step(0.25, hash1(floor(time.mul(14)).add(seed))).mul(0.8).add(0.2), flickerOn);
-    const tube = vColor.mul(2.1).mul(flick);
+    // — Type 2 : tube néon uni (sans clignotement : les néons défaillants faisaient des flashs) —
+    const tube = vColor.mul(1.9);
 
     // — Type 3 : uni —
     const plain = vColor.mul(faceH);
@@ -224,7 +229,11 @@ export function createCityMaterials(quality: { reflections: boolean; reflectionS
     const beacon = vColor.mul(smoothstep(0.0, 0.25, sin(time.mul(2.4).add(seed.mul(0.3)))).mul(5).add(0.3));
 
     const colorOut = glyphSign.mul(is(0)).add(screen.mul(is(1))).add(tube.mul(is(2))).add(plain.mul(is(3))).add(vending.mul(is(4))).add(beacon.mul(is(5)));
-    glow.colorNode = colorOut.mul(neonU);
+    // Les couleurs claires (blanc, jaune) paraissent bien plus lumineuses que les couleurs saturées :
+    // on les calme pour éviter les grandes plaques blanches qui débordent.
+    const lum = vColor.x.mul(0.3).add(vColor.y.mul(0.5)).add(vColor.z.mul(0.2));
+    const calm = float(1).div(lum.mul(1.1).add(0.42)).clamp(0.55, 1.2);
+    glow.colorNode = colorOut.mul(calm).mul(neonU);
     glow.side = THREE.DoubleSide;
   }
 
@@ -233,7 +242,7 @@ export function createCityMaterials(quality: { reflections: boolean; reflectionS
   // uv = (position en travers, distance le long), aData = (type, longueur, demi-largeur, -)
   // ————————————————————————————————————————————————————————————————
   // Un seul miroir pour toutes les chaussées au sol (il coûte un rendu de scène par image).
-  const refl = quality.reflections ? reflector({ resolutionScale: quality.reflectionScale, bounces: false }) : null;
+  const refl = quality.reflections ? reflector({ resolutionScale: quality.reflectionScale, bounces: false, generateMipmaps: true }) : null;
   const reflectorTarget: THREE.Object3D = refl ? refl.target : new THREE.Object3D();
   if (refl) refl.target.rotateX(-Math.PI / 2);
   const makeRoad = (withReflection: boolean): THREE.Material => {
@@ -273,11 +282,14 @@ export function createCityMaterials(quality: { reflections: boolean; reflectionS
     // Asphalte et flaques
     const grain = mx_noise_float(wp.xz.mul(9.0)).mul(0.5).add(0.5);
     const patches = mx_noise_float(wp.xz.mul(0.35)).mul(0.5).add(0.5);
-    const puddle = smoothstep(0.5, 0.78, mx_noise_float(wp.xz.mul(0.11).add(vec2(17.3, 4.1))).mul(0.5).add(0.5).add(patches.mul(0.25)));
+    // Humidité inégale : de grandes zones presque sèches, d'autres détrempées, et des flaques dedans.
+    const damp = smoothstep(0.3, 0.7, mx_noise_float(wp.xz.mul(0.014).add(vec2(3.1, 9.7))).mul(0.5).add(0.5));
+    const puddleRaw = smoothstep(0.55, 0.8, mx_noise_float(wp.xz.mul(0.11).add(vec2(17.3, 4.1))).mul(0.5).add(0.5).add(patches.mul(0.25)));
+    const puddle = puddleRaw.mul(mix(float(0.15), float(1.0), damp));
     const asphalt = vec3(0.04, 0.042, 0.048).mul(grain.mul(0.5).add(0.75)).mul(patches.mul(0.4).add(0.8));
     const wetDark = mix(float(1), float(0.55), puddle);
     m.colorNode = mix(asphalt.mul(wetDark), vec3(0.62, 0.62, 0.58), paint.mul(0.85));
-    m.roughnessNode = mix(mix(float(0.5), float(0.07), puddle), float(0.6), paint);
+    m.roughnessNode = mix(mix(float(0.68), float(0.22), puddle), float(0.65), paint);
     m.metalnessNode = float(0);
     // Les reflets viennent du miroir ci-dessous : on coupe la carte d'environnement pour ne pas blanchir la route.
     m.envMapIntensity = 0.12;
@@ -285,9 +297,10 @@ export function createCityMaterials(quality: { reflections: boolean; reflectionS
     if (withReflection && refl) {
       // Petites ondulations de l'eau : on déforme le miroir, davantage hors des flaques.
       const ripple = vec2(mx_noise_float(wp.xz.mul(7.0)), mx_noise_float(wp.xz.mul(7.0).add(vec2(31.0, 7.0))));
-      const mirror = (refl as any).sample((refl.uvNode as any).add(ripple.mul(mix(float(0.012), float(0.003), puddle))));
+      // Hors des flaques, on lit une version floue du miroir (asphalte humide, pas une vitre).
+      const mirror = (refl as any).sample((refl.uvNode as any).add(ripple.mul(mix(float(0.012), float(0.003), puddle)))).level(mix(float(3.2), float(0.6), puddle));
       const fresnel = float(1).sub(dot(normalView, positionViewDirection).clamp(0, 1)).pow(2.2).mul(0.85).add(0.15);
-      const strength = mix(float(0.2), float(0.68), puddle).mul(fresnel).mul(float(1).sub(paint.mul(0.5)));
+      const strength = mix(mix(float(0.03), float(0.13), damp), float(0.55), puddle).mul(fresnel).mul(float(1).sub(paint.mul(0.5)));
       m.emissiveNode = mirror.rgb.mul(strength).mul(wetU);
     }
     return m;

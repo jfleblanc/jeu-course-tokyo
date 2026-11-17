@@ -13,12 +13,12 @@ export interface RenderConfig {
 
 export const RENDER_DEFAULTS: RenderConfig = {
   exposure: 1.0,
-  bloomStrength: 0.5,
+  bloomStrength: 0.42,
   bloomRadius: 0.6,
-  bloomThreshold: 0.72,
+  bloomThreshold: 0.8,
   fogDensity: 0.003,
   neon: 1.0,
-  wetness: 1.0,
+  wetness: 0.85,
   musicVolume: 0.6,
 };
 

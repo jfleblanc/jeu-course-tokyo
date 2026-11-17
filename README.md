@@ -19,6 +19,7 @@ Le numéro de version (hash du commit) est affiché en haut à droite.
 | Panneau de réglage A/B | `F1` | `−` |
 | Basculer conduite A ↔ B | `B` | `+` |
 | Replacer la voiture | `R` | clic du stick gauche |
+| Lancer une course / l'abandonner | `Entrée` / `Échap` | croix ↑ / croix ← |
 | Musique suivante / musique oui-non | `N` / `P` | croix → / croix ↓ |
 | Afficher / masquer l'aide | `H` | |
 
@@ -45,6 +46,8 @@ src/
   vehicle/    simulation (sans Three.js), moteur/boîte, modèle 3D procédural
   world/      graphe de rues courbes → immeubles le long des rues → maillages et collisions
   render/     rendu WebGPU, matériaux TSL, bloom, caméras
+  race/       tracés générés, déroulement d'une course, décor de course
+  ai/         pilote automatique des adversaires
   audio/      musique générée par code (pistes décrites dans config/music.ts)
   ui/         HUD et panneau A/B
   debug/      stockage des réglages A/B
@@ -67,8 +70,16 @@ Règle : ne changer que deux ou trois réglages à la fois entre A et B.
 
 ## Phases
 
-Voir le brief du projet. Phase 1 (conduite + une ville) : faite. Ensuite : autoroute de ceinture,
-puis phase 2 (une course avec points de passage, 3 IA, décompte et classement).
+Voir le brief du projet. Phase 1 (conduite + une ville) et phase 2 (une course) : faites.
+Ensuite : phase 3 (progression : XP, argent, garage).
+
+## Les courses
+
+`Entrée` tire un tracé au sort dans le réseau de rues (environ 2,6 km, sans demi-tour, surtout
+sur les grands axes), place quatre voitures sur la grille et lance le décompte. Des portiques
+marquent les points de passage, une colonne de lumière indique le prochain, et chaque virage
+marqué est annoncé par une flèche à l'écran et un panneau à chevrons sur place. On peut couper
+entre deux points de passage, mais pas en sauter un. Réglages : `src/config/race.ts`.
 
 ## La ville
 

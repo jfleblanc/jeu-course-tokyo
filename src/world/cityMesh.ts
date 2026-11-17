@@ -281,7 +281,31 @@ export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes
   addHighway(city.highway, hwRoad, solid, glow, ROAD_KIND.highway);
   addHighway(city.ringway, hwRoad, solid, glow, ROAD_KIND.ringway);
   const connectorGeo = new GeomBuilder();
-  for (const c of city.connectors) addConnector(connectorGeo, c);
+  for (const c of city.connectors) {
+    addConnector(connectorGeo, c);
+    // Portique vert « autoroute » à l'entrée de la bretelle, visible depuis le périphérique.
+    const k = 5;
+    const x = c.pts[k * 2] as number, z = c.pts[k * 2 + 1] as number;
+    let tx = (c.pts[k * 2 + 4] as number) - x, tz = (c.pts[k * 2 + 5] as number) - z;
+    const l = Math.hypot(tx, tz) || 1;
+    tx /= l;
+    tz /= l;
+    const yaw = Math.atan2(tx, tz);
+    const half = c.width / 2 + 0.9;
+    for (const side of [1, -1]) solid.box(x + tz * side * half, 3.4, z - tx * side * half, 0.3, 6.8, 0.3, yaw, DARK_METAL);
+    solid.box(x, 6.9, z, half * 2 + 0.3, 0.3, 0.3, yaw, DARK_METAL, [0, 0, 0, 0], true, true);
+    // Panneau vert (comme sur les voies rapides japonaises) avec trois chevrons blancs « tout droit ».
+    glow.box(x, 5.6, z, half * 2 - 1.4, 1.9, 0.14, yaw, [0.03, 0.55, 0.2], [1, 3, 1, 0.9], true, true);
+    const P = (u: number, v: number, f: number): Vec3 => [x + tz * u - tx * f, 5.6 + v, z - tx * u - tz * f];
+    for (const f of [0.09, -0.09]) {
+      for (let cIdx = -1; cIdx <= 1; cIdx++) {
+        const u0 = cIdx * 1.5;
+        for (const sgn of [1, -1]) {
+          glow.quad(P(u0 + sgn * 0.6, -0.45, f), P(u0 + sgn * 0.6, -0.1, f), P(u0, 0.6, f), P(u0, 0.25, f), [-tx * Math.sign(f), 0, -tz * Math.sign(f)], 0, 0, 1, 1, [1, 1, 1], [1, 3, 1, 1.3]);
+        }
+      }
+    }
+  }
 
   // ——— Flaques de lumière au sol (plans additifs, pas de vraies lumières) ———
   const pools = new GeomBuilder();

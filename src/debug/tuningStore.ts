@@ -5,7 +5,7 @@ export type PresetName = 'A' | 'B';
 
 const KEY = 'jeu-course-tokyo.reglages';
 /** À augmenter quand les préréglages par défaut changent : les anciens réglages locaux sont alors ignorés. */
-const VERSION = 6;
+const VERSION = 7;
 
 interface Saved {
   version: number;

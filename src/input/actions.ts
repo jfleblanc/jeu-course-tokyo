@@ -34,7 +34,9 @@ export type ActionEvent =
   | 'reset'
   | 'toggleHelp'
   | 'musicNext'
-  | 'musicToggle';
+  | 'musicToggle'
+  | 'raceStart'
+  | 'raceQuit';
 
 export const emptyDriveInput = (): DriveInput => ({
   throttle: 0,

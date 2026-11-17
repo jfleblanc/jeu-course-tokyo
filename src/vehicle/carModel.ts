@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { color, float, uniform, vec3 } from 'three/tsl';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import type { CarSpec } from '../config/handling';
 import { REST_HEIGHT, type Vehicle } from './vehicle';
 
@@ -26,6 +27,37 @@ export interface CarVisual {
   headlight: THREE.SpotLight;
   brakeLevel: ReturnType<typeof uniform>;
   reverseLevel: ReturnType<typeof uniform>;
+}
+
+/**
+ * Fusionne tous les maillages d'un groupe en un seul maillage par matériau.
+ * Une voiture passe ainsi d'environ 80 appels de dessin à une vingtaine (important avec les adversaires).
+ */
+function mergeByMaterial(group: THREE.Object3D): void {
+  group.updateMatrixWorld(true);
+  const inverse = new THREE.Matrix4().copy(group.matrixWorld).invert();
+  const buckets = new Map<THREE.Material, THREE.BufferGeometry[]>();
+  const meshes: THREE.Mesh[] = [];
+  group.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh) meshes.push(m);
+  });
+  for (const m of meshes) {
+    const src = m.geometry.index ? m.geometry.toNonIndexed() : m.geometry.clone();
+    // On ne garde que les attributs communs à toutes les formes.
+    for (const name of Object.keys(src.attributes)) if (name !== 'position' && name !== 'normal' && name !== 'uv') src.deleteAttribute(name);
+    src.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inverse, m.matrixWorld));
+    const mat = m.material as THREE.Material;
+    const list = buckets.get(mat);
+    if (list) list.push(src);
+    else buckets.set(mat, [src]);
+  }
+  for (const child of [...group.children]) group.remove(child);
+  for (const [mat, geos] of buckets) {
+    const merged = mergeGeometries(geos, false);
+    if (merged) group.add(new THREE.Mesh(merged, mat));
+    for (const g of geos) g.dispose();
+  }
 }
 
 /**
@@ -61,7 +93,14 @@ function extrudeProfile(points: [number, number][], width: number, bevel: number
   return geo;
 }
 
-export function createCarVisual(spec: CarSpec): CarVisual {
+export interface CarVisualOptions {
+  /** Couleur de carrosserie (linéaire). */
+  color?: readonly [number, number, number];
+  /** Faux pour les adversaires : pas de vraies lumières (elles coûtent cher), seulement les feux émissifs. */
+  lights?: boolean;
+}
+
+export function createCarVisual(spec: CarSpec, options: CarVisualOptions = {}): CarVisual {
   const root = new THREE.Group();
   root.name = 'voiture';
   const body = new THREE.Group();
@@ -74,7 +113,8 @@ export function createCarVisual(spec: CarSpec): CarVisual {
 
   // ——— Matériaux ———
   const paint = new THREE.MeshPhysicalNodeMaterial();
-  paint.colorNode = color(0.72, 0.035, 0.05);
+  const paintColor = options.color ?? [0.72, 0.035, 0.05];
+  paint.colorNode = color(paintColor[0], paintColor[1], paintColor[2]);
   paint.metalnessNode = float(0.55);
   paint.roughnessNode = float(0.32);
   paint.clearcoatNode = float(1.0);
@@ -234,6 +274,11 @@ export function createCarVisual(spec: CarSpec): CarVisual {
   const spinner = new THREE.Group();
   spinner.add(wheelRing, spokes, spoke2);
   steeringWheel.add(spinner);
+  mergeByMaterial(interior);
+  const spinnerHolder = new THREE.Group();
+  spinnerHolder.add(wheelRing, spokes, spoke2);
+  mergeByMaterial(spinnerHolder);
+  spinner.add(spinnerHolder);
   interior.add(steeringWheel);
   interior.visible = false;
 
@@ -259,21 +304,25 @@ export function createCarVisual(spec: CarSpec): CarVisual {
     }
     const ring = mesh(new THREE.TorusGeometry(spec.wheelRadius * 0.7, 0.022, 6, 24), rim, spin, outer, 0, 0);
     ring.rotation.y = Math.PI / 2;
+    mergeByMaterial(spin);
     root.add(pivot);
     wheels.push({ pivot, spin });
   }
 
+  mergeByMaterial(body);
+  mergeByMaterial(cabin);
+
   // ——— Phares : un seul projecteur réel (le reste de la ville est émissif) ———
-  const headlight = new THREE.SpotLight(0xdfe8ff, 900, 95, 0.62, 0.7, 1.6);
+  const headlight = new THREE.SpotLight(0xdfe8ff, 15, 115, 0.62, 0.7, 0.5);
   headlight.position.set(0, 0.1, 2.0);
   headlight.target.position.set(0, -0.9, 30);
   headlight.castShadow = false;
-  root.add(headlight, headlight.target);
+  if (options.lights !== false) root.add(headlight, headlight.target);
 
   // Lumière d'appoint qui suit la voiture : fait vivre la carrosserie et le sol proche.
   const fill = new THREE.PointLight(0xb9a8ff, 30, 11, 1.8);
   fill.position.set(0, 4.0, -1.4);
-  root.add(fill);
+  if (options.lights !== false) root.add(fill);
 
   return {
     root,
