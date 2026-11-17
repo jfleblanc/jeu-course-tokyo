@@ -135,10 +135,12 @@ export const AGGRESSIVE = {
   /** Rythme en plus, tout le temps (0,1 = 10 %). */
   pace: 0.1,
   /** Rythme en plus quand ils sont loin derrière le joueur. */
-  chase: 0.2,
+  chase: 0.38,
   /** Puissance moteur en plus : de base, et en plus quand ils sont derrière. */
   power: 0.25,
-  chasePower: 0.45,
+  chasePower: 0.9,
+  /** Distance derrière le joueur (m) à laquelle ils donnent tout pour revenir. */
+  chaseDistance: 45,
   /** Ils barrent la route au joueur quand il est à moins de cette distance derrière eux (m). */
   blockRange: 32,
   /** Vitesse à laquelle ils se décalent pour barrer (m/s). */

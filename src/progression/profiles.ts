@@ -27,8 +27,8 @@ const LIST_KEY = 'jeu-course-tokyo.joueurs';
 const ACTIVE_KEY = 'jeu-course-tokyo.joueur-actif';
 const OLD_SAVE_KEY = 'jeu-course-tokyo.joueur';
 
-/** Symboles proposés : vent, dragon, tigre, tonnerre, étoile, cerisier, démon, samouraï, loup, flamme, nuit, lune. */
-export const SYMBOLS = ['風', '龍', '虎', '雷', '星', '桜', '鬼', '侍', '狼', '炎', '夜', '月'] as const;
+/** Symboles proposés : des hiragana. */
+export const SYMBOLS = ['あ', 'い', 'う', 'え', 'お', 'か', 'き', 'く', 'け', 'こ', 'さ', 'し', 'す', 'せ', 'そ', 'た', 'ち', 'つ', 'て', 'と', 'な', 'に', 'ぬ', 'ね', 'の', 'は', 'ひ', 'ふ', 'へ', 'ほ', 'ま', 'み', 'む', 'め', 'も', 'や', 'ゆ', 'よ', 'ら', 'り', 'る', 'れ', 'ろ', 'わ', 'を', 'ん'] as const;
 
 export const saveKeyFor = (id: string): string => `${OLD_SAVE_KEY}.${id}`;
 
@@ -74,6 +74,18 @@ export function createProfile(name: string, symbol: string, pin: string): Profil
   const list = read();
   const p: Profile = { id: `j${Date.now().toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`, name: name.trim().slice(0, 14) || `Joueur ${list.length + 1}`, symbol, pin: hashPin(pin), created: Date.now() };
   list.push(p);
+  write(list);
+  return p;
+}
+
+/** Modifie la carte d'un joueur. `pin` : undefined = inchangé, '' = plus de NIP. */
+export function updateProfile(id: string, change: { name?: string; symbol?: string; pin?: string }): Profile | null {
+  const list = read();
+  const p = list.find((q) => q.id === id);
+  if (!p) return null;
+  if (change.name !== undefined && change.name.trim()) p.name = change.name.trim().slice(0, 14);
+  if (change.symbol !== undefined) p.symbol = change.symbol;
+  if (change.pin !== undefined) p.pin = hashPin(change.pin);
   write(list);
   return p;
 }

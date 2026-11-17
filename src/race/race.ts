@@ -234,8 +234,10 @@ export class Race {
           if (ag > 0) {
             // Pilotes agressifs : plus vite partout, encore plus quand ils sont derrière, et ils
             // ne lèvent presque plus le pied quand ils mènent.
-            factor = (t > 0 ? 1 - RUBBER_BAND.maxSlow * 0.35 * t : 1 + AGGRESSIVE.chase * ag * -t) * (1 + AGGRESSIVE.pace * ag);
-            r.car.powerBoost = this.powerMatch * (1 + ag * (AGGRESSIVE.power + AGGRESSIVE.chasePower * Math.max(0, -t)));
+            // (dès qu'ils sont doublés ils reviennent : à 45 m derrière, ils sont déjà à fond)
+            const back = clamp(-gap / AGGRESSIVE.chaseDistance, 0, 1);
+            factor = (t > 0 ? 1 - RUBBER_BAND.maxSlow * 0.35 * t : 1 + AGGRESSIVE.chase * ag * back) * (1 + AGGRESSIVE.pace * ag);
+            r.car.powerBoost = this.powerMatch * (1 + ag * (AGGRESSIVE.power + AGGRESSIVE.chasePower * back));
             // Le joueur arrive derrière : on se met sur sa trajectoire.
             if (gap > 2 && gap < AGGRESSIVE.blockRange) {
               const q = route.points[Math.min(route.points.length - 1, r.index)] as RoutePoint;

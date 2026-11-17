@@ -1,6 +1,6 @@
 import { CAR_MODELS } from '../config/cars';
 import { tierOf } from '../config/progression';
-import { SYMBOLS, createProfile, deleteProfile, listProfiles, pinMatches, profileSummary, type Profile } from '../progression/profiles';
+import { SYMBOLS, createProfile, deleteProfile, updateProfile, listProfiles, pinMatches, profileSummary, type Profile } from '../progression/profiles';
 
 const esc = (s: string): string => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
 
@@ -13,7 +13,7 @@ export class ProfileSelect {
   private readonly el = document.createElement('div');
   private profiles: Profile[] = [];
   private focus = 0;
-  private mode: 'liste' | 'nouveau' | 'nip' | 'supprimer' = 'liste';
+  private mode: 'liste' | 'nouveau' | 'nip' | 'supprimer' | 'modifier' = 'liste';
   private symbol: string = SYMBOLS[0];
   private error = '';
   isOpen = false;
@@ -88,6 +88,19 @@ export class ProfileSelect {
       this.focus = Math.min(this.focus, this.profiles.length);
       this.render();
       this.cb.hover(this.profiles[this.focus] ?? null);
+    } else if (this.mode === 'modifier' && p) {
+      const val = (n: string): string => this.el.querySelector<HTMLInputElement>(`input[name=${n}]`)?.value.trim() ?? '';
+      const name = val('nom'), old = val('ancien'), pin = val('nip');
+      if (!pinMatches(p, old)) { this.error = 'NIP actuel incorrect'; this.render(name, pin); return; }
+      if (!name) { this.error = 'Il faut un nom'; this.render(name, pin); return; }
+      if (pin && !/^\d{4}$/.test(pin)) { this.error = 'Le NIP : 4 chiffres, ou rien'; this.render(name, pin); return; }
+      // NIP laissé vide : on garde l'actuel ; « 0000 » n'a rien de spécial. Case cochée : on l'enlève.
+      const drop = this.el.querySelector<HTMLInputElement>('input[name=sans]')?.checked ?? false;
+      updateProfile(p.id, { name, symbol: this.symbol, pin: drop ? '' : pin || undefined });
+      this.profiles = listProfiles();
+      this.mode = 'liste'; this.error = '';
+      this.render();
+      this.cb.hover(this.profiles[this.focus] ?? null);
     } else if (this.mode === 'nouveau') {
       const name = this.el.querySelector<HTMLInputElement>('input[name=nom]')?.value.trim() ?? '';
       const pin = this.el.querySelector<HTMLInputElement>('input[name=nip]')?.value.trim() ?? '';
@@ -101,6 +114,12 @@ export class ProfileSelect {
     const act = t.closest<HTMLElement>('[data-act]')?.dataset.act;
     if (act === 'retour') { this.mode = 'liste'; this.error = ''; this.render(); return; }
     if (act === 'ok') { this.confirm(); return; }
+    if (act === 'modif') {
+      this.setFocus(Number(t.closest<HTMLElement>('[data-k]')?.dataset.k ?? this.focus), true);
+      const cur = this.profiles[this.focus];
+      if (cur) { this.symbol = cur.symbol; this.mode = 'modifier'; this.error = ''; this.render(cur.name); }
+      return;
+    }
     if (act === 'suppr') {
       this.setFocus(Number(t.closest<HTMLElement>('[data-k]')?.dataset.k ?? this.focus), true);
       this.mode = 'supprimer'; this.error = ''; this.render();
@@ -123,6 +142,19 @@ export class ProfileSelect {
   private render(name = '', pin = ''): void {
     const err = this.error ? `<div class="pf-err">${esc(this.error)}</div>` : '';
     const p = this.profiles[this.focus];
+    if (this.mode === 'modifier' && p) {
+      this.el.innerHTML = `<div class="pf-form">
+        <div class="pf-title">Modifier la carte</div>
+        <label>Nom <input name="nom" maxlength="14" autocomplete="off" value="${esc(name)}"></label>
+        <div class="pf-syms">${[...new Set([p.symbol, ...SYMBOLS])].map((s) => `<button type="button" tabindex="-1" data-sym="${s}" class="${s === this.symbol ? 'on' : ''}">${s}</button>`).join('')}</div>
+        ${p.pin ? '<label>NIP actuel <input name="ancien" type="password" inputmode="numeric" maxlength="4" autocomplete="off"></label>' : ''}
+        <label>Nouveau NIP (4 chiffres ; vide = ${p.pin ? 'inchangé' : 'aucun'}) <input name="nip" type="password" inputmode="numeric" maxlength="4" autocomplete="off" value="${esc(pin)}"></label>
+        ${p.pin ? '<label class="pf-check"><input name="sans" type="checkbox"> Enlever le NIP</label>' : ''}
+        ${err}
+        <div class="pf-row"><button type="button" data-act="retour">Retour</button><button type="button" data-act="ok" class="go">Enregistrer</button></div>
+      </div>`;
+      return;
+    }
     if (this.mode === 'nouveau') {
       this.el.innerHTML = `<div class="pf-form">
         <div class="pf-title">Nouveau joueur</div>
@@ -153,6 +185,7 @@ export class ProfileSelect {
       const main = CAR_MODELS.find((m) => m.id === s.cars[s.active]?.model);
       return `<div class="pf-card ${k === this.focus ? 'on' : ''}" data-k="${k}">
         <button type="button" class="pf-x" data-act="suppr" title="Supprimer ce joueur">×</button>
+        <button type="button" class="pf-x pf-edit" data-act="modif" title="Modifier le nom, le symbole ou le NIP">✎</button>
         <div class="pf-head"><span class="pf-sym">${esc(pr.symbol)}</span><span class="pf-name">${esc(pr.name)}${pr.pin ? ' <i title="Protégé par un NIP">🔒</i>' : ''}</span></div>
         <div class="pf-line">Niveau <b>${s.level}</b> · ${esc(tierOf(s.level).name)}</div>
         <div class="pf-line money">¥ ${s.money.toLocaleString('fr-CA')}</div>

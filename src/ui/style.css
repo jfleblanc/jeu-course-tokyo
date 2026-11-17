@@ -238,8 +238,8 @@ body.titre .hud, body.titre #minimap, body.titre #race-hud { visibility: hidden;
 #profils label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--dim); }
 #profils input { font: 15px inherit; color: #fff; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 7px; padding: 6px 9px; outline: none; }
 #profils input:focus { border-color: var(--cyan); }
-#profils .pf-syms { display: grid; grid-template-columns: repeat(6, 1fr); gap: 5px; }
-#profils .pf-syms button { font-size: 18px; padding: 4px 0; color: #fff; background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 7px; cursor: pointer; }
+#profils .pf-syms { display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px; }
+#profils .pf-syms button { font-size: 15px; padding: 3px 0; color: #fff; background: rgba(255, 255, 255, 0.07); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 7px; cursor: pointer; }
 #profils .pf-syms button.on { border-color: var(--magenta); background: rgba(255, 46, 136, 0.28); }
 #profils .pf-row { display: flex; gap: 8px; justify-content: flex-end; }
 #profils .pf-row button { font: 13px inherit; color: #fff; background: rgba(255, 255, 255, 0.1); border: 1px solid rgba(255, 255, 255, 0.2); border-radius: 7px; padding: 6px 12px; cursor: pointer; }
@@ -253,3 +253,6 @@ body.cctv #cctv { display: block; }
 #cctv .cc-label { position: absolute; left: 18px; top: 14px; font: 13px ui-monospace, Menlo, monospace; letter-spacing: 0.08em; color: #e8f1ff; text-shadow: 0 0 6px rgba(0, 0, 0, 0.9); }
 #cctv .cc-rec { color: #ff3b4e; animation: t-pulse 1.2s steps(2) infinite; }
 body.cctv .hud, body.cctv #minimap, body.cctv #race-hud { visibility: hidden; }
+#profils .pf-x.pf-edit { right: 24px; font-size: 13px; top: 5px; }
+#profils .pf-check { flex-direction: row; align-items: center; gap: 6px; }
+#profils .pf-form { width: min(440px, 94vw); }
