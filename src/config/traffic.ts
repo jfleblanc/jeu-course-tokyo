@@ -6,6 +6,8 @@
 export const TRAFFIC = {
   /** Nombre de voitures en circulation autour du joueur. */
   count: 24,
+  /** Part de la circulation gardée à la campagne (Collines de Hakone) : 0,3 = 30 %. */
+  countryShare: 0.3,
   /** Nombre de voitures pendant une course (elles apparaissent sur le tracé). */
   raceCount: 14,
   /** Elles apparaissent entre ces deux distances du joueur (m), et disparaissent au-delà de la troisième. */

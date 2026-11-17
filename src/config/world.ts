@@ -43,17 +43,21 @@ export const WORLD = {
       { name: 'Collines de Hakone', unlockLevel: 31, section: 1, theme: 'collines', lines: 7, spacing: 130, bridge: 520 },
     ],
   },
-  /** Route de montagne des Collines de Hakone : une spirale qui grimpe autour d'une colline jusqu'à un temple. */
+  /**
+   * Col de Hakone : une route de montagne qui part d'un bout du village, grimpe en lacets, passe un
+   * col et redescend de l'autre côté (entrée et sortie différentes). Tracé : `src/world/mountainPass.ts`.
+   */
   mountain: {
-    height: 85,
-    /** Rayon de la spirale en bas et en haut (m). */
-    baseRadius: 240,
-    topRadius: 60,
-    turns: 2.25,
+    /** Altitude du col (m). */
+    height: 125,
     halfWidth: 6.5,
-    /** Ligne droite entre le quartier et le pied de la colline (m). */
-    approach: 70,
+    /** Longueur à plat à chaque bout, avant que la route ne monte (m). */
+    approach: 45,
+    /** Maille de la grille du relief (m) et largeur du talus qui raccorde la route au relief (m). */
+    cell: 10,
+    blend: 58,
   },
+
   ringway: {
     /** Distance entre le périphérique et l'axe de l'autoroute (m). */
     offset: 64,

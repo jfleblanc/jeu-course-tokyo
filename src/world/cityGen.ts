@@ -1,5 +1,6 @@
 import { Rng } from '../core/rng';
 import { NEON_PALETTE, WORLD, type RoadKind } from '../config/world';
+import { buildMountainPass, terrainHeight, type Terrain } from './mountainPass';
 import { generateStreetGraph, mergeGraph, pointAt, pointInPolygon, type GraphEdge, type GraphNode, type PathPoint, type StreetGraph } from './streetGraph';
 
 /**
@@ -164,15 +165,21 @@ export interface SpawnPoint {
   yaw: number;
 }
 
-/** Colline de la route de montagne : un cône tronqué, la route enroulée autour, un plateau au sommet. */
+/** Col de montagne : la route, le relief autour, et les repères utiles au décor. */
 export interface Mountain {
   road: Highway;
+  terrain: Terrain;
+  /** Centre et rayon approximatifs du massif (pour l'affichage, la carte). */
   cx: number;
   cz: number;
-  /** Rayon du cône au sol et au sommet (m). */
-  rBase: number;
-  rTop: number;
+  radius: number;
   height: number;
+  /** Indice de l'échantillon du col, et terre-plein du temple à côté. */
+  summit: number;
+  pad: { x: number; y: number; z: number };
+  /** Carrefours du quartier où la route commence et finit. */
+  nodeA: number;
+  nodeB: number;
 }
 
 /** Butte ou montagne : cône tronqué. `solid` = avec collision (les montagnes lointaines n'en ont pas). */
@@ -806,55 +813,52 @@ export function generateCity(seed: number = WORLD.seed): CityData {
       let radius = 0;
       for (let q = 0; q < sub.ringPolygon.length; q += 2) radius = Math.max(radius, Math.hypot((sub.ringPolygon[q] as number) - cx, (sub.ringPolygon[q + 1] as number) - cz));
       if (def.theme === 'collines') {
-        // ——— Route de montagne : part du bord extérieur du quartier, s'enroule autour d'une colline ———
+        // ——— Col de montagne : part d'un carrefour du bord extérieur, revient à un autre ———
         const M = WORLD.mountain;
-        let far = entry, best = -Infinity;
+        const ex = nz, ez = -nx;
+        let vmax = -Infinity, lmax = 0;
         for (const node of sub.nodes) {
           if (node.edges.length === 0) continue;
-          const d = (node.x - cx) * nx + (node.z - cz) * nz;
-          if (d > best) {
-            best = d;
-            far = node;
+          vmax = Math.max(vmax, (node.x - cx) * nx + (node.z - cz) * nz);
+          lmax = Math.max(lmax, Math.abs((node.x - cx) * ex + (node.z - cz) * ez));
+        }
+        const pick = (sign: number): GraphNode => {
+          let bestNode = entry, best = -Infinity;
+          for (const node of sub.nodes) {
+            if (node.edges.length === 0) continue;
+            const l = ((node.x - cx) * ex + (node.z - cz) * ez) * sign;
+            if (l < lmax * 0.3 || l > lmax * 0.8) continue;
+            const v = (node.x - cx) * nx + (node.z - cz) * nz;
+            if (v > best) { best = v; bestNode = node; }
           }
-        }
-        const sx = far.x + nx * (far.radius - 1), sz = far.z + nz * (far.radius - 1);
-        const p0x = sx + nx * M.approach, p0z = sz + nz * M.approach;
-        // Centre de la colline : à gauche du pied de la route.
-        const hx = p0x + nz * M.baseRadius, hz = p0z - nx * M.baseRadius;
-        const a0 = Math.atan2(p0z - hz, p0x - hx);
-        // Sens de rotation : celui qui prolonge la ligne droite d'approche.
-        const dir = -Math.sin(a0) * nx + Math.cos(a0) * nz > 0 ? 1 : -1;
-        const t0 = 0.955;
-        const dense: [number, number, number][] = [];
-        for (let q = 0; q <= M.approach; q += 1) dense.push([sx + nx * q, 0, sz + nz * q]);
-        const N2 = 2400;
-        for (let q = 1; q <= N2; q++) {
-          const t = q / N2;
-          const ang = a0 + dir * Math.PI * 2 * M.turns * t;
-          // Jusqu'à t0 on monte en spirale ; ensuite on est en haut et on rentre vers le plateau.
-          const r = t <= t0 ? M.baseRadius - ((M.baseRadius - M.topRadius) * t) / t0 : M.topRadius - 24 * ((t - t0) / (1 - t0));
-          dense.push([hx + Math.cos(ang) * r, t <= t0 ? (M.height * t) / t0 : M.height, hz + Math.sin(ang) * r]);
-        }
-        // Rééchantillonnage tous les 3 m.
-        const samples: HighwaySample[] = [];
-        let acc = 0, next = 0;
-        for (let q = 1; q < dense.length; q++) {
-          const a = dense[q - 1] as [number, number, number], b = dense[q] as [number, number, number];
-          const len = Math.hypot(b[0] - a[0], b[2] - a[2]);
-          while (next <= acc + len) {
-            const u = (next - acc) / (len || 1);
-            samples.push({ x: a[0] + (b[0] - a[0]) * u, y: a[1] + (b[1] - a[1]) * u, z: a[2] + (b[2] - a[2]) * u, tx: (b[0] - a[0]) / (len || 1), tz: (b[2] - a[2]) / (len || 1), s: next });
-            next += 3;
-          }
-          acc += len;
-        }
-        const ms = samples[Math.floor(samples.length / 2)] as HighwaySample;
-        const outerSide = -ms.tz * (ms.x - hx) + ms.tx * (ms.z - hz) > 0 ? 1 : -1;
-        mountain = {
-          road: { samples, halfWidth: M.halfWidth, barrierHeight: WORLD.highway.barrierHeight, pillars: [], closed: false, outerSide, gaps: [] },
-          cx: hx, cz: hz, rBase: M.baseRadius - M.halfWidth, rTop: M.topRadius - M.halfWidth, height: M.height,
+          return bestNode;
         };
-        accessLines.push([sx, sz, p0x, p0z]);
+        const nodeA = pick(-1), nodeB = pick(1);
+        const ax = nodeA.x + nx * (nodeA.radius - 1), az = nodeA.z + nz * (nodeA.radius - 1);
+        const bx = nodeB.x + nx * (nodeB.radius - 1), bz = nodeB.z + nz * (nodeB.radius - 1);
+        const ox = cx + nx * (vmax + 26), oz = cz + nz * (vmax + 26);
+        const poly = sub.ringPolygon;
+        const outside = (x: number, z: number): number => {
+          if (pointInPolygon(poly, x, z)) return 0;
+          let best = Infinity;
+          for (let q = 0; q < poly.length; q += 2) {
+            const x0 = poly[q] as number, z0 = poly[q + 1] as number, x1 = poly[(q + 2) % poly.length] as number, z1 = poly[(q + 3) % poly.length] as number;
+            const dx = x1 - x0, dz = z1 - z0;
+            const t = Math.max(0, Math.min(1, ((x - x0) * dx + (z - z0) * dz) / (dx * dx + dz * dz || 1)));
+            best = Math.min(best, Math.hypot(x - x0 - dx * t, z - z0 - dz * t));
+          }
+          return best;
+        };
+        const pass = buildMountainPass(seed + 31 * k, ax, az, bx, bz, ox, oz, nx, nz, outside);
+        mountain = {
+          road: { samples: pass.samples, halfWidth: M.halfWidth, barrierHeight: WORLD.highway.barrierHeight, pillars: [], closed: false, outerSide: 0, gaps: [] },
+          terrain: pass.terrain,
+          cx: ox + nx * 600, cz: oz + nz * 600, radius: 1100, height: M.height,
+          summit: pass.summit, pad: pass.pad,
+          nodeA: offset + sub.nodes.indexOf(nodeA), nodeB: offset + sub.nodes.indexOf(nodeB),
+        };
+        // Emprise au sol des deux pieds de la route : rien ne s'y construit.
+        for (const [fx, fz] of [[ax, az], [bx, bz]] as const) accessLines.push([fx, fz, fx + nx * 90, fz + nz * 90]);
       }
       graph.districts.push({
         id: k, name: def.name, unlockLevel: def.unlockLevel, cx, cz, radius: radius + 60, polygon: sub.ringPolygon, entryNode: offset + sub.nodes.indexOf(entry),
@@ -907,7 +911,7 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     const mt: Mountain = mountain;
     for (let i = 0; i < mt.road.samples.length; i += 2) {
       const sp = mt.road.samples[i] as HighwaySample;
-      if (sp.y > 14) break;
+      if (sp.y > 14) continue;
       const r = mt.road.halfWidth + 4;
       roadHash.insert(sp.x - r, sp.z - r, sp.x + r, sp.z + r, { x: sp.x, z: sp.z, r, slack: 0.3, kind: 'alley' });
     }
@@ -1148,7 +1152,7 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     b.style = 2;
     b.backdrop = true;
     const atSea = graph.districts.some((dd) => (dd.theme === 'baie' || dd.theme === 'docks') && Math.hypot(fp.cx - (dd.cx + dd.outX * (dd.radius + 330)), fp.cz - (dd.cz + dd.outZ * (dd.radius + 330))) < 420);
-    const onHill = mountain !== null && Math.hypot(fp.cx - (mountain as Mountain).cx, fp.cz - (mountain as Mountain).cz) < (mountain as Mountain).rBase + 60;
+    const onHill = mountain !== null && Math.hypot(fp.cx - (mountain as Mountain).cx, fp.cz - (mountain as Mountain).cz) < (mountain as Mountain).radius;
     const rural = graph.districts.some((dd) => dd.theme === 'collines' && Math.hypot(fp.cx - dd.cx, fp.cz - dd.cz) < dd.radius + 900 && (fp.cx - dd.cx) * dd.outX + (fp.cz - dd.cz) * dd.outZ > -dd.radius);
     if (!inDistrict(fp.cx, fp.cz, 40) && nearAccess(fp.cx, fp.cz) > 50 && !atSea && !onHill && !inValley(fp.cx, fp.cz) && !rural) buildings.push(b);
   }
@@ -1350,7 +1354,7 @@ export function generateCity(seed: number = WORLD.seed): CityData {
         const a = Math.atan2(d.outZ, d.outX) + rng.range(-1.9, 1.9);
         const dist = d.radius + rng.range(260, 760);
         const mx = d.cx + Math.cos(a) * dist, mz = d.cz + Math.sin(a) * dist;
-        if (mountain && Math.hypot(mx - (mountain as Mountain).cx, mz - (mountain as Mountain).cz) < (mountain as Mountain).rBase + 180) continue;
+        if (mountain && Math.hypot(mx - (mountain as Mountain).cx, mz - (mountain as Mountain).cz) < 760) continue;
         const r0 = rng.range(170, 340);
         mounds.push({ x: mx, z: mz, r0, r1: r0 * rng.range(0.04, 0.16), height: rng.range(130, 310), solid: false, color: [0.022, 0.03, 0.04] });
       }
@@ -1358,34 +1362,37 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     if (d.theme === 'collines' && mountain) {
       const mt: Mountain = mountain;
       const rs = mt.road.samples;
-      const first = rs[8] as HighwaySample;
-      addTorii(first.x, 0, first.z, Math.atan2(first.tx, first.tz), mt.road.halfWidth * 2 + 3);
-      // Sommet : grand temple au centre du plateau, torii à l'arrivée, parapet rouge tout autour.
-      addPagoda(mt.cx, mt.height, mt.cz, Math.atan2(d.outX, d.outZ), 1.7);
-      props.push({ x: mt.cx, y: mt.height + 4, z: mt.cz, sx: 15, sy: 8, sz: 15, yaw: Math.atan2(d.outX, d.outZ), color: [0.36, 0.06, 0.04] });
-      const last = rs[rs.length - 10] as HighwaySample;
-      addTorii(last.x, mt.height, last.z, Math.atan2(last.tx, last.tz), mt.road.halfWidth * 2 + 3);
-      const rim = mt.rTop - 1.2, segs = 44;
-      for (let q = 0; q < segs; q++) {
-        const a = ((q + 0.5) / segs) * Math.PI * 2;
-        const px = mt.cx + Math.cos(a) * rim, pz = mt.cz + Math.sin(a) * rim;
-        // Ouverture là où la route arrive sur le plateau.
-        let open = false;
-        for (let i = rs.length - 1; i >= 0 && (rs[i] as HighwaySample).y > mt.height - 6; i -= 2) if (Math.hypot((rs[i] as HighwaySample).x - px, (rs[i] as HighwaySample).z - pz) < mt.road.halfWidth + 6) open = true;
-        if (open) continue;
-        const len = (Math.PI * 2 * rim) / segs;
-        const yaw = Math.atan2(-Math.sin(a), Math.cos(a));
-        props.push({ x: px, y: mt.height + 0.7, z: pz, sx: 0.5, sy: 1.4, sz: len + 0.3, yaw, color: [0.42, 0.07, 0.04] });
-        solids.push({ x: px, y: mt.height + 1.5, z: pz, hx: 0.4, hy: 1.5, hz: len / 2 + 0.3, yaw });
-        if (q % 4 === 0) glowBoxes.push({ x: px, y: mt.height + 1.7, z: pz, sx: 0.45, sy: 0.6, sz: 0.45, yaw, color: [1.0, 0.6, 0.22] });
+      // Un torii à chaque pied de la route, un autre au col, et le temple sur son terre-plein.
+      for (const idx of [10, rs.length - 11, mt.summit]) {
+        const sp = rs[idx] as HighwaySample;
+        addTorii(sp.x, sp.y, sp.z, Math.atan2(sp.tx, sp.tz), mt.road.halfWidth * 2 + 3);
       }
-      // Arbres sur les pentes, hors de l'emprise de la route.
-      for (let q = 0; q < 420; q++) {
-        const a = rng.range(0, Math.PI * 2), rho = rng.range(mt.rTop + 6, mt.rBase - 4);
-        const tx = mt.cx + Math.cos(a) * rho, tz = mt.cz + Math.sin(a) * rho;
-        let clear = true;
-        for (let i = 0; i < rs.length; i += 3) if (Math.hypot((rs[i] as HighwaySample).x - tx, (rs[i] as HighwaySample).z - tz) < mt.road.halfWidth + 5) { clear = false; break; }
-        if (clear) trees.push({ x: tx, z: tz, y: (mt.height * (mt.rBase - rho)) / (mt.rBase - mt.rTop), height: rng.range(8, 15), radius: rng.range(2.2, 3.6) });
+      const top = rs[mt.summit] as HighwaySample;
+      const templeYaw = Math.atan2(top.x - mt.pad.x, top.z - mt.pad.z);
+      addPagoda(mt.pad.x, mt.pad.y, mt.pad.z, templeYaw, 1.7);
+      props.push({ x: mt.pad.x, y: mt.pad.y + 4, z: mt.pad.z, sx: 15, sy: 8, sz: 15, yaw: templeYaw, color: [0.36, 0.06, 0.04] });
+      for (let q = 0; q < 8; q++) {
+        const a = (q / 8) * Math.PI * 2;
+        glowBoxes.push({ x: mt.pad.x + Math.cos(a) * 17, y: mt.pad.y + 1.2, z: mt.pad.z + Math.sin(a) * 17, sx: 0.5, sy: 0.7, sz: 0.5, yaw: 0, color: [1.0, 0.6, 0.22] });
+      }
+      // Forêt sur les pentes, hors de l'emprise de la route et du terre-plein.
+      const T = mt.terrain;
+      const spanU = (T.ni - 1) * T.cell, spanV = (T.nj - 1) * T.cell;
+      const B = 30;
+      const near = new Set<number>();
+      for (const sp of rs) for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) near.add((Math.floor(sp.x / B) + i) * 100003 + Math.floor(sp.z / B) + j);
+      for (let q = 0; q < 5200; q++) {
+        const u = rng.range(0, spanU), v = rng.range(0, spanV);
+        const tx = T.x0 + T.ux * u + T.vx * v, tz = T.z0 + T.uz * u + T.vz * v;
+        const y = terrainHeight(T, tx, tz);
+        if (y < 1.5 || y > 235) continue;
+        if (Math.hypot(tx - mt.pad.x, tz - mt.pad.z) < 24) continue;
+        if (near.has(Math.floor(tx / B) * 100003 + Math.floor(tz / B))) {
+          let clear = true;
+          for (let i = 0; i < rs.length; i += 2) if (Math.hypot((rs[i] as HighwaySample).x - tx, (rs[i] as HighwaySample).z - tz) < mt.road.halfWidth + 6) { clear = false; break; }
+          if (!clear) continue;
+        }
+        trees.push({ x: tx, z: tz, y: y - 0.4, height: rng.range(8, 16), radius: rng.range(2.2, 3.8) });
       }
     }
     theme = null;
@@ -1411,7 +1418,7 @@ export function generateCity(seed: number = WORLD.seed): CityData {
         if (mountain) {
           let under = false;
           for (const sp of (mountain as Mountain).road.samples) {
-            if (sp.y > 34) break;
+            if (sp.y > 34) continue;
             if (Math.hypot(sp.x - (x0 + x1) / 2, sp.z - (z0 + z1) / 2) < 16) { under = true; break; }
           }
           if (under) continue;
@@ -1489,7 +1496,7 @@ export function generateCity(seed: number = WORLD.seed): CityData {
   }
   const countryside: number[][] = [];
   for (const d of graph.districts) if (d.theme === 'collines') countryside.push([d.cx, d.cz, d.radius + 220]);
-  if (mountain) countryside.push([(mountain as Mountain).cx, (mountain as Mountain).cz, (mountain as Mountain).rBase + 200]);
+  if (mountain) countryside.push([(mountain as Mountain).cx, (mountain as Mountain).cz, (mountain as Mountain).radius]);
   for (const v of valleys) countryside.push([v[0] as number, v[1] as number, (v[2] as number) + 160]);
   // Éclairage public propre à chaque quartier : sodium orangé sur les docks, rose chaud sur la baie, doré dans les collines.
   for (const d of graph.districts) {
@@ -1522,7 +1529,7 @@ export function generateCity(seed: number = WORLD.seed): CityData {
   }
   if (mountain) {
     const mt: Mountain = mountain;
-    const r = mt.rBase + 30;
+    const r = mt.radius;
     B.x0 = Math.min(B.x0, mt.cx - r);
     B.x1 = Math.max(B.x1, mt.cx + r);
     B.z0 = Math.min(B.z0, mt.cz - r);

@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { GeomBuilder, type Vec3 } from '../render/geomBuilder';
 import type { CityMaterials } from '../render/materials';
+import type { Terrain } from './mountainPass';
 import type { Building, CityData, Connector, Highway, HighwaySample } from './cityGen';
 import { pointAt, pointInPolygon, type GraphEdge, type GraphNode, type PathPoint } from './streetGraph';
 
@@ -180,7 +181,9 @@ function addHighway(hw: Highway, road: GeomBuilder, solid: GeomBuilder, glow: Ge
       const stripColor: Vec3 = toGround ? [0.15, 0.6, 1.0] : [1.0, 0.5, 0.12];
       const y0 = toGround ? h - 0.5 : 0.4;
       // (bande assez haute et pas trop vive : une ligne très fine et très lumineuse scintille au loin)
-      glow.quad([inA[0], inA[1] + y0, inA[2]], [inB[0], inB[1] + y0, inB[2]], [inB[0], inB[1] + y0 + STRIP_H, inB[2]], [inA[0], inA[1] + y0 + STRIP_H, inA[2]], nin, 0, 0, len, STRIP_H, stripColor, [1, 3, 1, 0.5]);
+      // décollée de 4 cm du muret : posée exactement sur lui, elle clignotait (deux faces au même endroit)
+      const ox = nin[0] * 0.04, oz = nin[2] * 0.04;
+      glow.quad([inA[0] + ox, inA[1] + y0, inA[2] + oz], [inB[0] + ox, inB[1] + y0, inB[2] + oz], [inB[0] + ox, inB[1] + y0 + STRIP_H, inB[2] + oz], [inA[0] + ox, inA[1] + y0 + STRIP_H, inA[2] + oz], nin, 0, 0, len, STRIP_H, stripColor, [1, 3, 1, 0.5]);
     }
     // Là où le flanc plein (rampe basse) laisse place au tablier mince, on ferme le caisson par
     // une cloison en travers : sinon, de dessous, on voit l'intérieur creux de la rampe.
@@ -264,6 +267,29 @@ export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes
       zones.push({ cx: d.cx + (i + 0.5) * CHUNK, cz: d.cz + (j + 0.5) * CHUNK, radius: CHUNK * 0.75, group: part.group });
     }
   }
+  const mt = city.mountain;
+  if (mt) {
+    // Massif : forêt et route par morceaux ; le relief d'un seul tenant, visible de loin.
+    const n = Math.ceil(mt.radius / CHUNK);
+    for (let i = -n; i < n; i++) for (let j = -n; j < n; j++) {
+      const part = buildZone(city, mats, MOUNTAIN_ZONE, { x0: mt.cx + i * CHUNK, z0: mt.cz + j * CHUNK });
+      if (part.triangles === 0) continue;
+      total += part.triangles;
+      root.add(part.group);
+      zones.push({ cx: mt.cx + (i + 0.5) * CHUNK, cz: mt.cz + (j + 0.5) * CHUNK, radius: CHUNK * 0.75, group: part.group });
+    }
+    const gb = new GeomBuilder();
+    addTerrain(gb, mt.terrain);
+    const geo = gb.build();
+    const mesh = new THREE.Mesh(geo, mats.solid);
+    mesh.name = 'relief';
+    mesh.matrixAutoUpdate = false;
+    const g = new THREE.Group();
+    g.add(mesh);
+    root.add(g);
+    total += geo.index ? geo.index.count / 3 : 0;
+    zones.push({ cx: mt.cx, cz: mt.cz, radius: mt.radius + 600, group: g });
+  }
   return { group: root, triangles: total, zones };
 }
 
@@ -272,6 +298,8 @@ export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes
  * l'autoroute de ceinture ou collé derrière elle), sinon le numéro du quartier extérieur.
  * Les réponses sont gardées en mémoire : la question est posée des dizaines de fois par objet.
  */
+/** Numéro de zone du massif montagneux (au-delà du quartier des collines). */
+const MOUNTAIN_ZONE = 99;
 const zoneCache = new Map<string, number>();
 let zoneCity: CityData | null = null;
 let mainPoly: number[] = [];
@@ -295,10 +323,36 @@ function zoneAt(city: CityData, x: number, z: number): number {
     zone = -1;
     if (!pointInPolygon(mainPoly, x, z)) {
       for (const d of city.graph.districts) if (Math.hypot(x - d.cx, z - d.cz) < d.radius + 130) zone = d.id;
+      const mt = city.mountain;
+      if (zone === -1 && mt && Math.hypot(x - mt.cx, z - mt.cz) < mt.radius) zone = MOUNTAIN_ZONE;
     }
     zoneCache.set(key, zone);
   }
   return zone;
+}
+
+/** Relief de la montagne : une grille de hauteurs, dessinée à facettes. */
+function addTerrain(solid: GeomBuilder, T: Terrain): void {
+  const V = (i: number, j: number): Vec3 => [T.x0 + (T.ux * i + T.vx * j) * T.cell, T.heights[j * T.ni + i] as number, T.z0 + (T.uz * i + T.vz * j) * T.cell];
+  const face = (a: Vec3, b: Vec3, c: Vec3): void => {
+    const e1x = b[0] - a[0], e1y = b[1] - a[1], e1z = b[2] - a[2], e2x = c[0] - a[0], e2y = c[1] - a[1], e2z = c[2] - a[2];
+    let nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nx /= l; ny /= l; nz /= l;
+    const sgn = ny < 0 ? -1 : 1;
+    // Herbe sombre sur le plat, roche sur les pentes raides, un peu plus clair en altitude.
+    const steep = 1 - Math.abs(ny);
+    const hgt = Math.min(1, (a[1] + b[1] + c[1]) / 3 / 260);
+    const g = 0.06 + hgt * 0.03;
+    const col: Vec3 = steep > 0.45 ? [0.1 + hgt * 0.05, 0.1 + hgt * 0.05, 0.12 + hgt * 0.06] : [g * 0.75, g * 1.25 + 0.008, g * 0.85];
+    solid.tri(a, b, c, [nx * sgn, ny * sgn, nz * sgn], col, [0, 0, 0, 0]);
+  };
+  for (let j = 0; j < T.nj - 1; j++) for (let i = 0; i < T.ni - 1; i++) {
+    const h00 = V(i, j), h10 = V(i + 1, j), h01 = V(i, j + 1), h11 = V(i + 1, j + 1);
+    if (h00[1] <= 0 && h10[1] <= 0 && h01[1] <= 0 && h11[1] <= 0) continue; // à plat : c'est le sol
+    face(h00, h11, h10);
+    face(h00, h01, h11);
+  }
 }
 
 /** Côté d'un morceau de quartier (m). */
@@ -408,11 +462,20 @@ function buildZone(city: CityData, mats: CityMaterials, zone: number, cell: { x0
     for (const br of city.bridges) addHighway(br, hwRoad, solid, glow, ROAD_KIND.ringway);
     for (const m of city.mounds) solid.cylinder(m.x, -0.1, m.z, m.r0, m.r1, m.height, m.solid ? 20 : 14, m.color, [0, 0, 0, 0], true);
   }
-  if (main && city.mountain) {
-    // Route de montagne et sa colline (un cône tronqué : la route court sur son flanc).
-    const mt = city.mountain;
-    addHighway(mt.road, hwRoad, solid, glow, ROAD_KIND.ringway);
-    solid.cylinder(mt.cx, -0.1, mt.cz, mt.rBase, mt.rTop, mt.height + 0.1, 56, [0.028, 0.04, 0.032], [0, 0, 0, 0], true);
+  if (city.mountain) {
+    // Route du col : dessinée par tronçons, chacun dans le morceau où il se trouve.
+    const road = city.mountain.road;
+    let run: HighwaySample[] = [];
+    const flush = (): void => {
+      if (run.length >= 2) addHighway({ ...road, samples: run }, hwRoad, solid, glow, ROAD_KIND.ringway);
+      run = [];
+    };
+    for (let k = 0; k < road.samples.length; k++) {
+      const sp = road.samples[k] as HighwaySample;
+      if (here(sp.x, sp.z)) run.push(sp);
+      else if (run.length > 0) { run.push(sp); flush(); }
+    }
+    flush();
   }
   if (main) {
     // Balises d'accès aux deux bouts de l'autoroute centrale et des ponts.

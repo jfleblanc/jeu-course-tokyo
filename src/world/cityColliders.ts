@@ -110,7 +110,22 @@ export function buildCityColliders(city: CityData, phys: PhysicsWorld): number {
   if (city.mountain) {
     const mt = city.mountain;
     addHighwayCollider(mt.road);
-    world.createCollider(R.ColliderDesc.cylinder(1, mt.rTop).setTranslation(mt.cx, mt.height - 1, mt.cz).setFriction(0.9).setCollisionGroups(GROUP_WORLD));
+    // Relief : mêmes triangles que l'affichage (la route passe 0,6 m au-dessus).
+    const T = mt.terrain;
+    const verts = new Float32Array(T.ni * T.nj * 3);
+    for (let j = 0; j < T.nj; j++) for (let i = 0; i < T.ni; i++) {
+      const o = (j * T.ni + i) * 3;
+      verts[o] = T.x0 + (T.ux * i + T.vx * j) * T.cell;
+      verts[o + 1] = T.heights[j * T.ni + i] as number;
+      verts[o + 2] = T.z0 + (T.uz * i + T.vz * j) * T.cell;
+    }
+    const idx: number[] = [];
+    for (let j = 0; j < T.nj - 1; j++) for (let i = 0; i < T.ni - 1; i++) {
+      const a = j * T.ni + i, b = a + 1, c = a + T.ni, d = c + 1;
+      if ((verts[a * 3 + 1] as number) <= 0 && (verts[b * 3 + 1] as number) <= 0 && (verts[c * 3 + 1] as number) <= 0 && (verts[d * 3 + 1] as number) <= 0) continue;
+      idx.push(a, d, b, a, c, d);
+    }
+    world.createCollider(R.ColliderDesc.trimesh(verts, new Uint32Array(idx), R.TriMeshFlags.FIX_INTERNAL_EDGES).setFriction(0.8).setCollisionGroups(GROUP_WORLD));
     count++;
   }
   for (const br of city.bridges) addHighwayCollider(br);

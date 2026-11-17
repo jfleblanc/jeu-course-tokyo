@@ -176,7 +176,14 @@ export class Traffic {
     }
     const R = this.phys.rapier;
     // Remplissage : tout de suite au début, puis une voiture à la fois.
-    const limit = this.routeEdges ? TRAFFIC.raceCount : TRAFFIC.count;
+    // À la campagne (et sur la route du col, au-delà), il y a bien moins de monde sur la route.
+    let share = 1;
+    for (const d of this.graph.districts) {
+      if (d.theme !== 'collines') continue;
+      const out = (focus.x - d.cx) * d.outX + (focus.z - d.cz) * d.outZ;
+      if (Math.hypot(focus.x - d.cx, focus.z - d.cz) < d.radius + 60 || out > d.radius * 0.5) share = TRAFFIC.countryShare;
+    }
+    const limit = Math.max(2, Math.round((this.routeEdges ? TRAFFIC.raceCount : TRAFFIC.count) * share));
     for (let i = 0; i < limit; i++) {
       const c = this.cars[i] as TrafficCar;
       if (!c.active) {

@@ -73,5 +73,9 @@ for (const d of g.districts) {
     phys.world.removeRigidBody(car.body);
   };
   for (const br of city.bridges) { drive('pont (aller)', br.samples, 38); drive('pont (retour)', [...br.samples].reverse().map((p) => ({ ...p, tx: -p.tx, tz: -p.tz })), 38); }
-  if (city.mountain) { drive('route de montagne (montée)', city.mountain.road.samples, 22); drive('route de montagne (descente)', [...city.mountain.road.samples].reverse().map((p) => ({ ...p, tx: -p.tx, tz: -p.tz })), 20); }
+  if (city.mountain) { const ms = city.mountain.road.samples; let minR = 1e9, maxSlope = 0;
+    for (let i = 6; i < ms.length - 6; i++) { const a = ms[i - 6]!, b = ms[i + 6]!; let d = Math.atan2(b.tx, b.tz) - Math.atan2(a.tx, a.tz); d = Math.abs(Math.atan2(Math.sin(d), Math.cos(d))); if (d > 0.01) minR = Math.min(minR, 36 / d); maxSlope = Math.max(maxSlope, Math.abs(ms[i + 1]!.y - ms[i]!.y) / 3); }
+    let minGapStrands = 1e9; for (let i = 0; i < ms.length; i += 4) for (let j = i + 60; j < ms.length; j += 4) minGapStrands = Math.min(minGapStrands, Math.hypot(ms[i]!.x - ms[j]!.x, ms[i]!.z - ms[j]!.z));
+    console.log(`col: ${(ms[ms.length - 1]!.s / 1000).toFixed(2)} km ; altitude ${city.mountain.height} m ; rayon mini ${minR.toFixed(0)} m ; pente max ${(maxSlope * 100).toFixed(0)} % ; écart mini entre deux lacets ${minGapStrands.toFixed(0)} m ; pieds distants de ${Math.hypot(ms[0]!.x - ms[ms.length - 1]!.x, ms[0]!.z - ms[ms.length - 1]!.z).toFixed(0)} m`);
+    drive('col (de A vers B)', ms, 24); drive('col (de B vers A)', [...ms].reverse().map((p) => ({ ...p, tx: -p.tx, tz: -p.tz })), 24); }
 }
