@@ -33,6 +33,8 @@ export interface TrafficCar {
   /** Distance parcourue (pour faire tourner les roues à l'affichage). */
   travel: number;
   braking: boolean;
+  /** Temps passé à l'arrêt (anti-blocage). */
+  stuck: number;
 }
 
 /** Ce que la circulation doit éviter ou qui peut la percuter : joueur et adversaires. */
@@ -48,6 +50,8 @@ const HALF = { x: 0.86, y: 0.5, z: 2.05 };
 export class Traffic {
   readonly cars: TrafficCar[] = [];
   enabled = true;
+  /** Zone sans circulation autour du joueur (m) : grille de départ pendant le décompte. */
+  keepOut = 0;
   private readonly rng: Rng;
   private readonly usable: GraphEdge[];
   private readonly p: PathPoint = { x: 0, z: 0, tx: 1, tz: 0 };
@@ -71,7 +75,7 @@ export class Traffic {
       this.cars.push({
         body, collider, active: false, state: 'rue', edge: 0, forward: true, s: 0, speed: 0, x: 0, z: 0, yaw: 0,
         jx0: 0, jz0: 0, jx1: 0, jz1: 0, jyaw0: 0, jyaw1: 0, jt: 0, jlen: 1, nextEdge: 0, nextForward: true, hitTime: 0,
-        color: i % TRAFFIC.colors.length, travel: 0, braking: false,
+        color: i % TRAFFIC.colors.length, travel: 0, braking: false, stuck: 0,
       });
     }
   }
@@ -94,22 +98,31 @@ export class Traffic {
   }
 
   private readonly tmp = { x: 0, z: 0, yaw: 0 };
+  /** Rues du tracé de la course en cours : la circulation y apparaît. null = toute la ville. */
+  private routeEdges: GraphEdge[] | null = null;
+
+  /** Début ou fin de course : la circulation se replace (sur le tracé, ou partout). */
+  setRoute(edgeIds: number[] | null): void {
+    this.clear();
+    this.routeEdges = edgeIds ? [...new Set(edgeIds)].map((id) => this.graph.edges[id] as GraphEdge).filter((e) => e.length - e.trimA - e.trimB > 30) : null;
+  }
+
 
   private spawn(c: TrafficCar, fx: number, fz: number, anywhere: boolean): boolean {
     for (let attempt = 0; attempt < 12; attempt++) {
-      const e = this.rng.pick(this.usable);
+      const e = this.rng.pick(this.routeEdges && this.routeEdges.length ? this.routeEdges : this.usable);
       const forward = this.rng.chance(0.5);
       const s = e.trimA + this.rng.next() * (e.length - e.trimA - e.trimB);
       this.lanePoint(e, forward, s, this.tmp);
       const d = Math.hypot(this.tmp.x - fx, this.tmp.z - fz);
-      if (d > TRAFFIC.spawnMax || (!anywhere && d < TRAFFIC.spawnMin) || (anywhere && d < 35)) continue;
+      if (d > TRAFFIC.spawnMax || (!anywhere && d < TRAFFIC.spawnMin) || (anywhere && d < 35) || d < this.keepOut) continue;
       let free = true;
       for (const o of this.cars) if (o !== c && o.active && Math.hypot(o.x - this.tmp.x, o.z - this.tmp.z) < 22) free = false;
       if (!free) continue;
       c.edge = e.id; c.forward = forward; c.s = s; c.state = 'rue';
       c.x = this.tmp.x; c.z = this.tmp.z; c.yaw = this.tmp.yaw;
       c.speed = TRAFFIC.speed[e.kind] * 0.8;
-      c.active = true; c.hitTime = 0;
+      c.active = true; c.hitTime = 0; c.stuck = 0;
       const R = this.phys.rapier;
       c.body.setBodyType(R.RigidBodyType.KinematicPositionBased, true);
       c.body.setEnabled(true);
@@ -161,9 +174,12 @@ export class Traffic {
     }
     const R = this.phys.rapier;
     // Remplissage : tout de suite au début, puis une voiture à la fois.
-    for (const c of this.cars) {
+    const limit = this.routeEdges ? TRAFFIC.raceCount : TRAFFIC.count;
+    for (let i = 0; i < limit; i++) {
+      const c = this.cars[i] as TrafficCar;
       if (!c.active) {
-        this.spawn(c, focus.x, focus.z, !this.filled);
+        // En course, jamais d'apparition surprise tout près : toujours à distance.
+        this.spawn(c, focus.x, focus.z, !this.filled && !this.routeEdges);
         if (this.filled) break;
       }
     }
@@ -183,7 +199,9 @@ export class Traffic {
         if ((c.hitTime > 6 && dFocus > 60) || c.hitTime > 25 || t.y < -5) this.retire(c);
         continue;
       }
-      if (dFocus > TRAFFIC.despawn) {
+      // Bloquée trop longtemps (face à face, joueur garé devant…) : on la retire si personne ne regarde de près.
+      c.stuck = c.speed < 0.3 ? c.stuck + dt : 0;
+      if (dFocus > TRAFFIC.despawn || dFocus < this.keepOut || (c.stuck > 8 && dFocus > 45)) {
         this.retire(c);
         continue;
       }

@@ -1,10 +1,13 @@
 /**
  * Circulation dans les rues (essai) : des voitures ordinaires qui suivent les rues à gauche,
- * ralentissent aux carrefours et s'arrêtent derrière un obstacle. En balade seulement.
+ * ralentissent aux carrefours et s'arrêtent derrière un obstacle. En balade partout dans la
+ * ville ; en course, sur le tracé, comme obstacles à éviter.
  */
 export const TRAFFIC = {
   /** Nombre de voitures en circulation autour du joueur. */
-  count: 14,
+  count: 24,
+  /** Nombre de voitures pendant une course (elles apparaissent sur le tracé). */
+  raceCount: 14,
   /** Elles apparaissent entre ces deux distances du joueur (m), et disparaissent au-delà de la troisième. */
   spawnMin: 70,
   spawnMax: 230,

@@ -49,3 +49,36 @@ input.throttle = 1;
 let hitAt = -1, vAfter = 0;
 for (let i = 0; i < 60 * 4; i++) { step(); if (hitAt < 0 && victim.state === 'choc') hitAt = i / 60; if (victim.state === 'choc') vAfter = Math.max(vAfter, victim.speed); }
 console.log(`choc à 90 km/h: voiture passée en physique libre à ${hitAt.toFixed(2)} s, poussée jusqu'à ${(vAfter * 3.6).toFixed(0)} km/h ; joueur ${(car.speed * 3.6).toFixed(0)} km/h après 4 s, hauteur ${car.pos.y.toFixed(2)} ; victime y=${victim.body.translation().y.toFixed(2)}`);
+
+// ——— Course avec circulation sur le tracé : les adversaires s'en sortent-ils ? ———
+{
+  const { Race } = await import('../src/race/race');
+  const { buildTrackBank } = await import('../src/race/trackBank');
+  const { driveAlongRoute } = await import('../src/ai/driver');
+  const { AI_DRIVERS } = await import('../src/config/race');
+  traffic.clear();
+  const bank = buildTrackBank(city.graph);
+  for (const track of [bank[0]!, bank[3]!, bank[9]!]) {
+    const race = new Race(phys, CAR_SPEC, car);
+    race.start(track.route);
+    traffic.setRoute(track.route.edges);
+    const me = AI_DRIVERS[1]!; let struck = 0; const seen = new Set<number>(); let n = 0; let myAvoid = 0;
+    while (n < 60 * 240 && !race.racers.every((r) => r.finished)) {
+      const a = actors; a.length = 1; const lv = car.body.linvel(); a[0]!.x = car.pos.x; a[0]!.z = car.pos.z; a[0]!.vx = lv.x; a[0]!.vz = lv.z;
+      race.obstacles.length = 0;
+      for (const r of race.racers) if (!r.isPlayer) { const v = r.car.body.linvel(); a.push({ x: r.car.pos.x, z: r.car.pos.z, vx: v.x, vz: v.z }); }
+      for (const c of traffic.cars) if (c.active) race.obstacles.push(c);
+      traffic.keepOut = race.phase === 'countdown' ? 130 : 0;
+      // le « joueur » suit le tracé sans regarder la circulation (pire cas)
+      if (race.phase === 'running' && !race.player!.finished) driveAlongRoute(car, race.route!, race.player!.index, me, 1, myAvoid, input); else { input.throttle = 0; input.brake = 1; input.steer = 0; }
+      car.update(FIXED_DT, race.playerInput(input), PRESET_A);
+      race.beforeStep(FIXED_DT, PRESET_A);
+      traffic.beforeStep(FIXED_DT, a);
+      phys.world.step(); car.afterStep(); race.afterStep(FIXED_DT);
+      traffic.cars.forEach((c, i) => { if (c.active && c.state === 'choc' && !seen.has(i * 1000 + Math.floor(c.hitTime < 0.05 ? n / 600 : -1))) { if (c.hitTime < 0.05) { struck++; seen.add(i * 1000 + Math.floor(n / 600)); } } });
+      n++;
+    }
+    console.log(`course « ${track.name} » avec circulation: ` + race.racers.map((r) => `${r.name} ${r.finished ? r.finishTime.toFixed(0) + ' s' : 'pas arrivé'} (${r.resets} repl.)`).join(' ; ') + ` ; voitures percutées: ${struck}`);
+    race.stop(); traffic.setRoute(null);
+  }
+}
