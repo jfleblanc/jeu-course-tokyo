@@ -27,3 +27,11 @@ Licences : [CC-BY-4.0](http://creativecommons.org/licenses/by/4.0/), [CC-BY-SA-4
 
 Non inclus : « Nissan GT-R R35 GT V2 » (blakebella), sous licence CC-BY-NC-ND : cette licence interdit
 de diffuser une version modifiée, et le modèle doit être allégé pour tourner dans le jeu.
+
+## Garage
+
+Le mobilier de l'atelier (plateau tournant, servantes, établi et outils, panneau à outils) vient de
+« Car Garage | Desert Garage Environment » (https://sketchfab.com/3d-models/car-garage-desert-garage-environment-ef8bb81713814d688487a81ae2467a51)
+par DevPoly3D (https://sketchfab.com/DevPoly3D), sous licence CC BY-NC 4.0
+(http://creativecommons.org/licenses/by-nc/4.0/) : auteur crédité, **pas d'usage commercial**.
+Fichier `garage.glb` : textures réduites ; la coque du bâtiment n'est pas affichée.

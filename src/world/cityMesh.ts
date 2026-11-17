@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import { GeomBuilder, type Vec3 } from '../render/geomBuilder';
 import type { CityMaterials } from '../render/materials';
 import type { Terrain } from './mountainPass';
+import { GARAGE, GARAGE_BOUNDS, garageToWorld, inGarageHole } from './garageSite';
 import type { Building, CityData, Connector, Highway, HighwaySample } from './cityGen';
 import { pointAt, pointInPolygon, type GraphEdge, type GraphNode, type PathPoint } from './streetGraph';
 
@@ -396,7 +397,27 @@ function buildZone(city: CityData, mats: CityMaterials, zone: number, cell: { x0
       const rural = bx - ax < 100 && city.countryside.some((c) => Math.hypot(mx - (c[0] as number), mz - (c[1] as number)) < (c[2] as number));
       groundGeo.quad([ax, gy, bz], [bx, gy, bz], [bx, gy, az], [ax, gy, az], [0, 1, 0], 0, 0, 1, 1, rural ? GRASS : SIDEWALK);
     };
-    for (let x = x0; x < x1; x += cell) for (let z = z0; z < z1; z += cell) tile(x, z, x + cell, z + cell);
+    // Le garage du joueur est en sous-sol : le sol est troué au-dessus de l'atelier et de la rampe.
+    // On retire les dalles qui touchent son emprise et on repave autour, dans le repère du garage.
+    const site = city.garage;
+    let hole: { x0: number; x1: number; z0: number; z1: number } | null = null;
+    if (site) {
+      const GB = GARAGE_BOUNDS;
+      const cs = [[GB.x0, GB.z0], [GB.x1, GB.z0], [GB.x0, GB.z1], [GB.x1, GB.z1]].map(([lx, lz]) => garageToWorld(site, lx as number, lz as number));
+      hole = { x0: Math.min(...cs.map((c) => c[0])) - 1, x1: Math.max(...cs.map((c) => c[0])) + 1, z0: Math.min(...cs.map((c) => c[1])) - 1, z1: Math.max(...cs.map((c) => c[1])) + 1 };
+      const S = 105;
+      const xs = [-S, GB.x0, GARAGE.rampX0, GB.x1, S], zs = [-S, GB.z0, GARAGE.landingZ0, GARAGE.halfD + GARAGE.wall, GB.z1, S];
+      for (let i = 0; i < xs.length - 1; i++) for (let j = 0; j < zs.length - 1; j++) {
+        const lx0 = xs[i] as number, lx1 = xs[i + 1] as number, lz0 = zs[j] as number, lz1 = zs[j + 1] as number;
+        if (inGarageHole((lx0 + lx1) / 2, (lz0 + lz1) / 2)) continue;
+        const P = (lx: number, lz: number): Vec3 => { const w = garageToWorld(site, lx, lz); return [w[0], gy, w[1]]; };
+        groundGeo.quad(P(lx0, lz1), P(lx1, lz1), P(lx1, lz0), P(lx0, lz0), [0, 1, 0], 0, 0, 1, 1, SIDEWALK);
+      }
+    }
+    for (let x = x0; x < x1; x += cell) for (let z = z0; z < z1; z += cell) {
+      if (hole && x < hole.x1 && x + cell > hole.x0 && z < hole.z1 && z + cell > hole.z0) continue;
+      tile(x, z, x + cell, z + cell);
+    }
     // Au-delà de la ville (dans le brouillard) : quatre grandes dalles suffisent.
     const G = 2600;
     tile(-G, -G, G, z0);

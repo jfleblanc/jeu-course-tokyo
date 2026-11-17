@@ -1,5 +1,6 @@
 import { GROUP_WORLD, type PhysicsWorld, GROUP_BARRIER } from '../physics/physicsWorld';
 import { RailGuide, setRailGuide } from './railGuide';
+import { GARAGE, GARAGE_BOUNDS, garageToWorld } from './garageSite';
 import type { CityData, Highway, HighwaySample } from './cityGen';
 
 /**
@@ -112,7 +113,61 @@ export function buildCityColliders(city: CityData, phys: PhysicsWorld): number {
   };
 
   // Sol
-  box(0, -1, 0, 3000, 1, 3000, 0, 0.9);
+  const site = city.garage;
+  if (!site) box(0, -1, 0, 3000, 1, 3000, 0, 0.9);
+  else {
+    // Le sol est troué à l'emplacement du garage : quatre grandes dalles autour d'un carré, puis,
+    // dans ce carré, des blocs posés dans le repère du garage qui laissent libres l'atelier et la
+    // rampe. Les blocs sont épais : leurs flancs servent de murs au sous-sol.
+    const Q = 70, far = 3000;
+    box(site.x, -1, site.z + Q + far / 2, far, 1, far / 2, 0, 0.9);
+    box(site.x, -1, site.z - Q - far / 2, far, 1, far / 2, 0, 0.9);
+    box(site.x + Q + far / 2, -1, site.z, far / 2, 1, Q, 0, 0.9);
+    box(site.x - Q - far / 2, -1, site.z, far / 2, 1, Q, 0, 0.9);
+    const G = GARAGE, GB = GARAGE_BOUNDS, L = 115, deep = 5;
+    // bloc local : de (x0, z0) à (x1, z1), du niveau `top` jusqu'à `deep` mètres sous le sol de l'atelier
+    const block = (x0: number, z0: number, x1: number, z1: number, top = 0, friction = 0.9): void => {
+      const [wx, wz] = garageToWorld(site, (x0 + x1) / 2, (z0 + z1) / 2);
+      const bottom = G.floor - deep;
+      box(wx, (top + bottom) / 2, wz, (x1 - x0) / 2, (top - bottom) / 2, (z1 - z0) / 2, site.yaw, friction);
+    };
+    block(-L, -L, GB.x0, L);
+    block(GB.x1, -L, L, L);
+    block(GB.x0, -L, GB.x1, GB.z0);
+    block(GB.x0, GB.z1, GB.x1, L);
+    // Sous l'immeuble, entre l'atelier et la rue ; et derrière le palier.
+    block(GB.x0, G.halfD + G.wall, G.rampX0, GB.z1);
+    block(G.rampX0, GB.z0, GB.x1, G.landingZ0);
+    // Sol de l'atelier et du palier.
+    block(GB.x0, GB.z0, GB.x1, G.rampZ0 + 0.5, G.floor);
+    // Mur entre l'atelier et le palier, de part et d'autre de la porte.
+    block(G.halfW, G.landingZ0, G.rampX0, G.doorZ0, 0, 0.3);
+    block(G.halfW, G.doorZ1, G.rampX0, G.halfD + G.wall, 0, 0.3);
+    // Rampe : une dalle inclinée du palier jusqu'à la rue.
+    {
+      const run = G.rampZ1 - G.rampZ0, rise = -G.floor;
+      const len = Math.hypot(run, rise), pitch = -Math.asin(rise / len), T = 0.4;
+      const [wx, wz] = garageToWorld(site, (G.rampX0 + G.rampX1) / 2, (G.rampZ0 + G.rampZ1) / 2);
+      // (centre décalé d'une demi-épaisseur sous la surface, le long de la normale)
+      const ny = run / len, nzl = -rise / len;
+      const [ox, oz] = [Math.sin(site.yaw) * nzl * (T / 2), Math.cos(site.yaw) * nzl * (T / 2)];
+      const cy = Math.cos(site.yaw / 2), sy = Math.sin(site.yaw / 2), cp = Math.cos(pitch / 2), sp = Math.sin(pitch / 2);
+      world.createCollider(R.ColliderDesc.cuboid((G.rampX1 - G.rampX0) / 2, T / 2, len / 2 + 0.3)
+        .setTranslation(wx - ox, G.floor / 2 - ny * (T / 2), wz - oz)
+        .setRotation({ x: cy * sp, y: sy * cp, z: -sy * sp, w: cy * cp })
+        .setFriction(0.9).setCollisionGroups(GROUP_WORLD));
+      count++;
+    }
+    // L'immeuble au-dessus (son plancher est le plafond de l'atelier) et le parapet de la rampe.
+    {
+      const [wx, wz] = garageToWorld(site, 0, (GB.z0 + GB.z1 - 2) / 2);
+      box(wx, G.buildingHeight / 2 + 0.02, wz, G.halfW + G.wall, G.buildingHeight / 2, (GB.z1 - 2 - GB.z0) / 2, site.yaw, 0.3);
+      const [px, pz] = garageToWorld(site, GB.x1 + 0.2, (G.landingZ0 + GB.z1 - 3) / 2);
+      box(px, 0.5, pz, 0.2, 0.5, (GB.z1 - 3 - G.landingZ0) / 2, site.yaw, 0.3);
+      const [qx, qz] = garageToWorld(site, (G.rampX0 + GB.x1) / 2, G.landingZ0 - 0.2);
+      box(qx, 0.5, qz, (GB.x1 - G.rampX0) / 2 + 0.4, 0.5, 0.2, site.yaw, 0.3);
+    }
+  }
 
   // Immeubles : une boîte orientée par immeuble
   for (const b of city.buildings) {

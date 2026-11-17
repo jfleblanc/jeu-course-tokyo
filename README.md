@@ -116,9 +116,13 @@ nom, symbole, NIP de 4 chiffres facultatif. Chaque joueur a sa propre sauvegarde
 d'avant devient « Joueur 1 ». Le NIP évite seulement de jouer la partie d'un autre par mégarde
 (tout reste dans le navigateur). Code : `src/progression/profiles.ts`, `src/ui/profileSelect.ts`.
 
-Le **garage** (touche G) est un vrai atelier (`src/world/garageScene.ts`) : la voiture active au
-milieu avec le mécano qui travaille dessus, les autres garées le long du mur, servantes, établi,
-étagères, pneus. Il est construit loin sous la ville ; la ville n'est pas dessinée pendant ce temps.
+Le **garage** est un vrai lieu de la ville : un immeuble près du départ, avec l'atelier au
+sous-sol et une rampe vers la rue (`src/world/garageSite.ts` pour la géométrie, `garageScene.ts`
+pour le décor, sol troué et collisions dans `cityColliders.ts` / `cityMesh.ts`). La partie commence
+dans l'atelier, voiture sur le plateau : on sort par la rampe. Dans l'atelier, la vue est celle
+d'une caméra de surveillance. La touche G ramène la voiture à sa place et ouvre le menu.
+Le mobilier vient d'un modèle 3D sous licence CC BY-NC (voir `public/models/CREDITS.md`).
+Essais : `sh scripts/run-sim.sh garage`, `?lieu=garage`, `?lieu=garage-rue`.
 
 ## Se téléporter pour essayer
 

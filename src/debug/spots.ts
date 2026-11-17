@@ -1,4 +1,5 @@
 import type { CityData, HighwaySample } from '../world/cityGen';
+import { GARAGE, garageToWorld } from '../world/garageSite';
 
 export interface TestSpot { id: string; label: string; x: number; y: number; z: number; yaw: number }
 
@@ -15,6 +16,16 @@ export function testSpots(city: CityData): TestSpot[] {
     out.push({ id, label, x: p.x, y: p.y, z: p.z, yaw: Math.atan2(p.tx, p.tz) + (reverse ? Math.PI : 0) });
   };
   out.push({ id: 'depart', label: 'Point de départ', x: city.spawn.x, y: 0, z: city.spawn.z, yaw: city.spawn.yaw });
+  if (city.garage) {
+    const g = city.garage, G = GARAGE;
+    const [bx, bz] = garageToWorld(g, G.mainBay.x, G.mainBay.z);
+    out.push({ id: 'garage', label: 'Garage (dans l’atelier)', x: bx, y: G.floor, z: bz, yaw: g.yaw + G.mainBay.yaw });
+    const rx = (G.rampX0 + G.rampX1) / 2;
+    const [tx, tz] = garageToWorld(g, rx, G.rampZ1 + 9);
+    out.push({ id: 'garage-rue', label: 'Garage (dans la rue, devant la rampe)', x: tx, y: 0, z: tz, yaw: g.yaw + Math.PI });
+    const [lx, lz] = garageToWorld(g, rx, G.rampZ0 + 6);
+    out.push({ id: 'garage-rampe', label: 'Garage (en bas de la rampe)', x: lx, y: G.floor * (1 - 6 / (G.rampZ1 - G.rampZ0)), z: lz, yaw: g.yaw });
+  }
   on('autoroute', 'Autoroute centrale (sur le tablier)', city.highway.samples, 0.3);
   on('rampe', 'Autoroute centrale, avant la descente', city.highway.samples, 0.8);
   // Ceinture : une portion surélevée

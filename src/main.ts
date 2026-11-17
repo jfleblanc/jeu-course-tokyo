@@ -236,7 +236,13 @@ async function boot(): Promise<void> {
   let cheat = '';
   let cameraChanged = false;
   // ——— Garage en vrai (vu par une caméra de surveillance) et choix du joueur ———
-  const garageScene = new GarageScene(scene);
+  const garageScene = new GarageScene(scene, city.garage);
+  let garageView = false;
+  /** Pose la voiture du joueur à sa place dans l'atelier, à l'arrêt. */
+  const parkInGarage = (): void => {
+    const b = garageScene.bayPose();
+    car.teleport(b.x, b.y + REST_HEIGHT + 0.15, b.z, b.yaw);
+  };
   const cctv = document.createElement('div');
   cctv.id = 'cctv';
   cctv.innerHTML = '<div class="cc-label"></div>';
@@ -249,10 +255,10 @@ async function boot(): Promise<void> {
     return { glb: testModel === 'aucun' ? null : m.glb, color: paint >= 0 ? (PAINTS[paint]?.color ?? m.color) : m.color, bigWing: m.bigWing, traits: m.traits };
   };
   /** Gare dans l'atelier les voitures d'un joueur, la voiture active en premier. */
-  const showGarageOf = (cars: { model: string; paint: number }[], active: number, name: string): void => {
+  const showGarageOf = (cars: { model: string; paint: number }[], active: number, name: string, showMain = true): void => {
     const list = cars.length ? cars : [{ model: (CAR_MODELS[0] as (typeof CAR_MODELS)[number]).id, paint: -1 }];
     const order = [list[active] ?? list[0], ...list.filter((_, k) => k !== active)];
-    garageScene.setCars(order.map((c) => (c ? garageCarOf(c.model, c.paint) : null)).filter((c): c is GarageCar => c !== null));
+    garageScene.setCars(order.map((c) => (c ? garageCarOf(c.model, c.paint) : null)).filter((c): c is GarageCar => c !== null), showMain);
     cctvName = name;
   };
   const profiles = new ProfileSelect({
@@ -268,15 +274,19 @@ async function boot(): Promise<void> {
       rebuildPlayerCar();
       refreshProgress();
       nosCharge = NOS.seconds;
-      hud.toast(`Bonne course, ${p.name} !`);
-      // La caméra revient en ville, autour de la voiture, puis glisse derrière elle.
-      const a = car.yaw + 0.7;
-      camera.position.set(visual.root.position.x + Math.sin(a) * 6.8, visual.root.position.y + 1.25, visual.root.position.z + Math.cos(a) * 6.8);
-      camera.lookAt(visual.root.position.x, visual.root.position.y + 0.25, visual.root.position.z);
-      titlePhase = 'glisse';
-      glide = 0;
-      glideFrom.copy(camera.position);
-      glideQuat.copy(camera.quaternion);
+      // On part de son garage : la voiture est sur le plateau, il n'y a plus qu'à sortir par la rampe.
+      if (city.garage) {
+        parkInGarage();
+        garageDirty = true;
+        titlePhase = 'fini';
+        hud.toast(`Bonne course, ${p.name} ! Sortez du garage par la rampe.`);
+      } else {
+        hud.toast(`Bonne course, ${p.name} !`);
+        titlePhase = 'glisse';
+        glide = 0;
+        glideFrom.copy(camera.position);
+        glideQuat.copy(camera.quaternion);
+      }
       document.body.classList.remove('titre');
       if (Tutorial.needed) tutorial.start();
     },
@@ -568,6 +578,8 @@ async function boot(): Promise<void> {
       case 'garage':
         // Pas de garage en pleine course.
         if (garage.open || race.phase === 'idle' || race.phase === 'finished') {
+          // Le garage est un lieu : si on n'y est pas, G y ramène la voiture.
+          if (!garage.open && city.garage && !garageScene.contains(car.pos.x, car.pos.y, car.pos.z)) parkInGarage();
           garage.toggle();
           garageTime = 0;
         }
@@ -694,13 +706,17 @@ async function boot(): Promise<void> {
         const a = car.yaw + orbit.a;
         camera.position.set(visual.root.position.x + Math.sin(a) * orbit.d, visual.root.position.y + orbit.h, visual.root.position.z + Math.cos(a) * orbit.d);
         camera.lookAt(visual.root.position.x, visual.root.position.y + 0.1, visual.root.position.z);
-      } else if (garage.open || titlePhase === 'profils') {
+      } else if (garageView) {
         // Garage : on regarde l'atelier par sa caméra de surveillance.
-        if (garage.open && garageDirty) {
+        const menu = titlePhase === 'profils';
+        if (!menu && garageDirty) {
           garageDirty = false;
-          showGarageOf(player.cars.map((c) => ({ model: c.model, paint: c.paint })), player.active, 'ATELIER');
+          // (la voiture active est la vraie, sur le plateau : on n'affiche que les autres)
+          showGarageOf(player.cars.map((c) => ({ model: c.model, paint: c.paint })), player.active, 'ATELIER', false);
         }
-        garageScene.update(frameDt, camera);
+        const bay = garageScene.bayPose();
+        garageScene.showMechanic(menu || Math.hypot(car.pos.x - bay.x, car.pos.z - bay.z) < 2.5);
+        garageScene.update(frameDt, camera, menu || garage.open ? null : car.pos);
         garageTime += frameDt;
         cctvLabel.innerHTML = `<span class="cc-rec">●</span> REC · CAM 03 · GARAGE — ${cctvName} · ${new Date().toLocaleTimeString('fr-CA')}`;
       } else if (titlePhase === 'attente') {
@@ -771,15 +787,21 @@ async function boot(): Promise<void> {
       trafficVisuals.update(traffic, camera.position.x, camera.position.z);
       lampVisuals.update();
       // Vue du garage : on éteint la ville (inutile de la dessiner) et on allume l'atelier.
-      const inGarage = garage.open || titlePhase === 'profils';
-      if (inGarage !== garageScene.visible) {
-        garageScene.setVisible(inGarage);
-        meshes.group.visible = !inGarage;
-        document.body.classList.toggle('cctv', inGarage);
-        if (inGarage) garageDirty = true;
+      // Vue par la caméra de l'atelier : dans les menus du garage, au choix du joueur, et quand
+      // la voiture roule dans l'atelier (le plafond cacherait la vue habituelle).
+      const menus = garage.open || titlePhase === 'profils';
+      const view = menus || (titlePhase === 'fini' && garageScene.contains(car.pos.x, car.pos.y, car.pos.z));
+      if (view !== garageView) {
+        garageView = view;
+        document.body.classList.toggle('cctv', view);
+        if (view) garageDirty = true;
         else rig.reset();
       }
-      if (!inGarage) updateCityZones(meshes, camera.position.x, camera.position.z);
+      document.body.classList.toggle('cctv-menu', menus);
+      garageScene.setLights(view || garageScene.distance(car.pos.x, car.pos.z) < 90);
+      // Dans les menus, inutile de dessiner la ville.
+      meshes.group.visible = !menus;
+      if (!menus) updateCityZones(meshes, camera.position.x, camera.position.z);
       fullMap.update({ x: car.pos.x, z: car.pos.z, yaw: car.yaw, level: player.level, racing: race.active, allOpen: allDistrictsOpen });
       const blocked = gates.blockedNear(frameDt, car.pos.x, car.pos.z);
       if (blocked) hud.toast(`${blocked.name} : ouverture au niveau ${blocked.unlockLevel}`);

@@ -89,7 +89,8 @@ if (ok) {
     };
   });
   console.log('État :', JSON.stringify(state));
-  if (!(state.y > 0.3 && state.y < 1.2)) fail(`hauteur de la voiture anormale (${state.y})`);
+  // (la partie commence dans le garage, au sous-sol : la voiture est soit là, soit déjà dans la rue)
+  if (!((state.y > 0.3 && state.y < 1.2) || (state.y > -4.5 && state.y < 0.3))) fail(`hauteur de la voiture anormale (${state.y})`);
   if (!(state.vitesse > 0.5)) fail(`la voiture n'avance pas avec W (${state.vitesse} km/h)`);
   if (!state.version.includes('version')) fail('numéro de version absent du HUD');
   // La capture est un bonus : sur une machine sans carte graphique elle peut être trop lente.

@@ -1,5 +1,6 @@
 import { Rng } from '../core/rng';
 import { NEON_PALETTE, WORLD, type RoadKind } from '../config/world';
+import { GARAGE, GARAGE_BOUNDS, garageToLocal, garageToWorld, type GarageSite } from './garageSite';
 import { buildMountainPass, terrainHeight, type Terrain } from './mountainPass';
 import { generateStreetGraph, mergeGraph, pointAt, pointInPolygon, type District, type GraphEdge, type GraphNode, type PathPoint, type StreetGraph } from './streetGraph';
 
@@ -252,6 +253,8 @@ export interface CityData {
   /** Zones de campagne (x, z, rayon) : le sol y est de l'herbe, pas du dallage. */
   countryside: number[][];
   spawn: SpawnPoint;
+  /** Garage du joueur (atelier en sous-sol), ou null si aucun emplacement n'a été trouvé. */
+  garage: GarageSite | null;
   /** Points de réapparition sur la chaussée (milieu de chaque rue). */
   respawns: SpawnPoint[];
 }
@@ -1718,7 +1721,68 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     const ms = (mountain as Mountain).road.samples;
     for (let i = 6; i < ms.length - 6; i += 10) { const sp = ms[i] as HighwaySample; respawns.push({ x: sp.x, y: sp.y, z: sp.z, yaw: Math.atan2(sp.tx, sp.tz) }); }
   }
+  // ——— Garage du joueur : un immeuble près du départ, atelier au sous-sol, rampe vers la rue ———
+  let garage: GarageSite | null = null;
+  {
+    const GB = GARAGE_BOUNDS;
+    const candidates = graph.edges
+      .filter((e) => e.district < 0 && !e.onRing && (e.kind === 'avenue' || e.kind === 'street') && e.length - e.trimA - e.trimB > 60)
+      .map((e) => { pointAt(e, e.length / 2, p); return { e, d: Math.hypot(p.x - spawn.x, p.z - spawn.z) }; })
+      .sort((a, b) => a.d - b.d);
+    const sw = WORLD.sidewalk;
+    const p2: PathPoint = { x: 0, z: 0, tx: 1, tz: 0 };
+    search: for (const { e } of candidates) {
+      for (const side of [1, -1]) {
+        pointAt(e, e.length / 2, p);
+        const nx = -p.tz * side, nz = p.tx * side; // vers l'intérieur de l'îlot
+        const back = e.width / 2 + sw[e.kind] + 0.5 + GB.z1;
+        const site: GarageSite = { x: p.x + nx * back, z: p.z + nz * back, yaw: Math.atan2(-nx, -nz) };
+        // Aucune rue ne doit passer sur l'emprise (sauf celle de devant, au-delà du haut de la rampe).
+        let ok = true;
+        for (const o of graph.edges) {
+          if (o.district >= 0) continue;
+          const reach = o.width / 2 + sw[o.kind] + 1.5;
+          for (let q = 0; q <= o.length && ok; q += 5) {
+            pointAt(o, q, p2);
+            const [lx, lz] = garageToLocal(site, p2.x, p2.z);
+            if (lx > GB.x0 - reach - 2 && lx < GB.x1 + reach + 2 && lz > GB.z0 - reach - 2 && lz < GB.z1 + reach - 1.2) ok = false;
+          }
+          if (!ok) break;
+        }
+        // Ni autoroute ni bretelle au-dessus.
+        if (ok) for (const hw of [highway, ringway]) for (let q = 0; q < hw.samples.length && ok; q += 3) { const sp = hw.samples[q] as HighwaySample; if (Math.hypot(sp.x - site.x, sp.z - site.z) < 62) ok = false; }
+        if (ok) for (const c of connectors) for (let q = 0; q < c.pts.length && ok; q += 2) if (Math.hypot((c.pts[q] as number) - site.x, (c.pts[q + 1] as number) - site.z) < 60) ok = false;
+        if (!ok) continue;
+        garage = site;
+        break search;
+      }
+    }
+    if (garage) {
+      const site: GarageSite = garage;
+      // On fait place nette : immeubles, enseignes, lampadaires, arbres et décor sur l'emprise.
+      const inside = (x: number, z: number, m: number): boolean => {
+        const [lx, lz] = garageToLocal(site, x, z);
+        return lx > GB.x0 - m && lx < GB.x1 + m && lz > GB.z0 - m && lz < GB.z1 + m;
+      };
+      const keep = <T>(list: T[], test: (o: T) => boolean): void => {
+        let n = 0;
+        for (const o of list) if (!test(o)) list[n++] = o;
+        list.length = n;
+      };
+      keep(buildings, (b) => inside(b.footprint.cx, b.footprint.cz, Math.hypot(b.footprint.w, b.footprint.d) / 2 + 1.5));
+      keep(signs, (o) => inside(o.x, o.z, 9));
+      keep(lamps, (o) => inside(o.x, o.z, 1) && garageToLocal(site, o.x, o.z)[1] < GB.z1 + 0.5);
+      keep(trees, (o) => inside(o.x, o.z, 4));
+      keep(props, (o) => inside(o.x, o.z, 4));
+      keep(glowBoxes, (o) => inside(o.x, o.z, 4));
+      keep(solids, (o) => inside(o.x, o.z, 4));
+      keep(pools, (o) => inside(o.x, o.z, 2) && garageToLocal(site, o.x, o.z)[1] < GB.z1);
+      // Réapparition dans l'atelier, à la place de la voiture.
+      const [bx, bz] = garageToWorld(site, GARAGE.mainBay.x, GARAGE.mainBay.z);
+      respawns.push({ x: bx, y: GARAGE.floor, z: bz, yaw: site.yaw + GARAGE.mainBay.yaw });
+    }
+  }
   const margin = 60;
   const bounds: Rect = { x0: B.x0 - margin, x1: B.x1 + margin, z0: B.z0 - margin, z1: B.z1 + margin };
-  return { seed, graph, bounds, buildings, signs, lamps, pools, props, glowBoxes, trees, parks, walls, highway, ringway, connectors, mountain, solids, bridges, links, mounds, countryside, spawn, respawns };
+  return { seed, graph, bounds, buildings, signs, lamps, pools, props, glowBoxes, trees, parks, walls, highway, ringway, connectors, mountain, solids, bridges, links, mounds, countryside, spawn, respawns, garage };
 }

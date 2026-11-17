@@ -252,7 +252,7 @@ body.titre .hud, body.titre #minimap, body.titre #race-hud { visibility: hidden;
 body.cctv #cctv { display: block; }
 #cctv .cc-label { position: absolute; left: 18px; top: 14px; font: 13px ui-monospace, Menlo, monospace; letter-spacing: 0.08em; color: #e8f1ff; text-shadow: 0 0 6px rgba(0, 0, 0, 0.9); }
 #cctv .cc-rec { color: #ff3b4e; animation: t-pulse 1.2s steps(2) infinite; }
-body.cctv .hud, body.cctv #minimap, body.cctv #race-hud { visibility: hidden; }
+body.cctv-menu .hud, body.cctv-menu #minimap, body.cctv-menu #race-hud { visibility: hidden; }
 #profils .pf-x.pf-edit { right: 24px; font-size: 13px; top: 5px; }
 #profils .pf-check { flex-direction: row; align-items: center; gap: 6px; }
 #profils .pf-form { width: min(440px, 94vw); }
