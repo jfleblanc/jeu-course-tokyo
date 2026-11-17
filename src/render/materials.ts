@@ -146,7 +146,8 @@ export function createCityMaterials(quality: { reflections: boolean; reflectionS
     const shopF = fract(along.div(5.2).add(seed.mul(0.5)));
     const shopHash = hash1(shopCell.add(seed.mul(0.31)));
     const isGround = float(1).sub(upper).mul(isWall).mul(float(1).sub(isBackdrop));
-    const shopOpen = step(shopHash, float(0.42));
+    // (immeubles presque sans fenêtres allumées — entrepôts, conteneurs : rideaux de fer partout)
+    const shopOpen = step(shopHash, float(0.42)).mul(step(0.095, lit));
     const inShop = step(0.06, shopF).mul(step(shopF, float(0.94))).mul(step(0.15, p.y)).mul(step(p.y, float(2.9)));
     const shopTint = mix(vec3(1.0, 0.85, 0.65), neonFrom(hash1(shopHash.mul(53.0))), step(0.6, hash1(shopHash.mul(17.0))).mul(0.6));
     // Vitrine : montants verticaux, soubassement sombre, lumière plus forte en haut.
@@ -233,7 +234,8 @@ export function createCityMaterials(quality: { reflections: boolean; reflectionS
     // on les calme pour éviter les grandes plaques blanches qui débordent.
     const lum = vColor.x.mul(0.3).add(vColor.y.mul(0.5)).add(vColor.z.mul(0.2));
     const calm = float(1).div(lum.mul(1.1).add(0.42)).clamp(0.55, 1.2);
-    glow.colorNode = colorOut.mul(calm).mul(neonU);
+    // Plafond : aucune surface lumineuse ne dépasse cette valeur, même petite et très intense.
+    glow.colorNode = colorOut.mul(calm).mul(neonU).min(vec3(3.2, 3.2, 3.2));
     glow.side = THREE.DoubleSide;
   }
 

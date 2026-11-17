@@ -1,5 +1,8 @@
 import * as THREE from 'three/webgpu';
-import { pass } from 'three/tsl';
+import { pass, vec4 } from 'three/tsl';
+
+/** Luminosité maximale par pixel prise en compte par le halo (bloom). */
+const BLOOM_INPUT_MAX = 2.2;
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
 import { QUALITY, type Quality, type RenderConfig } from '../config/render';
 import { SKY_HORIZON, type CityMaterials } from './materials';
@@ -49,7 +52,10 @@ export async function createRenderer(container: HTMLElement, quality: Quality, f
   const pipeline = new THREE.RenderPipeline(renderer);
   const scenePass = pass(scene, camera);
   const sceneColor = scenePass.getTextureNode('output');
-  const bloomPass = bloom(sceneColor, 0.5, 0.6, 0.75);
+  // Le halo ne reçoit jamais plus qu'une certaine luminosité par pixel : un reflet ou une petite
+  // lampe très brillants qui entrent dans le champ ne font plus un éclair blanc.
+  const bloomInput = sceneColor.min(vec4(BLOOM_INPUT_MAX, BLOOM_INPUT_MAX, BLOOM_INPUT_MAX, 1));
+  const bloomPass = bloom(bloomInput as unknown as typeof sceneColor, 0.5, 0.6, 0.75);
   pipeline.outputNode = q.bloom ? sceneColor.add(bloomPass as unknown as typeof sceneColor) : sceneColor;
 
   let materials: CityMaterials | null = null;

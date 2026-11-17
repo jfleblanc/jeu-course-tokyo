@@ -301,8 +301,12 @@ function buildZone(city: CityData, mats: CityMaterials, zone: number, cell: { x0
     const b = city.bounds;
     const x0 = Math.floor(b.x0 / cell) * cell, x1 = Math.ceil(b.x1 / cell) * cell;
     const z0 = Math.floor(b.z0 / cell) * cell, z1 = Math.ceil(b.z1 / cell) * cell;
+    // Campagne : de l'herbe sombre à la place du dallage.
+    const GRASS: Vec3 = [0.022, 0.05, 0.03];
     const tile = (ax: number, az: number, bx: number, bz: number): void => {
-      groundGeo.quad([ax, gy, bz], [bx, gy, bz], [bx, gy, az], [ax, gy, az], [0, 1, 0], 0, 0, 1, 1, SIDEWALK);
+      const mx = (ax + bx) / 2, mz = (az + bz) / 2;
+      const rural = bx - ax < 100 && city.countryside.some((c) => Math.hypot(mx - (c[0] as number), mz - (c[1] as number)) < (c[2] as number));
+      groundGeo.quad([ax, gy, bz], [bx, gy, bz], [bx, gy, az], [ax, gy, az], [0, 1, 0], 0, 0, 1, 1, rural ? GRASS : SIDEWALK);
     };
     for (let x = x0; x < x1; x += cell) for (let z = z0; z < z1; z += cell) tile(x, z, x + cell, z + cell);
     // Au-delà de la ville (dans le brouillard) : quatre grandes dalles suffisent.
@@ -343,9 +347,10 @@ function buildZone(city: CityData, mats: CityMaterials, zone: number, cell: { x0
       }
       continue;
     }
-    solid.cylinder(t.x, sh, t.z, 0.22, 0.14, t.height * 0.5, 6, [0.05, 0.035, 0.025], [0, 0, 0, 0], false);
-    solid.cylinder(t.x, sh + t.height * 0.35, t.z, t.radius, t.radius * 0.55, t.height * 0.35, 7, [0.02, 0.07, 0.04], [0, 0, 0, 0], false);
-    solid.cylinder(t.x, sh + t.height * 0.7, t.z, t.radius * 0.55, 0.05, t.height * 0.3, 7, [0.025, 0.08, 0.045], [0, 0, 0, 0], false);
+    const ty = sh + (t.y ?? 0);
+    solid.cylinder(t.x, ty, t.z, 0.22, 0.14, t.height * 0.5, 6, [0.05, 0.035, 0.025], [0, 0, 0, 0], false);
+    solid.cylinder(t.x, ty + t.height * 0.35, t.z, t.radius, t.radius * 0.55, t.height * 0.35, 7, [0.02, 0.07, 0.04], [0, 0, 0, 0], false);
+    solid.cylinder(t.x, ty + t.height * 0.7, t.z, t.radius * 0.55, 0.05, t.height * 0.3, 7, [0.025, 0.08, 0.045], [0, 0, 0, 0], false);
   }
   for (const l of city.lamps) {
     if (!here(l.x, l.z)) continue;
@@ -373,6 +378,17 @@ function buildZone(city: CityData, mats: CityMaterials, zone: number, cell: { x0
   const hwRoad = new GeomBuilder();
   if (main) addHighway(city.highway, hwRoad, solid, glow, ROAD_KIND.highway);
   if (main) addHighway(city.ringway, hwRoad, solid, glow, ROAD_KIND.ringway);
+  if (main) {
+    // Ponts d'accès, buttes et montagnes.
+    for (const br of city.bridges) addHighway(br, hwRoad, solid, glow, ROAD_KIND.ringway);
+    for (const m of city.mounds) solid.cylinder(m.x, -0.1, m.z, m.r0, m.r1, m.height, m.solid ? 20 : 14, m.color, [0, 0, 0, 0], true);
+  }
+  if (main && city.mountain) {
+    // Route de montagne et sa colline (un cône tronqué : la route court sur son flanc).
+    const mt = city.mountain;
+    addHighway(mt.road, hwRoad, solid, glow, ROAD_KIND.ringway);
+    solid.cylinder(mt.cx, -0.1, mt.cz, mt.rBase, mt.rTop, mt.height + 0.1, 56, [0.028, 0.04, 0.032], [0, 0, 0, 0], true);
+  }
   const connectorGeo = new GeomBuilder();
   for (const c of main ? city.connectors : []) {
     addConnector(connectorGeo, c);

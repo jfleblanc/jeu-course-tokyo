@@ -28,19 +28,31 @@ export const WORLD = {
    * `section` = numéro de la portion au sol de la ceinture où se trouve leur sortie (0 à 3).
    */
   districts: {
-    /** Même taille que la ville principale. */
-    lines: 11,
-    spacing: 80,
     /** Longueur de la route d'accès entre la ceinture et le quartier (m). */
     accessLength: 150,
     accessWidth: 14,
+    /** Hauteur du tablier d'un pont d'accès (m). */
+    bridgeHeight: 18,
     list: [
       // theme : 'baie' = bord de mer (palmiers, hôtels clairs, grande roue), 'docks' = port
       // (entrepôts, conteneurs, grues), 'collines' = quartier bas et très arboré.
-      { name: 'Baie de Yokohama', unlockLevel: 11, section: 0, theme: 'baie' },
-      { name: 'Docks de Kawasaki', unlockLevel: 21, section: 2, theme: 'docks' },
-      { name: 'Collines de Hakone', unlockLevel: 31, section: 1, theme: 'collines' },
+      { name: 'Baie de Yokohama', unlockLevel: 11, section: 0, theme: 'baie', lines: 11, spacing: 80, bridge: 0 },
+      { name: 'Docks de Kawasaki', unlockLevel: 21, section: 2, theme: 'docks', lines: 11, spacing: 80, bridge: 0 },
+      // Les collines sont une campagne : peu de routes (lignes plus espacées), et on y arrive
+      // par un grand pont (`bridge` = longueur en mètres).
+      { name: 'Collines de Hakone', unlockLevel: 31, section: 1, theme: 'collines', lines: 7, spacing: 130, bridge: 520 },
     ],
+  },
+  /** Route de montagne des Collines de Hakone : une spirale qui grimpe autour d'une colline jusqu'à un temple. */
+  mountain: {
+    height: 85,
+    /** Rayon de la spirale en bas et en haut (m). */
+    baseRadius: 240,
+    topRadius: 60,
+    turns: 2.25,
+    halfWidth: 6.5,
+    /** Ligne droite entre le quartier et le pied de la colline (m). */
+    approach: 70,
   },
   ringway: {
     /** Distance entre le périphérique et l'axe de l'autoroute (m). */

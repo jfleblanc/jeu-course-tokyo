@@ -115,6 +115,8 @@ export interface Tree {
   radius: number;
   /** Vrai pour un palmier (tronc fin, couronne de palmes). */
   palm?: boolean;
+  /** Hauteur du pied de l'arbre (0 = au sol ; sert sur les pentes de la colline). */
+  y?: number;
 }
 
 /** Mur invisible (bord de la ville). */
@@ -162,6 +164,39 @@ export interface SpawnPoint {
   yaw: number;
 }
 
+/** Colline de la route de montagne : un cône tronqué, la route enroulée autour, un plateau au sommet. */
+export interface Mountain {
+  road: Highway;
+  cx: number;
+  cz: number;
+  /** Rayon du cône au sol et au sommet (m). */
+  rBase: number;
+  rTop: number;
+  height: number;
+}
+
+/** Butte ou montagne : cône tronqué. `solid` = avec collision (les montagnes lointaines n'en ont pas). */
+export interface Mound {
+  x: number;
+  z: number;
+  r0: number;
+  r1: number;
+  height: number;
+  solid: boolean;
+  color: readonly [number, number, number];
+}
+
+/** Boîte de collision libre (parapets du sommet…). */
+export interface SolidBox {
+  x: number;
+  y: number;
+  z: number;
+  hx: number;
+  hy: number;
+  hz: number;
+  yaw: number;
+}
+
 export interface CityData {
   seed: number;
   graph: StreetGraph;
@@ -184,6 +219,16 @@ export interface CityData {
   /** Autoroute de ceinture. */
   ringway: Highway;
   connectors: Connector[];
+  /** Route de montagne (quartier des collines), s'il y en a une. */
+  mountain: Mountain | null;
+  /** Collisions supplémentaires. */
+  solids: SolidBox[];
+  /** Ponts d'accès aux quartiers (même structure qu'une autoroute surélevée). */
+  bridges: Highway[];
+  /** Buttes boisées et montagnes de la campagne. */
+  mounds: Mound[];
+  /** Zones de campagne (x, z, rayon) : le sol y est de l'herbe, pas du dallage. */
+  countryside: number[][];
   spawn: SpawnPoint;
   /** Points de réapparition sur la chaussée (milieu de chaque rue). */
   respawns: SpawnPoint[];
@@ -286,13 +331,11 @@ function makeThemedBuilding(rng: Rng, fp: Obb, facades: Facade[], boost: number)
     b.tiers = [{ w: fp.w, d: fp.d, y0: 0, y1: b.height }];
   };
   if (theme === 'docks') {
-    if (rng.chance(0.78)) {
-      // Entrepôt : bas, large, presque sans fenêtres.
-      flat(rng.range(7, 15));
-      b.style = 0;
-      b.cellW = rng.range(4, 6);
-      b.lit = rng.range(0.02, 0.07);
-    } else flat(Math.min(b.height, rng.range(18, 34)));
+    // Entrepôt : bas, large, presque sans fenêtres. Ni tours ni habitations sur les docks.
+    flat(rng.chance(0.85) ? rng.range(7, 13) : rng.range(13, 19));
+    b.style = 0;
+    b.cellW = rng.range(4, 6);
+    b.lit = rng.range(0.02, 0.07);
     b.wall = [...rng.pick(DOCK_WALLS)] as [number, number, number];
   } else if (theme === 'baie') {
     // Hôtels et résidences de bord de mer : clairs, moyens, bien éclairés ; quelques tours.
@@ -302,11 +345,13 @@ function makeThemedBuilding(rng: Rng, fp: Obb, facades: Facade[], boost: number)
     b.lit = rng.range(0.35, 0.6);
     b.wall = [...rng.pick(BAY_WALLS)] as [number, number, number];
   } else {
-    // Collines : petites maisons et auberges.
-    flat(rng.range(6, 15));
+    // Campagne : petites maisons basses, sans vitrine ni enseigne.
+    flat(rng.range(3.4, 7.5));
     b.style = 1;
     b.cellW = rng.range(2.8, 3.8);
-    b.lit = rng.range(0.25, 0.5);
+    b.lit = rng.chance(0.5) ? rng.range(0.12, 0.3) : rng.range(0.04, 0.09);
+    b.facades = [];
+    b.wall = [...rng.pick(DOCK_WALLS)] as [number, number, number];
   }
   return b;
 }
@@ -654,6 +699,12 @@ export function generateCity(seed: number = WORLD.seed): CityData {
   const trees: Tree[] = [];
   const parks: Obb[] = [];
   const walls: Wall[] = [];
+  const solids: SolidBox[] = [];
+  const bridges: Highway[] = [];
+  const mounds: Mound[] = [];
+  /** Vallées sous les ponts (x, z, rayon) : rien n'y pousse. */
+  const valleys: number[][] = [];
+  let mountain: Mountain | null = null;
   const respawns: SpawnPoint[] = [];
   const p: PathPoint = { x: 0, z: 0, tx: 1, tz: 0 };
 
@@ -664,16 +715,16 @@ export function generateCity(seed: number = WORLD.seed): CityData {
   const accessLines: number[][] = [];
   {
     const D = WORLD.districts;
-    const half = ((D.lines - 1) / 2) * D.spacing;
     D.list.forEach((def, k) => {
       const idx = groundCenters[def.section % groundCenters.length];
       if (idx === undefined) return;
       const mid = ringway.samples[idx] as HighwaySample;
       const nx = -mid.tz * ringway.outerSide, nz = mid.tx * ringway.outerSide;
       const edgeX = mid.x + nx * ringway.halfWidth, edgeZ = mid.z + nz * ringway.halfWidth;
-      const reach = D.accessLength + half;
+      const half = ((def.lines - 1) / 2) * def.spacing;
+      const reach = (def.bridge > 0 ? def.bridge : D.accessLength) + half;
       const cx = edgeX + nx * reach, cz = edgeZ + nz * reach;
-      const sub = generateStreetGraph(seed + 7919 * (k + 1), { district: k, lines: D.lines, spacing: D.spacing, cx, cz, ezx: nx, ezz: nz });
+      const sub = generateStreetGraph(seed + 7919 * (k + 1), { district: k, lines: def.lines, spacing: def.spacing, cx, cz, ezx: nx, ezz: nz });
       // Entrée : le carrefour du quartier le plus proche de la sortie de l'autoroute.
       let entry = sub.nodes[0] as (typeof sub.nodes)[number], bd = Infinity;
       for (const node of sub.nodes) {
@@ -687,24 +738,66 @@ export function generateCity(seed: number = WORLD.seed): CityData {
       const offset = mergeGraph(graph, sub);
       // Route d'accès : de la chaussée de l'autoroute jusqu'au carrefour d'entrée.
       const ax = mid.x + nx * (ringway.halfWidth - 1.5), az = mid.z + nz * (ringway.halfWidth - 1.5);
-      const pts: number[] = [];
-      const steps = Math.max(6, Math.round(Math.hypot(entry.x - ax, entry.z - az) / 5));
-      for (let q = 0; q <= steps; q++) pts.push(ax + ((entry.x - ax) * q) / steps, az + ((entry.z - az) * q) / steps);
-      connectors.push({ pts, width: D.accessWidth });
-      accessLines.push([ax, az, entry.x, entry.z]);
-      // Glissières en béton de chaque côté de la route d'accès : on ne peut pas en sortir pour
-      // aller buter contre les limites invisibles, et le passage se lit d'un coup d'œil.
-      {
-        const len = Math.hypot(entry.x - ax, entry.z - az);
-        const tx = (entry.x - ax) / len, tz = (entry.z - az) / len;
-        const from = 5, to = len - entry.radius - 4;
-        if (to - from > 8) {
-          const midS = (from + to) / 2;
-          for (const side of [1, -1]) {
-            const gx = tz * side, gz = -tx * side;
-            const off = D.accessWidth / 2 + 0.9;
-            const fp: Obb = { cx: ax + tx * midS + gx * off, cz: az + tz * midS + gz * off, w: to - from, d: 0.7, yaw: Math.atan2(-gx, -gz) };
-            buildings.push({ footprint: fp, tiers: [{ w: fp.w, d: fp.d, y0: 0, y1: 1.25 }], height: 1.25, seed: 0.5, style: 0, wall: [0.16, 0.16, 0.17], cellW: 40, lit: 0, facades: [], backdrop: false });
+      if (def.bridge > 0) {
+        // ——— Grand pont : on quitte la ville par-dessus une vallée, on arrive ailleurs ———
+        const len = Math.hypot(entry.x - ax, entry.z - az) - entry.radius + 2;
+        const tx = (entry.x - ax) / Math.hypot(entry.x - ax, entry.z - az), tz = (entry.z - az) / Math.hypot(entry.x - ax, entry.z - az);
+        const Hb = D.bridgeHeight, flat0 = 34, ramp = 120, flat1 = 14;
+        const samples: HighwaySample[] = [];
+        for (let st = 0; st <= len; st += 3) {
+          const up = Math.max(0, Math.min(1, (st - flat0) / ramp)), down = Math.max(0, Math.min(1, (len - flat1 - st) / ramp));
+          const u = Math.min(up, down);
+          samples.push({ x: ax + tx * st, y: Hb * u * u * (3 - 2 * u), z: az + tz * st, tx, tz, s: st });
+        }
+        const pillars: Highway['pillars'] = [];
+        for (let i = 8; i < samples.length - 8; i += 12) {
+          const sp = samples[i] as HighwaySample;
+          if (sp.y > 4) pillars.push({ x: sp.x, z: sp.z, top: sp.y, yaw: Math.atan2(tx, tz) });
+        }
+        bridges.push({ samples, halfWidth: D.accessWidth / 2, barrierHeight: WORLD.highway.barrierHeight, pillars, closed: false, outerSide: 0, gaps: [] });
+        accessLines.push([ax, az, entry.x, entry.z]);
+        // Deux grands pylônes et leurs haubans lumineux, visibles de loin ; balises rouges au sommet.
+        const yaw = Math.atan2(tx, tz);
+        const towerH = 78, hw = D.accessWidth / 2 + 1.6;
+        for (const f of [0.34, 0.66]) {
+          const px = ax + tx * len * f, pz = az + tz * len * f;
+          for (const side of [-1, 1]) {
+            props.push({ x: px + tz * side * hw, y: towerH / 2, z: pz - tx * side * hw, sx: 2.2, sy: towerH, sz: 3, yaw, color: [0.2, 0.21, 0.24] });
+            glowBoxes.push({ x: px + tz * side * hw, y: towerH + 0.8, z: pz - tx * side * hw, sx: 1, sy: 1, sz: 1, yaw, color: [1.0, 0.1, 0.05] });
+            // Haubans : des points lumineux de la tête du pylône vers le tablier, de part et d'autre.
+            for (const along of [-1, 1]) for (let q = 1; q <= 9; q++) {
+              const reachS = q * 16;
+              for (let h = 0; h < 3; h++) {
+                const w = (h + 1) / 4;
+                glowBoxes.push({ x: px + tz * side * hw + tx * along * reachS * w, y: Hb + 1.2 + (towerH - Hb - 4) * (1 - w), z: pz - tx * side * hw + tz * along * reachS * w, sx: 0.22, sy: 0.22, sz: 0.22, yaw, color: [0.75, 0.9, 1.0] });
+              }
+            }
+          }
+          props.push({ x: px, y: towerH - 6, z: pz, sx: hw * 2, sy: 2.4, sz: 2.4, yaw, color: [0.2, 0.21, 0.24] });
+        }
+        // La rivière au fond de la vallée : une longue lueur bleutée sous le pont.
+        for (let q = -5; q <= 5; q++) pools.push({ x: ax + tx * len * 0.5 + tz * q * 150, z: az + tz * len * 0.5 - tx * q * 150, radius: 120, color: [0.03, 0.09, 0.16], intensity: 1 });
+        valleys.push([ax + tx * len * 0.5, az + tz * len * 0.5, len * 0.5 + 60]);
+      } else {
+        const pts: number[] = [];
+        const steps = Math.max(6, Math.round(Math.hypot(entry.x - ax, entry.z - az) / 5));
+        for (let q = 0; q <= steps; q++) pts.push(ax + ((entry.x - ax) * q) / steps, az + ((entry.z - az) * q) / steps);
+        connectors.push({ pts, width: D.accessWidth });
+        accessLines.push([ax, az, entry.x, entry.z]);
+        // Glissières en béton de chaque côté de la route d'accès : on ne peut pas en sortir pour
+        // aller buter contre les limites invisibles, et le passage se lit d'un coup d'œil.
+        {
+          const len = Math.hypot(entry.x - ax, entry.z - az);
+          const tx = (entry.x - ax) / len, tz = (entry.z - az) / len;
+          const from = 5, to = len - entry.radius - 4;
+          if (to - from > 8) {
+            const midS = (from + to) / 2;
+            for (const side of [1, -1]) {
+              const gx = tz * side, gz = -tx * side;
+              const off = D.accessWidth / 2 + 0.9;
+              const fp: Obb = { cx: ax + tx * midS + gx * off, cz: az + tz * midS + gz * off, w: to - from, d: 0.7, yaw: Math.atan2(-gx, -gz) };
+              buildings.push({ footprint: fp, tiers: [{ w: fp.w, d: fp.d, y0: 0, y1: 1.25 }], height: 1.25, seed: 0.5, style: 0, wall: [0.16, 0.16, 0.17], cellW: 40, lit: 0, facades: [], backdrop: false });
+            }
           }
         }
       }
@@ -712,6 +805,57 @@ export function generateCity(seed: number = WORLD.seed): CityData {
       ringway.gaps.push({ side: ringway.outerSide, from: idx - span, to: idx + span });
       let radius = 0;
       for (let q = 0; q < sub.ringPolygon.length; q += 2) radius = Math.max(radius, Math.hypot((sub.ringPolygon[q] as number) - cx, (sub.ringPolygon[q + 1] as number) - cz));
+      if (def.theme === 'collines') {
+        // ——— Route de montagne : part du bord extérieur du quartier, s'enroule autour d'une colline ———
+        const M = WORLD.mountain;
+        let far = entry, best = -Infinity;
+        for (const node of sub.nodes) {
+          if (node.edges.length === 0) continue;
+          const d = (node.x - cx) * nx + (node.z - cz) * nz;
+          if (d > best) {
+            best = d;
+            far = node;
+          }
+        }
+        const sx = far.x + nx * (far.radius - 1), sz = far.z + nz * (far.radius - 1);
+        const p0x = sx + nx * M.approach, p0z = sz + nz * M.approach;
+        // Centre de la colline : à gauche du pied de la route.
+        const hx = p0x + nz * M.baseRadius, hz = p0z - nx * M.baseRadius;
+        const a0 = Math.atan2(p0z - hz, p0x - hx);
+        // Sens de rotation : celui qui prolonge la ligne droite d'approche.
+        const dir = -Math.sin(a0) * nx + Math.cos(a0) * nz > 0 ? 1 : -1;
+        const t0 = 0.955;
+        const dense: [number, number, number][] = [];
+        for (let q = 0; q <= M.approach; q += 1) dense.push([sx + nx * q, 0, sz + nz * q]);
+        const N2 = 2400;
+        for (let q = 1; q <= N2; q++) {
+          const t = q / N2;
+          const ang = a0 + dir * Math.PI * 2 * M.turns * t;
+          // Jusqu'à t0 on monte en spirale ; ensuite on est en haut et on rentre vers le plateau.
+          const r = t <= t0 ? M.baseRadius - ((M.baseRadius - M.topRadius) * t) / t0 : M.topRadius - 24 * ((t - t0) / (1 - t0));
+          dense.push([hx + Math.cos(ang) * r, t <= t0 ? (M.height * t) / t0 : M.height, hz + Math.sin(ang) * r]);
+        }
+        // Rééchantillonnage tous les 3 m.
+        const samples: HighwaySample[] = [];
+        let acc = 0, next = 0;
+        for (let q = 1; q < dense.length; q++) {
+          const a = dense[q - 1] as [number, number, number], b = dense[q] as [number, number, number];
+          const len = Math.hypot(b[0] - a[0], b[2] - a[2]);
+          while (next <= acc + len) {
+            const u = (next - acc) / (len || 1);
+            samples.push({ x: a[0] + (b[0] - a[0]) * u, y: a[1] + (b[1] - a[1]) * u, z: a[2] + (b[2] - a[2]) * u, tx: (b[0] - a[0]) / (len || 1), tz: (b[2] - a[2]) / (len || 1), s: next });
+            next += 3;
+          }
+          acc += len;
+        }
+        const ms = samples[Math.floor(samples.length / 2)] as HighwaySample;
+        const outerSide = -ms.tz * (ms.x - hx) + ms.tx * (ms.z - hz) > 0 ? 1 : -1;
+        mountain = {
+          road: { samples, halfWidth: M.halfWidth, barrierHeight: WORLD.highway.barrierHeight, pillars: [], closed: false, outerSide, gaps: [] },
+          cx: hx, cz: hz, rBase: M.baseRadius - M.halfWidth, rTop: M.topRadius - M.halfWidth, height: M.height,
+        };
+        accessLines.push([sx, sz, p0x, p0z]);
+      }
       graph.districts.push({
         id: k, name: def.name, unlockLevel: def.unlockLevel, cx, cz, radius: radius + 60, polygon: sub.ringPolygon, entryNode: offset + sub.nodes.indexOf(entry),
         gate: { x: edgeX + nx * 20, z: edgeZ + nz * 20, yaw: Math.atan2(nx, nz), width: D.accessWidth },
@@ -750,6 +894,23 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     const sp = ringway.samples[i] as HighwaySample;
     const r = ringway.halfWidth + 3;
     roadHash.insert(sp.x - r, sp.z - r, sp.x + r, sp.z + r, { x: sp.x, z: sp.z, r, slack: 0.4, kind: 'alley' });
+  }
+  for (const br of bridges) {
+    for (let i = 0; i < br.samples.length; i += 2) {
+      const sp = br.samples[i] as HighwaySample;
+      const r = br.halfWidth + 5;
+      roadHash.insert(sp.x - r, sp.z - r, sp.x + r, sp.z + r, { x: sp.x, z: sp.z, r, slack: 0.3, kind: 'alley' });
+    }
+  }
+  const inValley = (x: number, z: number): boolean => valleys.some((v) => Math.hypot(x - (v[0] as number), z - (v[1] as number)) < (v[2] as number));
+  if (mountain) {
+    const mt: Mountain = mountain;
+    for (let i = 0; i < mt.road.samples.length; i += 2) {
+      const sp = mt.road.samples[i] as HighwaySample;
+      if (sp.y > 14) break;
+      const r = mt.road.halfWidth + 4;
+      roadHash.insert(sp.x - r, sp.z - r, sp.x + r, sp.z + r, { x: sp.x, z: sp.z, r, slack: 0.3, kind: 'alley' });
+    }
   }
   const connectorHash = new SpatialHash<{ x: number; z: number; r: number }>(40);
   for (const c of connectors) {
@@ -791,6 +952,38 @@ export function generateCity(seed: number = WORLD.seed): CityData {
       return false;
     });
     return found;
+  };
+
+  /** Arbre de campagne : avec un tronc en dur (on ne traverse pas la forêt en voiture). */
+  const plantTree = (x: number, z: number, height: number, radius: number): void => {
+    trees.push({ x, z, height, radius });
+    solids.push({ x, y: 1.5, z, hx: 0.3, hy: 1.5, hz: 0.3, yaw: 0 });
+  };
+
+  /** Pagode à trois toits (décor) posée à la hauteur y ; `k` = échelle. */
+  const addPagoda = (x: number, y: number, z: number, yaw: number, k: number): void => {
+    const red: readonly [number, number, number] = [0.42, 0.07, 0.04];
+    const roof: readonly [number, number, number] = [0.03, 0.035, 0.04];
+    const levels: [number, number, number][] = [[12.5, 4.6, 9], [9.5, 8.4, 6.2], [6.8, 11.6, 4]];
+    levels.forEach(([roofW, top, bodyW], i) => {
+      // Corps de l'étage (sauf le premier, qui est le pavillon), puis son toit débordant.
+      const prev = i === 0 ? 0 : ((levels[i - 1] as [number, number, number])[1] + 0.5);
+      if (i > 0) props.push({ x, y: y + k * (prev + (top - prev) / 2), z, sx: bodyW * k, sy: (top - prev) * k, sz: bodyW * k, yaw, color: red });
+      props.push({ x, y: y + k * (top + 0.25), z, sx: roofW * k, sy: 0.5 * k, sz: roofW * k, yaw, color: roof });
+      props.push({ x, y: y + k * (top + 0.75), z, sx: roofW * 0.7 * k, sy: 0.5 * k, sz: roofW * 0.7 * k, yaw, color: roof });
+    });
+    props.push({ x, y: y + k * 14.4, z, sx: 0.4 * k, sy: 4 * k, sz: 0.4 * k, yaw, color: [0.3, 0.24, 0.08] });
+    // Lanternes aux quatre coins.
+    const c = Math.cos(yaw), sn = Math.sin(yaw);
+    for (const [lx, lz] of [[5, 5], [-5, 5], [5, -5], [-5, -5]] as const) glowBoxes.push({ x: x + (lx * c + lz * sn) * k, y: y + 3.6 * k, z: z + (-lx * sn + lz * c) * k, sx: 0.5, sy: 0.7, sz: 0.5, yaw, color: [1.0, 0.6, 0.22] });
+  };
+  /** Torii (portique rouge) en travers d'une route : `w` = largeur du passage. */
+  const addTorii = (x: number, y: number, z: number, yaw: number, w: number): void => {
+    const red: readonly [number, number, number] = [0.5, 0.07, 0.04];
+    const c = Math.cos(yaw), sn = Math.sin(yaw);
+    for (const side of [-1, 1]) props.push({ x: x + side * (w / 2) * c, y: y + 4.5, z: z - side * (w / 2) * sn, sx: 0.9, sy: 9, sz: 0.9, yaw, color: red });
+    props.push({ x, y: y + 9.3, z, sx: w + 5, sy: 0.9, sz: 1.2, yaw, color: red });
+    props.push({ x, y: y + 7.6, z, sx: w + 1.5, sy: 0.6, sz: 0.8, yaw, color: red });
   };
 
   const finishBuilding = (fp: Obb, front: Facade | null, boost: number): void => {
@@ -871,7 +1064,25 @@ export function generateCity(seed: number = WORLD.seed): CityData {
                 const lx = rng.range(-w / 2 + 2, w / 2 - 2), lz = rng.range(-d / 2 + 2, d / 2 - 2);
                 trees.push({ x: fp.cx + lx * c + lz * sn, z: fp.cz - lx * sn + lz * c, height: rng.range(5, 9), radius: rng.range(1.6, 2.8) });
               }
-            } else if (theme === 'docks' && !outer && rng.chance(0.32)) {
+            } else if (theme === 'collines' && rng.chance(0.9)) {
+              // Campagne : la plupart du temps, pas de maison mais un bout de forêt au bord de la route.
+              const c = Math.cos(fp.yaw), sn = Math.sin(fp.yaw);
+              for (let q = rng.int(2, 5); q > 0; q--) {
+                const lx = rng.range(-fp.w / 2, fp.w / 2), lz = rng.range(-fp.d / 2 + 2.5, fp.d / 2);
+                plantTree(fp.cx + lx * c + lz * sn, fp.cz - lx * sn + lz * c, rng.range(7, 14), rng.range(2, 3.6));
+              }
+            } else if (theme === 'docks' && !outer && rng.chance(0.3)) {
+              // Docks : vaste cour ou stationnement, presque vide — une ou deux remorques garées.
+              occupy(fp);
+              const c = Math.cos(fp.yaw), sn = Math.sin(fp.yaw);
+              for (let q = rng.int(0, 2); q > 0; q--) {
+                const lx = rng.range(-fp.w / 2 + 6.5, fp.w / 2 - 6.5), lz = rng.range(-fp.d / 2 + 2, fp.d / 2 - 4);
+                if (Math.abs(fp.w) < 14) break;
+                const cfp: Obb = { cx: fp.cx + lx * c + lz * sn, cz: fp.cz - lx * sn + lz * c, w: 12.2, d: 2.5, yaw: fp.yaw + (rng.chance(0.5) ? 0 : Math.PI / 2) };
+                if (hitsRoad(cfp) || hitsBuilding(cfp)) continue;
+                buildings.push({ footprint: cfp, tiers: [{ w: cfp.w, d: cfp.d, y0: 0, y1: 2.6 }], height: 2.6, seed: rng.next(), style: 0, wall: [...rng.pick(CONTAINER_COLORS)] as [number, number, number], cellW: 12.2, lit: 0, facades: [], backdrop: false });
+              }
+            } else if (theme === 'docks' && !outer && rng.chance(0.5)) {
               // Docks : un parc à conteneurs en bord de rue à la place d'un immeuble.
               occupy(fp);
               const c = Math.cos(fp.yaw), sn = Math.sin(fp.yaw);
@@ -936,8 +1147,10 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     b.tiers = [{ w: fp.w, d: fp.d, y0: 0, y1: b.height }];
     b.style = 2;
     b.backdrop = true;
-    const atSea = graph.districts.some((dd) => dd.theme === 'baie' && Math.hypot(fp.cx - (dd.cx + dd.outX * (dd.radius + 330)), fp.cz - (dd.cz + dd.outZ * (dd.radius + 330))) < 420);
-    if (!inDistrict(fp.cx, fp.cz, 40) && nearAccess(fp.cx, fp.cz) > 50 && !atSea) buildings.push(b);
+    const atSea = graph.districts.some((dd) => (dd.theme === 'baie' || dd.theme === 'docks') && Math.hypot(fp.cx - (dd.cx + dd.outX * (dd.radius + 330)), fp.cz - (dd.cz + dd.outZ * (dd.radius + 330))) < 420);
+    const onHill = mountain !== null && Math.hypot(fp.cx - (mountain as Mountain).cx, fp.cz - (mountain as Mountain).cz) < (mountain as Mountain).rBase + 60;
+    const rural = graph.districts.some((dd) => dd.theme === 'collines' && Math.hypot(fp.cx - dd.cx, fp.cz - dd.cz) < dd.radius + 900 && (fp.cx - dd.cx) * dd.outX + (fp.cz - dd.cz) * dd.outZ > -dd.radius);
+    if (!inDistrict(fp.cx, fp.cz, 40) && nearAccess(fp.cx, fp.cz) > 50 && !atSea && !onHill && !inValley(fp.cx, fp.cz) && !rural) buildings.push(b);
   }
 
   // ——— Limite de la ville : mur invisible le long du flanc extérieur de l'autoroute de ceinture ———
@@ -965,7 +1178,7 @@ export function generateCity(seed: number = WORLD.seed): CityData {
       const fp: Obb = { cx: sp.x + nx * dist, cz: sp.z + nz * dist, w: wB, d: dB, yaw: Math.atan2(-nx, -nz) };
       const bd = makeBuilding(rng, fp, [{ cx: sp.x + nx * (ringway.halfWidth + 7), cz: sp.z + nz * (ringway.halfWidth + 7), nx: -nx, nz: -nz, length: wB, kind: 'avenue' }], 1, 1.7);
       bd.backdrop = true;
-      const clear = nearAccess(fp.cx, fp.cz) < 34 || inDistrict(fp.cx, fp.cz, -20);
+      const clear = nearAccess(fp.cx, fp.cz) < 34 || inDistrict(fp.cx, fp.cz, -20) || inValley(fp.cx, fp.cz);
       if (!clear) buildings.push(bd);
       // (les enseignes sont tirées quand même : la ville principale reste identique)
       const signsHere: Sign[] = clear ? [] : signs;
@@ -1017,22 +1230,82 @@ export function generateCity(seed: number = WORLD.seed): CityData {
         continue;
       }
       if (hitsRoad(fp) || hitsBuilding(fp)) continue;
-      if (d.theme === 'collines' && rng.chance(0.6)) {
-        // Bois : les cœurs d'îlots sont plantés plutôt que bâtis.
+      if (d.theme === 'collines' && fp.w > 14 && fp.d > 14 && rng.chance(0.07)) {
+        // Temple : un pavillon (avec collision) au milieu d'un jardin, sous une pagode à trois toits.
         parks.push(fp);
         occupy(fp);
-        const c = Math.cos(fp.yaw), sn = Math.sin(fp.yaw);
-        for (let q = rng.int(4, 8); q > 0; q--) {
-          const lx = rng.range(-fp.w / 2 + 1.5, fp.w / 2 - 1.5), lz = rng.range(-fp.d / 2 + 1.5, fp.d / 2 - 1.5);
-          trees.push({ x: x + lx * c + lz * sn, z: z - lx * sn + lz * c, height: rng.range(7, 13), radius: rng.range(1.8, 3.2) });
-        }
+        const hall: Obb = { cx: x, cz: z, w: 9, d: 9, yaw: fp.yaw };
+        buildings.push({ footprint: hall, tiers: [{ w: 9, d: 9, y0: 0, y1: 4.6 }], height: 4.6, seed: rng.next(), style: 1, wall: [0.34, 0.06, 0.04], cellW: 3, lit: 0.5, facades: [], backdrop: false });
+        addPagoda(x, 0, z, fp.yaw, 1);
         continue;
       }
+      if (d.theme === 'collines') {
+        if (rng.chance(0.4)) {
+          // Butte boisée : un vrai relief au milieu des champs (avec collision).
+          const r0 = rng.range(15, 30), h = rng.range(9, 22);
+          const sq: Obb = { cx: x, cz: z, w: r0 * 2, d: r0 * 2, yaw: 0 };
+          if (!hitsRoad(sq) && !hitsBuilding(sq)) {
+            occupy(sq);
+            mounds.push({ x, z, r0, r1: r0 * 0.25, height: h, solid: true, color: [0.03, 0.05, 0.035] });
+            for (let q = rng.int(9, 16); q > 0; q--) {
+              const a = rng.range(0, Math.PI * 2), rho = rng.range(r0 * 0.3, r0 * 0.95);
+              trees.push({ x: x + Math.cos(a) * rho, z: z + Math.sin(a) * rho, y: (h * (r0 - rho)) / (r0 * 0.75), height: rng.range(8, 14), radius: rng.range(2.2, 3.6) });
+            }
+            continue;
+          }
+        }
+        if (rng.chance(0.82)) {
+          // Forêt : quelques arbres serrés.
+          occupy(fp);
+          const c = Math.cos(fp.yaw), sn = Math.sin(fp.yaw);
+          for (let q = rng.int(3, 7); q > 0; q--) {
+            const lx = rng.range(-fp.w / 2 + 1.5, fp.w / 2 - 1.5), lz = rng.range(-fp.d / 2 + 1.5, fp.d / 2 - 1.5);
+            plantTree(x + lx * c + lz * sn, z - lx * sn + lz * c, rng.range(8, 15), rng.range(2.2, 3.8));
+          }
+          continue;
+        }
+      }
+      // Campagne : très peu de maisons isolées au milieu des terres.
+      if (d.theme === 'collines' && rng.chance(0.75)) continue;
       finishBuilding(fp, null, 1.1);
     }
-    // Docks : peu d'enseignes au néon.
     if (d.theme === 'docks') {
-      const kept = signs.slice(firstSign).filter(() => rng.chance(0.3));
+      // Quai : au bord extérieur, une rangée de grandes grues de quai, des murs de conteneurs,
+      // un cargo à quai et l'eau du port au-delà (décor, hors d'atteinte).
+      const qx = d.cx + d.outX * (d.radius + 30), qz = d.cz + d.outZ * (d.radius + 30);
+      const px = d.outZ, pz = -d.outX; // le long du quai
+      const yaw = Math.atan2(d.outX, d.outZ);
+      const steel: readonly [number, number, number] = [0.5, 0.2, 0.03];
+      for (let k = -4; k <= 4; k++) {
+        const gx = qx + px * k * 95, gz = qz + pz * k * 95;
+        // Grue de quai : quatre pieds, un portique, une flèche qui avance au-dessus de l'eau.
+        for (const sa of [-1, 1]) for (const sb of [-1, 1]) props.push({ x: gx + px * sa * 13 + d.outX * sb * 11, y: 24, z: gz + pz * sa * 13 + d.outZ * sb * 11, sx: 1.6, sy: 48, sz: 1.6, yaw, color: steel });
+        props.push({ x: gx, y: 48.5, z: gz, sx: 29, sy: 3, sz: 25, yaw, color: steel });
+        props.push({ x: gx + d.outX * 34, y: 51, z: gz + d.outZ * 34, sx: 3.2, sy: 2.6, sz: 92, yaw, color: steel });
+        props.push({ x: gx, y: 60, z: gz, sx: 2.4, sy: 22, sz: 2.4, yaw, color: steel });
+        glowBoxes.push({ x: gx, y: 71.6, z: gz, sx: 0.9, sy: 0.9, sz: 0.9, yaw, color: [1.0, 0.1, 0.05] });
+        glowBoxes.push({ x: gx + d.outX * 78, y: 52.8, z: gz + d.outZ * 78, sx: 0.8, sy: 0.8, sz: 0.8, yaw, color: [1.0, 0.1, 0.05] });
+        for (const sa of [-1, 1]) glowBoxes.push({ x: gx + px * sa * 13, y: 46, z: gz + pz * sa * 13, sx: 1.4, sy: 0.5, sz: 1.4, yaw, color: [1.0, 0.75, 0.4] });
+        // Murs de conteneurs entre les grues.
+        for (let r = 0; r < 3; r++) for (let q = -2; q <= 2; q++) {
+          const lv = rng.int(2, 5);
+          props.push({ x: gx + px * (47 + q * 12.9) - d.outX * (18 + r * 3.2), y: lv * 1.3, z: gz + pz * (47 + q * 12.9) - d.outZ * (18 + r * 3.2), sx: 12.2, sy: lv * 2.6, sz: 2.5, yaw: yaw + Math.PI / 2, color: rng.pick(CONTAINER_COLORS) });
+        }
+      }
+      // Cargo à quai, chargé de conteneurs.
+      const shx = qx + d.outX * 62, shz = qz + d.outZ * 62;
+      props.push({ x: shx, y: 7, z: shz, sx: 36, sy: 14, sz: 300, yaw: yaw + Math.PI / 2, color: [0.05, 0.06, 0.09] });
+      props.push({ x: shx + px * 125, y: 26, z: shz + pz * 125, sx: 30, sy: 24, sz: 22, yaw: yaw + Math.PI / 2, color: [0.3, 0.3, 0.32] });
+      for (let q = -8; q <= 6; q++) for (let r = -1; r <= 1; r++) {
+        const lv = rng.int(2, 5);
+        props.push({ x: shx + px * q * 13.2 + d.outX * r * 9, y: 14 + lv * 1.3, z: shz + pz * q * 13.2 + d.outZ * r * 9, sx: 8.6, sy: lv * 2.6, sz: 12.4, yaw: yaw + Math.PI / 2, color: rng.pick(CONTAINER_COLORS) });
+      }
+      for (let q = -3; q <= 3; q++) glowBoxes.push({ x: shx + px * (125 + q * 3.5), y: 39, z: shz + pz * (125 + q * 3.5), sx: 1.6, sy: 0.9, sz: 0.6, yaw, color: [1.0, 0.85, 0.6] });
+      pools.push({ x: d.cx + d.outX * (d.radius + 360), z: d.cz + d.outZ * (d.radius + 360), radius: 340, color: [0.015, 0.06, 0.1], intensity: 1 });
+    }
+    // Docks : peu d'enseignes au néon. Campagne : aucune.
+    if (d.theme === 'docks' || d.theme === 'collines') {
+      const kept = signs.slice(firstSign).filter(() => d.theme === 'docks' && rng.chance(0.3));
       signs.length = firstSign;
       signs.push(...kept);
     }
@@ -1061,6 +1334,50 @@ export function generateCity(seed: number = WORLD.seed): CityData {
       for (const side of [-1, 1]) props.push({ x: wx + ax * side * 14, y: hub / 2, z: wz + az * side * 14, sx: 1.6, sy: hub, sz: 1.6, yaw, color: [0.12, 0.12, 0.14] });
       pools.push({ x: d.cx + d.outX * (d.radius + 330), z: d.cz + d.outZ * (d.radius + 330), radius: 330, color: [0.02, 0.1, 0.14], intensity: 1 });
     }
+    if (d.theme === 'collines') {
+      // Chaîne de montagnes à l'horizon, du côté opposé à la ville (décor, sans collision).
+      for (let q = 0; q < 16; q++) {
+        const a = Math.atan2(d.outZ, d.outX) + rng.range(-1.9, 1.9);
+        const dist = d.radius + rng.range(260, 760);
+        const mx = d.cx + Math.cos(a) * dist, mz = d.cz + Math.sin(a) * dist;
+        if (mountain && Math.hypot(mx - (mountain as Mountain).cx, mz - (mountain as Mountain).cz) < (mountain as Mountain).rBase + 180) continue;
+        const r0 = rng.range(170, 340);
+        mounds.push({ x: mx, z: mz, r0, r1: r0 * rng.range(0.04, 0.16), height: rng.range(130, 310), solid: false, color: [0.022, 0.03, 0.04] });
+      }
+    }
+    if (d.theme === 'collines' && mountain) {
+      const mt: Mountain = mountain;
+      const rs = mt.road.samples;
+      const first = rs[8] as HighwaySample;
+      addTorii(first.x, 0, first.z, Math.atan2(first.tx, first.tz), mt.road.halfWidth * 2 + 3);
+      // Sommet : grand temple au centre du plateau, torii à l'arrivée, parapet rouge tout autour.
+      addPagoda(mt.cx, mt.height, mt.cz, Math.atan2(d.outX, d.outZ), 1.7);
+      props.push({ x: mt.cx, y: mt.height + 4, z: mt.cz, sx: 15, sy: 8, sz: 15, yaw: Math.atan2(d.outX, d.outZ), color: [0.36, 0.06, 0.04] });
+      const last = rs[rs.length - 10] as HighwaySample;
+      addTorii(last.x, mt.height, last.z, Math.atan2(last.tx, last.tz), mt.road.halfWidth * 2 + 3);
+      const rim = mt.rTop - 1.2, segs = 44;
+      for (let q = 0; q < segs; q++) {
+        const a = ((q + 0.5) / segs) * Math.PI * 2;
+        const px = mt.cx + Math.cos(a) * rim, pz = mt.cz + Math.sin(a) * rim;
+        // Ouverture là où la route arrive sur le plateau.
+        let open = false;
+        for (let i = rs.length - 1; i >= 0 && (rs[i] as HighwaySample).y > mt.height - 6; i -= 2) if (Math.hypot((rs[i] as HighwaySample).x - px, (rs[i] as HighwaySample).z - pz) < mt.road.halfWidth + 6) open = true;
+        if (open) continue;
+        const len = (Math.PI * 2 * rim) / segs;
+        const yaw = Math.atan2(-Math.sin(a), Math.cos(a));
+        props.push({ x: px, y: mt.height + 0.7, z: pz, sx: 0.5, sy: 1.4, sz: len + 0.3, yaw, color: [0.42, 0.07, 0.04] });
+        solids.push({ x: px, y: mt.height + 1.5, z: pz, hx: 0.4, hy: 1.5, hz: len / 2 + 0.3, yaw });
+        if (q % 4 === 0) glowBoxes.push({ x: px, y: mt.height + 1.7, z: pz, sx: 0.45, sy: 0.6, sz: 0.45, yaw, color: [1.0, 0.6, 0.22] });
+      }
+      // Arbres sur les pentes, hors de l'emprise de la route.
+      for (let q = 0; q < 420; q++) {
+        const a = rng.range(0, Math.PI * 2), rho = rng.range(mt.rTop + 6, mt.rBase - 4);
+        const tx = mt.cx + Math.cos(a) * rho, tz = mt.cz + Math.sin(a) * rho;
+        let clear = true;
+        for (let i = 0; i < rs.length; i += 3) if (Math.hypot((rs[i] as HighwaySample).x - tx, (rs[i] as HighwaySample).z - tz) < mt.road.halfWidth + 5) { clear = false; break; }
+        if (clear) trees.push({ x: tx, z: tz, y: (mt.height * (mt.rBase - rho)) / (mt.rBase - mt.rTop), height: rng.range(8, 15), radius: rng.range(2.2, 3.6) });
+      }
+    }
     theme = null;
     // Limite : mur invisible autour du quartier, derrière ses immeubles, ouvert devant la route d'accès.
     const poly = d.polygon;
@@ -1080,6 +1397,15 @@ export function generateCity(seed: number = WORLD.seed): CityData {
         const x0 = ax + ((bx - ax) * q) / parts, z0 = az + ((bz - az) * q) / parts;
         const x1 = ax + ((bx - ax) * (q + 1)) / parts, z1 = az + ((bz - az) * (q + 1)) / parts;
         if (nearAccess((x0 + x1) / 2, (z0 + z1) / 2) < 24 || nearAccess(x0, z0) < 18 || nearAccess(x1, z1) < 18) continue;
+        // Pas de mur (haut de 30 m) en travers de la route de montagne quand elle passe au-dessus.
+        if (mountain) {
+          let under = false;
+          for (const sp of (mountain as Mountain).road.samples) {
+            if (sp.y > 34) break;
+            if (Math.hypot(sp.x - (x0 + x1) / 2, sp.z - (z0 + z1) / 2) < 16) { under = true; break; }
+          }
+          if (under) continue;
+        }
         walls.push({ x: (x0 + x1) / 2, z: (z0 + z1) / 2, yaw: Math.atan2(x1 - x0, z1 - z0), halfLength: len / parts / 2 + 0.5 });
       }
     }
@@ -1140,6 +1466,21 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     });
   }
 
+  // Campagne : un lampadaire sur quatre seulement, la nuit y est plus noire.
+  for (const d of graph.districts) {
+    if (d.theme !== 'collines') continue;
+    const dim = new Rng(seed ^ 0x33aa71);
+    const keep = <T extends { x: number; z: number }>(list: T[]): T[] => list.filter((q) => Math.hypot(q.x - d.cx, q.z - d.cz) > d.radius || dim.chance(0.25));
+    const l2 = keep(lamps), p2 = keep(pools);
+    lamps.length = 0;
+    lamps.push(...l2);
+    pools.length = 0;
+    pools.push(...p2);
+  }
+  const countryside: number[][] = [];
+  for (const d of graph.districts) if (d.theme === 'collines') countryside.push([d.cx, d.cz, d.radius + 220]);
+  if (mountain) countryside.push([(mountain as Mountain).cx, (mountain as Mountain).cz, (mountain as Mountain).rBase + 200]);
+  for (const v of valleys) countryside.push([v[0] as number, v[1] as number, (v[2] as number) + 160]);
   // Éclairage public propre à chaque quartier : sodium orangé sur les docks, rose chaud sur la baie, doré dans les collines.
   for (const d of graph.districts) {
     const tint: readonly [number, number, number] = d.theme === 'docks' ? [1.0, 0.5, 0.14] : d.theme === 'baie' ? [1.0, 0.62, 0.7] : [1.0, 0.78, 0.45];
@@ -1169,6 +1510,14 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     B.z0 = Math.min(B.z0, sp.z);
     B.z1 = Math.max(B.z1, sp.z);
   }
+  if (mountain) {
+    const mt: Mountain = mountain;
+    const r = mt.rBase + 30;
+    B.x0 = Math.min(B.x0, mt.cx - r);
+    B.x1 = Math.max(B.x1, mt.cx + r);
+    B.z0 = Math.min(B.z0, mt.cz - r);
+    B.z1 = Math.max(B.z1, mt.cz + r);
+  }
   for (const d of graph.districts) {
     B.x0 = Math.min(B.x0, d.cx - d.radius);
     B.x1 = Math.max(B.x1, d.cx + d.radius);
@@ -1177,5 +1526,5 @@ export function generateCity(seed: number = WORLD.seed): CityData {
   }
   const margin = 60;
   const bounds: Rect = { x0: B.x0 - margin, x1: B.x1 + margin, z0: B.z0 - margin, z1: B.z1 + margin };
-  return { seed, graph, bounds, buildings, signs, lamps, pools, props, glowBoxes, trees, parks, walls, highway, ringway, connectors, spawn, respawns };
+  return { seed, graph, bounds, buildings, signs, lamps, pools, props, glowBoxes, trees, parks, walls, highway, ringway, connectors, mountain, solids, bridges, mounds, countryside, spawn, respawns };
 }

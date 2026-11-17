@@ -115,16 +115,26 @@ décor :
 
 - **Baie de Yokohama** (niveau 11) : bord de mer — hôtels clairs, palmiers le long des avenues,
   éclairage rose, grande roue illuminée et lueur de la mer au large ;
-- **Docks de Kawasaki** (niveau 21) : port — entrepôts bas, parcs à conteneurs (avec collision),
-  grues portiques, éclairage au sodium, peu de néons ;
-- **Collines de Hakone** (niveau 31) : petites maisons, îlots boisés, lumière dorée.
+- **Docks de Kawasaki** (niveau 21) : port, presque sans habitations — entrepôts bas aux rideaux
+  de fer, grandes cours ouvertes avec remorques garées, parcs à conteneurs (avec collision), grues
+  portiques, et au fond un **quai** : mur de conteneurs, neuf grandes grues de quai et un cargo ;
+- **Collines de Hakone** (niveau 31) : la campagne. On y arrive par un **grand pont à haubans**
+  (520 m, 18 m au-dessus d'une rivière), puis forêt le long des routes, quelques maisons basses,
+  buttes boisées (solides), montagnes à l'horizon, peu de lampadaires, aucune enseigne. Au centre,
+  une **route de montagne en spirale** (85 m de dénivelé, parapet) monte jusqu'à un temple.
+  Réglages : `WORLD.mountain` et `bridge` dans `WORLD.districts.list`.
 
 Tant que le niveau n'est pas atteint, la sortie est fermée par une barrière de chantier
 lumineuse ; elle s'ouvre toute seule quand on monte de niveau. `?quartiers=ouverts` les ouvre
 tous (essais). La route d'accès est bordée de glissières. Réglages : `WORLD.districts` dans
 `src/config/world.ts` ; génération et décors dans `src/world/cityGen.ts` ; barrières dans
 `src/world/districtGates.ts`. Les quartiers sont dessinés par morceaux de 300 m, masqués quand
-ils sont trop loin pour être vus (`updateCityZones`). Vérification : `sh scripts/run-sim.sh districts`.
+ils sont trop loin pour être vus (`updateCityZones`). Vérification : `sh scripts/run-sim.sh districts`
+(passages sans mur invisible, traversée du pont dans les deux sens, montée et descente de la montagne).
+
+Éclats blancs : ce qui entre dans le halo lumineux (bloom) est plafonné (`BLOOM_INPUT_MAX` dans
+`src/render/renderer.ts`), et les surfaces lumineuses aussi (`src/render/materials.ts`), pour qu'une
+source très vive qui entre dans l'image ne fasse plus un flash.
 
 ## Voitures : vrais modèles 3D
 

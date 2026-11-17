@@ -135,6 +135,8 @@ export class Traffic {
 
   private retire(c: TrafficCar): void {
     c.active = false;
+    // (rangée loin sous la carte : un corps seulement désactivé peut rester un obstacle fantôme)
+    c.body.setTranslation({ x: c.x, y: -500, z: c.z }, false);
     c.body.setEnabled(false);
   }
 
@@ -214,6 +216,8 @@ export class Traffic {
         if (dist > 9) continue;
         const closing = -((a.vx - hx * c.speed) * dx + (a.vz - hz * c.speed) * dz) / (dist || 1);
         if (dist < 3.2 || (closing > 5 && dist < 3.2 + closing * 0.22)) struck = true;
+        // Contact de biais à l'arrêt (coin contre coin) : sans ça la voiture reste un mur immobile.
+        if (c.stuck > 1.2 && dist < 5) struck = true;
       }
       if (struck) {
         c.state = 'choc';

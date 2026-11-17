@@ -88,5 +88,22 @@ export function buildCityColliders(city: CityData, phys: PhysicsWorld): number {
 
   // Autoroutes : tablier + glissières (+ flancs pleins) en un trimesh chacune
   for (const hw of [city.highway, city.ringway]) addHighwayCollider(hw);
+  // Route de montagne : chaussée et glissières, plateau du sommet, parapets.
+  if (city.mountain) {
+    const mt = city.mountain;
+    addHighwayCollider(mt.road);
+    world.createCollider(R.ColliderDesc.cylinder(1, mt.rTop).setTranslation(mt.cx, mt.height - 1, mt.cz).setFriction(0.9).setCollisionGroups(GROUP_WORLD));
+    count++;
+  }
+  for (const br of city.bridges) addHighwayCollider(br);
+  for (const br of city.bridges) for (const p of br.pillars) box(p.x, (p.top - 0.9) / 2, p.z, 0.8, (p.top - 0.9) / 2, 0.8, p.yaw, 0.3);
+  // Buttes : un cône (prolongé jusqu'à sa pointe) par butte.
+  for (const m of city.mounds) {
+    if (!m.solid) continue;
+    const full = (m.height * m.r0) / (m.r0 - m.r1);
+    world.createCollider(R.ColliderDesc.cone(full / 2, m.r0).setTranslation(m.x, full / 2, m.z).setFriction(0.6).setCollisionGroups(GROUP_WORLD));
+    count++;
+  }
+  for (const b of city.solids) box(b.x, b.y, b.z, b.hx, b.hy, b.hz, b.yaw, 0.3);
   return count;
 }

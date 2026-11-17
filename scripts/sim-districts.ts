@@ -40,3 +40,38 @@ for (const d of g.districts) {
   const inWay = city.buildings.filter((b) => !b.backdrop && b.height > 1.5).filter((b) => { for (let t = 0; t <= len - 40; t += 2) { const x = sx + tx * t, z = sz + tz * t; if (Math.hypot(x - b.footprint.cx, z - b.footprint.cz) < Math.max(b.footprint.w, b.footprint.d) / 2 + 3) return true; } return false; }).length;
   console.log(`passage vers « ${d.name} »: mur invisible le plus proche de la chaussée à ${worst.toFixed(1)} m (${where}) ; immeubles en travers: ${inWay}`);
 }
+
+// ——— Conduite réelle : traversée du pont, montée de la route de montagne ———
+{
+  const { createPhysicsWorld } = await import('../src/physics/physicsWorld');
+  const { buildCityColliders } = await import('../src/world/cityColliders');
+  const { Vehicle } = await import('../src/vehicle/vehicle');
+  const { CAR_SPEC, PRESET_A } = await import('../src/config/handling');
+  const { emptyDriveInput } = await import('../src/input/actions');
+  const { FIXED_DT } = await import('../src/core/loop');
+  const phys = await createPhysicsWorld();
+  const n = buildCityColliders(city, phys);
+  console.log(`collisions: ${n} ; arbres ${city.trees.length} ; buttes ${city.mounds.filter((m) => m.solid).length} ; montagnes ${city.mounds.filter((m) => !m.solid).length} ; ponts ${city.bridges.length}`);
+  const drive = (name: string, samples: { x: number; y: number; z: number; tx: number; tz: number }[], target: number): void => {
+    const s0 = samples[2]!;
+    const car = new Vehicle(phys, CAR_SPEC, { x: s0.x, y: s0.y + 0.8, z: s0.z, yaw: Math.atan2(s0.tx, s0.tz) });
+    const input = emptyDriveInput();
+    let idx = 2, maxY = -1e9, minGap = 1e9, maxLat = 0, maxV = 0, t = 0, stuck = 0;
+    while (t < 400 && idx < samples.length - 3) {
+      while (idx < samples.length - 3 && (samples[idx]!.x - car.pos.x) * samples[idx]!.tx + (samples[idx]!.z - car.pos.z) * samples[idx]!.tz < 0) idx++;
+      const look = samples[Math.min(samples.length - 1, idx + 4 + Math.floor(car.speed / 6))]!;
+      let diff = Math.atan2(look.x - car.pos.x, look.z - car.pos.z) - car.yaw; diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+      input.steer = Math.max(-1, Math.min(1, diff * 2.4));
+      input.throttle = car.speed < target ? 1 : 0; input.brake = car.speed > target + 3 ? 0.4 : 0;
+      car.update(FIXED_DT, input, PRESET_A); phys.world.step(); car.afterStep(); t += FIXED_DT;
+      const sp = samples[idx]!;
+      maxY = Math.max(maxY, car.pos.y); minGap = Math.min(minGap, car.pos.y - sp.y);
+      maxLat = Math.max(maxLat, Math.abs((car.pos.x - sp.x) * sp.tz - (car.pos.z - sp.z) * sp.tx)); maxV = Math.max(maxV, car.speed);
+      stuck = car.speed < 1 ? stuck + FIXED_DT : 0; if (stuck > 5) break;
+    }
+    console.log(`${name}: ${idx >= samples.length - 3 ? 'arrivé' : 'BLOQUÉ à ' + idx + '/' + samples.length} en ${t.toFixed(0)} s ; hauteur max ${maxY.toFixed(1)} m ; écart latéral max ${maxLat.toFixed(1)} m ; sous la chaussée au pire ${minGap.toFixed(2)} m ; v max ${(maxV * 3.6).toFixed(0)} km/h ; position finale y=${car.pos.y.toFixed(1)}`);
+    phys.world.removeRigidBody(car.body);
+  };
+  for (const br of city.bridges) { drive('pont (aller)', br.samples, 38); drive('pont (retour)', [...br.samples].reverse().map((p) => ({ ...p, tx: -p.tx, tz: -p.tz })), 38); }
+  if (city.mountain) { drive('route de montagne (montée)', city.mountain.road.samples, 22); drive('route de montagne (descente)', [...city.mountain.road.samples].reverse().map((p) => ({ ...p, tx: -p.tx, tz: -p.tz })), 20); }
+}

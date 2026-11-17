@@ -94,6 +94,28 @@ export class Minimap {
       }
       c.stroke();
     }
+    // Ponts d'accès
+    c.strokeStyle = '#3f8fb8';
+    for (const br of this.city.bridges) {
+      c.lineWidth = Math.max(2, br.halfWidth * 2 * PX);
+      c.beginPath();
+      br.samples.forEach((p, k) => {
+        if (k === 0) c.moveTo(this.mx(p.x), this.mz(p.z));
+        else c.lineTo(this.mx(p.x), this.mz(p.z));
+      });
+      c.stroke();
+    }
+    // Route de montagne
+    if (this.city.mountain) {
+      c.strokeStyle = '#7a8f6a';
+      c.lineWidth = Math.max(2, this.city.mountain.road.halfWidth * 2 * PX);
+      c.beginPath();
+      this.city.mountain.road.samples.forEach((p, k) => {
+        if (k === 0) c.moveTo(this.mx(p.x), this.mz(p.z));
+        else c.lineTo(this.mx(p.x), this.mz(p.z));
+      });
+      c.stroke();
+    }
     // Rues, des plus petites aux plus grandes
     const order = ['alley', 'street', 'avenue', 'boulevard'] as const;
     for (const kind of order) {
