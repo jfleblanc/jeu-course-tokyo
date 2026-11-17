@@ -1286,6 +1286,16 @@ export function generateCity(seed: number = WORLD.seed): CityData {
         glowBoxes.push({ x: gx, y: 71.6, z: gz, sx: 0.9, sy: 0.9, sz: 0.9, yaw, color: [1.0, 0.1, 0.05] });
         glowBoxes.push({ x: gx + d.outX * 78, y: 52.8, z: gz + d.outZ * 78, sx: 0.8, sy: 0.8, sz: 0.8, yaw, color: [1.0, 0.1, 0.05] });
         for (const sa of [-1, 1]) glowBoxes.push({ x: gx + px * sa * 13, y: 46, z: gz + pz * sa * 13, sx: 1.4, sy: 0.5, sz: 1.4, yaw, color: [1.0, 0.75, 0.4] });
+        // Mât de projecteurs entre deux grues : il éclaire le terre-plein et les conteneurs.
+        {
+          const mx = gx + px * 47 - d.outX * 9, mz = gz + pz * 47 - d.outZ * 9;
+          props.push({ x: mx, y: 17, z: mz, sx: 0.7, sy: 34, sz: 0.7, yaw, color: [0.2, 0.2, 0.22] });
+          props.push({ x: mx, y: 34.4, z: mz, sx: 7, sy: 0.5, sz: 1.2, yaw: yaw + Math.PI / 2, color: [0.2, 0.2, 0.22] });
+          for (const q of [-2.4, -0.8, 0.8, 2.4]) glowBoxes.push({ x: mx + px * q - d.outX * 0.7, y: 33.6, z: mz + pz * q - d.outZ * 0.7, sx: 1.1, sy: 0.9, sz: 0.4, yaw: yaw + Math.PI / 2, color: [1.0, 0.86, 0.62] });
+          for (const [back, rad, it] of [[34, 44, 2.1], [80, 48, 1.7], [128, 48, 1.3], [176, 46, 0.9]] as const) pools.push({ x: mx - d.outX * back, z: mz - d.outZ * back, radius: rad, color: [1.0, 0.8, 0.52], intensity: it });
+          // lumière de travail sous le portique de la grue
+          pools.push({ x: gx - d.outX * 6, z: gz - d.outZ * 6, radius: 30, color: [1.0, 0.8, 0.52], intensity: 1.2 });
+        }
         // Murs de conteneurs entre les grues.
         for (let r = 0; r < 3; r++) for (let q = -2; q <= 2; q++) {
           const lv = rng.int(2, 5);

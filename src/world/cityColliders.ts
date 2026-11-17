@@ -55,16 +55,34 @@ export function buildCityColliders(city: CityData, phys: PhysicsWorld): number {
       quad(a + 0, b + 0, b + 4, a + 4); // tablier
       for (const [o, side] of [[0, 1], [4, -1]] as const) {
         if (inGap(side, k)) continue; // ouverture pour une bretelle
-        quad(a + o, a + o + 1, b + o + 1, b + o); // face intérieure de la glissière
-        quad(a + o + 1, a + o + 2, b + o + 2, b + o + 1); // dessus
         quad(a + o + 2, a + o + 3, b + o + 3, b + o + 2); // face extérieure / flanc
+        // Glissière : une boîte pleine par tronçon. (Une simple paroi de triangles laissait la
+        // caisse s'enfoncer dedans puis s'y accrocher : la voiture s'arrêtait net en la frôlant.)
+        {
+          const pa = s[k] as HighwaySample, pb = s[(k + 1) % n] as HighwaySample;
+          const dx = pb.x - pa.x, dy = pb.y - pa.y, dz = pb.z - pa.z;
+          const len = Math.hypot(dx, dy, dz) || 1;
+          const yaw = Math.atan2(dx, dz), pitch = -Math.asin(dy / len);
+          const bh = hw.barrierHeight + (side === hw.outerSide ? 1.6 : 0.5);
+          const T = 0.3;
+          const mx = (pa.x + pb.x) / 2, my = (pa.y + pb.y) / 2, mz = (pa.z + pb.z) / 2;
+          const ox = -(pa.tz + pb.tz) / 2 * side, oz = (pa.tx + pb.tx) / 2 * side;
+          const cy = Math.cos(yaw / 2), sy = Math.sin(yaw / 2), cp = Math.cos(pitch / 2), sp = Math.sin(pitch / 2);
+          world.createCollider(R.ColliderDesc.cuboid(T, bh / 2 + 0.3, len / 2 + 0.06)
+            .setTranslation(mx + ox * (half + T), my + bh / 2 - 0.3, mz + oz * (half + T))
+            .setRotation({ x: cy * sp, y: sy * cp, z: -sy * sp, w: cy * cp })
+            .setFriction(0.3).setRestitution(0.05).setCollisionGroups(GROUP_WORLD));
+          count++;
+        }
       }
       const sa = s[k] as HighwaySample;
       if (sa.y >= 4) quad(a + 3, b + 3, b + 7, a + 7); // dessous du tablier
     }
+    // Frottement 0,3 comme les immeubles : frôler une glissière ne freine pas plus que frôler un mur
+    // (les roues n'utilisent pas ce frottement, seulement la caisse).
     // FIX_INTERNAL_EDGES : sans lui, une voiture qui retombe sur le tablier peut « buter » sur
     // l'arête entre deux triangles comme sur un mur.
-    const desc = R.ColliderDesc.trimesh(new Float32Array(verts), new Uint32Array(idx), R.TriMeshFlags.FIX_INTERNAL_EDGES).setFriction(0.9).setCollisionGroups(GROUP_WORLD);
+    const desc = R.ColliderDesc.trimesh(new Float32Array(verts), new Uint32Array(idx), R.TriMeshFlags.FIX_INTERNAL_EDGES).setFriction(0.3).setCollisionGroups(GROUP_WORLD);
     world.createCollider(desc);
     count++;
   };

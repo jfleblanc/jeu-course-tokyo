@@ -105,6 +105,31 @@ function addJunction(gb: GeomBuilder, n: GraphNode): void {
   }
 }
 
+/**
+ * Balise d'accès : deux colonnes lumineuses vertes, visibles de loin par-dessus les voitures, et
+ * trois grands chevrons au sol qui pointent vers l'entrée (rampe d'autoroute, bretelle, pont).
+ */
+function addEntryMarker(solid: GeomBuilder, glow: GeomBuilder, x: number, y: number, z: number, tx: number, tz: number, halfW: number): void {
+  const yaw = Math.atan2(tx, tz);
+  const GREEN: Vec3 = [0.1, 1.0, 0.45];
+  for (const side of [1, -1]) {
+    const px = x + tz * side * (halfW + 1.3), pz = z - tx * side * (halfW + 1.3);
+    solid.box(px, y + 0.6, pz, 0.7, 1.2, 0.7, yaw, DARK_METAL);
+    glow.box(px, y + 7.2, pz, 0.38, 12, 0.38, yaw, GREEN, [1, 3, 1, 1.1], true, false);
+  }
+  const w = Math.max(1.6, halfW * 0.62);
+  const P = (u: number, f: number): Vec3 => [x + tz * u + tx * f, y + 0.07, z - tx * u + tz * f];
+  for (let k = 0; k < 3; k++) {
+    const f0 = 4 + k * 4.2;
+    for (const sgn of [1, -1]) {
+      // une branche du chevron : de l'extérieur (en arrière) vers la pointe (en avant)
+      glow.quad(P(sgn * w, f0), P(sgn * w, f0 + 1.1), P(0, f0 + 2.9), P(0, f0 + 1.8), [0, 1, 0], 0, 0, 1, 1, GREEN, [1, 3, 1, 0.75]);
+    }
+  }
+}
+
+const STRIP_H = 0.3;
+
 function addHighway(hw: Highway, road: GeomBuilder, solid: GeomBuilder, glow: GeomBuilder, roadKind: number): void {
   const s = hw.samples;
   const half = hw.halfWidth;
@@ -153,8 +178,17 @@ function addHighway(hw: Highway, road: GeomBuilder, solid: GeomBuilder, glow: Ge
       solid.quad(inTopA, inTopB, outTopB, outTopA, [0, 1, 0], 0, 0, len, 0.35, CONCRETE);
       solid.quad(topB, topA, outTopA, outTopB, nrm, 0, 0, len, h, CONCRETE);
       const stripColor: Vec3 = toGround ? [0.15, 0.6, 1.0] : [1.0, 0.5, 0.12];
-      const y0 = toGround ? h - 0.35 : 0.5;
-      glow.quad([inA[0], inA[1] + y0, inA[2]], [inB[0], inB[1] + y0, inB[2]], [inB[0], inB[1] + y0 + 0.12, inB[2]], [inA[0], inA[1] + y0 + 0.12, inA[2]], nin, 0, 0, len, 0.12, stripColor, [1, 3, 1, 0.9]);
+      const y0 = toGround ? h - 0.5 : 0.4;
+      // (bande assez haute et pas trop vive : une ligne très fine et très lumineuse scintille au loin)
+      glow.quad([inA[0], inA[1] + y0, inA[2]], [inB[0], inB[1] + y0, inB[2]], [inB[0], inB[1] + y0 + STRIP_H, inB[2]], [inA[0], inA[1] + y0 + STRIP_H, inA[2]], nin, 0, 0, len, STRIP_H, stripColor, [1, 3, 1, 0.5]);
+    }
+    // Là où le flanc plein (rampe basse) laisse place au tablier mince, on ferme le caisson par
+    // une cloison en travers : sinon, de dessous, on voit l'intérieur creux de la rampe.
+    if ((a.y < 4) !== (b.y < 4)) {
+      const lowSide = a.y < 4 ? a : b;
+      const l = edgeOut(lowSide, 1, 0.02, 0.35), r = edgeOut(lowSide, -1, 0.02, 0.35);
+      const sgn = a.y < 4 ? 1 : -1;
+      solid.quad([l[0], 0, l[2]], [r[0], 0, r[2]], r, l, [lowSide.tx * sgn, 0, lowSide.tz * sgn], 0, 0, half * 2, lowSide.y, CONCRETE);
     }
     if (a.y >= 4 || b.y >= 4) {
       const lowA = a.y - thick, lowB = b.y - thick;
@@ -352,16 +386,7 @@ function buildZone(city: CityData, mats: CityMaterials, zone: number, cell: { x0
     solid.cylinder(t.x, ty + t.height * 0.35, t.z, t.radius, t.radius * 0.55, t.height * 0.35, 7, [0.02, 0.07, 0.04], [0, 0, 0, 0], false);
     solid.cylinder(t.x, ty + t.height * 0.7, t.z, t.radius * 0.55, 0.05, t.height * 0.3, 7, [0.025, 0.08, 0.045], [0, 0, 0, 0], false);
   }
-  for (const l of city.lamps) {
-    if (!here(l.x, l.z)) continue;
-    solid.cylinder(l.x, sh, l.z, 0.1, 0.07, l.height, 6, DARK_METAL, [0, 0, 0, 0], false);
-    const ax = l.x + l.dx * l.arm * 0.5;
-    const az = l.z + l.dz * l.arm * 0.5;
-    const yaw = Math.atan2(l.dx, l.dz);
-    solid.box(ax, sh + l.height, az, 0.09, 0.09, l.arm, yaw, DARK_METAL, [0, 0, 0, 0], true, true);
-    // Tête lumineuse (aData : graine, type 3 = uni, -, intensité)
-    glow.box(l.x + l.dx * l.arm, sh + l.height - 0.08, l.z + l.dz * l.arm, 0.32, 0.12, 0.8, yaw, l.color, [1, 3, 1, 2.6], true, true);
-  }
+  // (les lampadaires sont dessinés à part, par instances : src/render/lampVisuals.ts)
   for (const p of city.props) if (here(p.x, p.z)) solid.box(p.x, p.y, p.z, p.sx, p.sy, p.sz, p.yaw, p.color);
   for (const g of city.glowBoxes) if (here(g.x, g.z)) glow.box(g.x, g.y, g.z, g.sx, g.sy, g.sz, g.yaw, g.color, [1, 4, 1, 1.5], true, false);
 
@@ -389,9 +414,27 @@ function buildZone(city: CityData, mats: CityMaterials, zone: number, cell: { x0
     addHighway(mt.road, hwRoad, solid, glow, ROAD_KIND.ringway);
     solid.cylinder(mt.cx, -0.1, mt.cz, mt.rBase, mt.rTop, mt.height + 0.1, 56, [0.028, 0.04, 0.032], [0, 0, 0, 0], true);
   }
+  if (main) {
+    // Balises d'accès aux deux bouts de l'autoroute centrale et des ponts.
+    for (const hw of [city.highway, ...city.bridges]) {
+      const s0 = hw.samples[1] as HighwaySample, s1 = hw.samples[hw.samples.length - 2] as HighwaySample;
+      addEntryMarker(solid, glow, s0.x - s0.tx * 14, 0, s0.z - s0.tz * 14, s0.tx, s0.tz, hw.halfWidth);
+      addEntryMarker(solid, glow, s1.x + s1.tx * 14, 0, s1.z + s1.tz * 14, -s1.tx, -s1.tz, hw.halfWidth);
+    }
+  }
   const connectorGeo = new GeomBuilder();
   for (const c of main ? city.connectors : []) {
     addConnector(connectorGeo, c);
+    // Balises aux deux bouts de la bretelle, chevrons pointés vers l'intérieur.
+    {
+      const n = c.pts.length / 2;
+      for (const [i0, i1] of [[0, 2], [n - 1, n - 3]] as const) {
+        const ex = c.pts[i0 * 2] as number, ez = c.pts[i0 * 2 + 1] as number;
+        let dx = (c.pts[i1 * 2] as number) - ex, dz = (c.pts[i1 * 2 + 1] as number) - ez;
+        const dl = Math.hypot(dx, dz) || 1; dx /= dl; dz /= dl;
+        addEntryMarker(solid, glow, ex, 0, ez, dx, dz, c.width / 2);
+      }
+    }
     // Portique vert « autoroute » à l'entrée de la bretelle, visible depuis le périphérique.
     const k = 5;
     const x = c.pts[k * 2] as number, z = c.pts[k * 2 + 1] as number;

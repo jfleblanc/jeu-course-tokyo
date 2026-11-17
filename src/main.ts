@@ -20,6 +20,8 @@ import { Tutorial } from './ui/tutorial';
 import { Sfx } from './audio/sfx';
 import { Traffic, type TrafficActor } from './world/traffic';
 import { TrafficVisuals } from './render/trafficVisuals';
+import { LampVisuals } from './render/lampVisuals';
+import { LampField, type LampStriker } from './world/lampField';
 import { DistrictGates } from './world/districtGates';
 import { FullMap } from './ui/fullMap';
 import { emptyDriveInput } from './input/actions';
@@ -204,6 +206,22 @@ async function boot(): Promise<void> {
   // Circulation (essai) : en balade seulement. ?trafic=non la coupe.
   const traffic = new Traffic(phys, city.graph, seed);
   const trafficVisuals = new TrafficVisuals(scene, traffic);
+  // Lampadaires renversables
+  const lampField = new LampField(city.lamps);
+  const lampVisuals = new LampVisuals(scene, lampField, mats);
+  const strikers: LampStriker[] = [];
+  const strikerOf = new Map<Vehicle, LampStriker>();
+  const strikerFor = (v: Vehicle): LampStriker => {
+    let s = strikerOf.get(v);
+    if (!s) {
+      s = { x: 0, z: 0, yaw: 0, vx: 0, vz: 0, slow: (keep) => { const lv = v.body.linvel(); v.body.setLinvel({ x: lv.x * keep, y: lv.y, z: lv.z * keep }, true); } };
+      strikerOf.set(v, s);
+    }
+    const lv = v.body.linvel();
+    s.x = v.pos.x; s.z = v.pos.z; s.yaw = v.yaw; s.vx = lv.x; s.vz = lv.z;
+    return s;
+  };
+  let lampsHeard = 0;
   // ?trafic=non : aucune circulation ; ?trafic=balade : pas pendant les courses.
   const trafficOn = params.get('trafic') !== 'non';
   const trafficInRace = params.get('trafic') !== 'balade';
@@ -530,6 +548,11 @@ async function boot(): Promise<void> {
       traffic.beforeStep(dt, actors);
       phys.world.step();
       car.afterStep();
+      strikers.length = 0;
+      strikers.push(strikerFor(car));
+      if (race.active) for (const r of race.racers) if (!r.isPlayer) strikers.push(strikerFor(r.car));
+      lampField.update(dt, strikers, car.pos.x, car.pos.z);
+      if (lampField.knocked !== lampsHeard) { lampsHeard = lampField.knocked; sfx.clang(); }
       race.afterStep(dt);
       // Filet de sécurité : sortie de carte ou chute sous le sol.
       const b = city.bounds;
@@ -616,6 +639,7 @@ async function boot(): Promise<void> {
       sky.position.copy(camera.position);
       raceVisuals.update(race, alpha, frameDt);
       trafficVisuals.update(traffic, camera.position.x, camera.position.z);
+      lampVisuals.update();
       updateCityZones(meshes, camera.position.x, camera.position.z);
       fullMap.update({ x: car.pos.x, z: car.pos.z, yaw: car.yaw, level: player.level, racing: race.active, allOpen: allDistrictsOpen });
       const blocked = gates.blockedNear(frameDt, car.pos.x, car.pos.z);
@@ -666,7 +690,7 @@ async function boot(): Promise<void> {
   });
 
   // Accès console pour le débogage : window.__jeu
-  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks, traffic,
+  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks, traffic, lampField,
     /** Éclairage de studio pour les planches de contrôle. */
     studio: (): void => {
       scene.add(new THREE.HemisphereLight(0xffffff, 0x8888aa, 3.2));

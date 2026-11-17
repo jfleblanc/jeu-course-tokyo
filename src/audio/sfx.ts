@@ -262,6 +262,13 @@ export class Sfx {
     notes.forEach((n, k) => this.tone(n, k * 0.13, k === notes.length - 1 ? 0.6 : 0.16, 0.14, 'triangle'));
   }
 
+  /** Lampadaire fauché : choc sourd et tintement métallique. */
+  clang(): void {
+    this.tone(150, 0, 0.12, 0.2, 'triangle', 60);
+    this.tone(1250, 0.01, 0.35, 0.07, 'square', 1180);
+    this.tone(1870, 0.01, 0.25, 0.04, 'square', 1790);
+  }
+
   /** Clic de menu. */
   click(): void {
     this.tone(660, 0, 0.05, 0.07, 'triangle');

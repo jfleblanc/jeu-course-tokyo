@@ -68,6 +68,12 @@ function makeWheel(front: boolean, left: boolean, spec: CarSpec): WheelState {
   };
 }
 
+/** Compression au-delà de laquelle ce qu'il y a sous la roue est un rebord, pas la route (m). */
+const LEDGE_COMPRESSION = 0.45;
+
+/** Comportement en l'air (saut en haut d'une rampe). */
+const AIR = { extraGravity: 1.1, align: 9, damp: 5, cushionRange: 8, cushionDecel: 75, touchdownSpeed: 3.5 };
+
 export class Vehicle {
   readonly body: RAPIER.RigidBody;
   readonly collider: RAPIER.Collider;
@@ -335,6 +341,7 @@ export class Vehicle {
     const mr = this.massRatio;
     const staticLoad = (mass * 9.81) / WHEEL_COUNT;
     const maxSuspForce = staticLoad * 4;
+    const bump = this.bumpForce;
     let contacts = 0;
     for (let i = 0; i < WHEEL_COUNT; i++) {
       const w = this.wheels[i] as WheelState;
@@ -353,7 +360,14 @@ export class Vehicle {
         const flip = hit.normal.x * ux + hit.normal.y * uy + hit.normal.z * uz < 0 ? -1 : 1;
         hnx = hit.normal.x * flip; hny = hit.normal.y * flip; hnz = hit.normal.z * flip;
       }
-      if (hit && hny > 0.3) {
+      // Rebord sous la roue (dessus d'une glissière, toit d'une autre voiture) : la surface est plus
+      // haute que ce que la suspension peut encaisser, caisse posée au sol comprise. Ce n'est pas un
+      // appui : sans ce tri, la roue « grimpe » sur la glissière et la voiture s'arrête net.
+      const ledge = hit !== null && spec.suspRestLength - (hit.timeOfImpact - spec.wheelRadius) > LEDGE_COMPRESSION;
+      // Au ras d'une glissière, la normale renvoyée peut être celle de la paroi : on roule quand
+      // même sur le tablier, donc on prend la verticale de la voiture.
+      if (hit && !ledge && hny <= 0.3) { hnx = ux; hny = uy; hnz = uz; }
+      if (hit && !ledge && hny > 0.3) {
         const dist = hit.timeOfImpact;
         w.inContact = true;
         w.suspLength = Math.max(spec.suspRestLength - spec.suspMaxTravel, dist - spec.wheelRadius);
@@ -372,6 +386,11 @@ export class Vehicle {
       }
       const compVel = clamp((w.compression - prevComp) / dt, -3, 3);
       suspForce[i] = w.inContact ? (cfg.suspStiffness * w.compression + cfg.suspDamping * compVel) * mr : 0;
+      // Butée : en fin de course (grosse compression en bas d'une rampe, réception d'un saut) un
+      // ressort très raide prend le relais, pour que la caisse ne racle pas la route.
+      bump[i] = 0;
+      const over = w.compression - spec.suspMaxTravel * 0.8;
+      if (w.inContact && over > 0) bump[i] = Math.max(0, (cfg.suspStiffness * 9 * over + cfg.suspDamping * 2.5 * Math.max(0, compVel)) * mr);
     }
     // Barre antiroulis : transfère de la force du côté détendu vers le côté comprimé.
     for (let axle = 0; axle < 2; axle++) {
@@ -423,7 +442,7 @@ export class Vehicle {
       const nx = hitNormals[i * 3] as number, ny = hitNormals[i * 3 + 1] as number, nz = hitNormals[i * 3 + 2] as number;
       const cx = hitPoints[i * 3] as number, cy = hitPoints[i * 3 + 1] as number, cz = hitPoints[i * 3 + 2] as number;
 
-      const fs = clamp(suspForce[i] as number, 0, maxSuspForce);
+      const fs = clamp(suspForce[i] as number, 0, maxSuspForce) + Math.min(bump[i] as number, maxSuspForce * 3);
       const load = fs * Math.max(0, nx * ux + ny * uy + nz * uz);
       w.load = load;
 
@@ -517,6 +536,42 @@ export class Vehicle {
       const down = cfg.downforce * vF * vF * dt;
       imp.x -= ux * down; imp.y -= uy * down; imp.z -= uz * down;
     }
+    if (contacts === 0 && speed > 6) {
+      // En l'air : la voiture retombe plus vite qu'en vrai (moins de longs vols plats en haut des
+      // rampes) et se remet dans l'axe de sa trajectoire pour se recevoir à plat, sans planter le nez.
+      imp.y -= mass * 9.81 * AIR.extraGravity * dt;
+      const vx = lv.x / speed, vy = lv.y / speed, vz = lv.z / speed;
+      const sgn = vF >= 0 ? 1 : -1;
+      // rotation qui amène l'avant sur la vitesse : avant × vitesse
+      const cx = (fy * vz - fz * vy) * sgn, cy = (fz * vx - fx * vz) * sgn, cz = (fx * vy - fy * vx) * sgn;
+      // on ne garde que le tangage (autour de l'axe latéral) : le lacet reste au joueur
+      const pitchErr = cx * lx + cy * ly + cz * lz;
+      const pitchRate = av.x * lx + av.y * ly + av.z * lz;
+      const rollRate = av.x * fx + av.y * fy + av.z * fz;
+      const k = (pitchErr * AIR.align - pitchRate * AIR.damp) * this.inertiaY * dt;
+      const kr = -rollRate * AIR.damp * 0.5 * this.inertiaY * dt;
+      const tq = this.tmpTorque;
+      tq.x = lx * k + fx * kr; tq.y = ly * k + fy * kr; tq.z = lz * k + fz * kr;
+      body.applyTorqueImpulse(tq, true);
+      // Coussin de réception : à l'approche du sol on freine la chute petit à petit. Sans lui, une
+      // voiture qui retombe de haut s'enfonce dans la route en un pas de calcul et s'arrête net.
+      const ro = this.ray.origin, rd = this.ray.dir;
+      ro.x = p.x; ro.y = p.y; ro.z = p.z; rd.x = 0; rd.y = -1; rd.z = 0;
+      const hit = this.phys.world.castRayAndGetNormal(this.ray, AIR.cushionRange, true, undefined, undefined, undefined, body);
+      if (hit) {
+        const flip = hit.normal.y < 0 ? -1 : 1;
+        const nx = hit.normal.x * flip, ny = hit.normal.y * flip, nz = hit.normal.z * flip;
+        if (ny > 0.5) {
+          const closing = -(lv.x * nx + lv.y * ny + lv.z * nz);
+          const room = Math.max(0, hit.timeOfImpact * ny - 0.6);
+          const allowed = Math.sqrt(2 * AIR.cushionDecel * room) + AIR.touchdownSpeed;
+          if (closing > allowed) {
+            const k = mass * (closing - allowed);
+            imp.x += nx * k; imp.y += ny * k; imp.z += nz * k;
+          }
+        }
+      }
+    }
     body.applyImpulse(imp, true);
 
     // Accroche en drift : on rend à la voiture, au centre de masse (donc sans effet sur le lacet),
@@ -551,6 +606,8 @@ export class Vehicle {
       body.applyTorqueImpulse(tq, true);
     }
   }
+
+  private readonly bumpForce = [0, 0, 0, 0];
 
   /** À appeler juste après world.step() pour que le rendu ait l'état courant. */
   afterStep(): void {
