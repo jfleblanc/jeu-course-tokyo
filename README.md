@@ -20,6 +20,7 @@ Le numéro de version (hash du commit) est affiché en haut à droite.
 | Basculer conduite A ↔ B | `B` | `+` |
 | Replacer la voiture | `R` | clic du stick gauche |
 | Lancer une course / l'abandonner | `Entrée` / `Échap` | croix ↑ / croix ← |
+| Lancer un circuit à 3 tours | `T` | |
 | Musique suivante / musique oui-non | `N` / `P` | croix → / croix ↓ |
 | Afficher / masquer l'aide | `H` | |
 
@@ -80,6 +81,11 @@ sur les grands axes), place quatre voitures sur la grille et lance le décompte.
 marquent les points de passage, une colonne de lumière indique le prochain, et chaque virage
 marqué est annoncé par une flèche à l'écran et un panneau à chevrons sur place. On peut couper
 entre deux points de passage, mais pas en sauter un. Réglages : `src/config/race.ts`.
+
+`T` lance un circuit fermé à trois tours avec des adversaires 10 % plus rapides : ce sera
+l'épreuve des changements de palier. La mini-carte (en bas à droite) tourne avec la voiture et
+montre le tracé, le prochain point de passage et les adversaires. L'option d'adresse
+`?barrieres` affiche un aperçu des rues transversales barrées (désactivé par défaut).
 
 ## La ville
 

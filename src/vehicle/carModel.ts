@@ -117,8 +117,12 @@ export function createCarVisual(spec: CarSpec, options: CarVisualOptions = {}): 
   paint.colorNode = color(paintColor[0], paintColor[1], paintColor[2]);
   paint.metalnessNode = float(0.55);
   paint.roughnessNode = float(0.32);
-  paint.clearcoatNode = float(1.0);
-  paint.clearcoatRoughnessNode = float(0.06);
+  // Adversaires : vernis plus mat, sinon nos phares font une tache blanche sur leur coffre.
+  const glossy = options.lights !== false;
+  paint.metalnessNode = float(glossy ? 0.55 : 0.25);
+  paint.roughnessNode = float(glossy ? 0.32 : 0.55);
+  paint.clearcoatNode = float(glossy ? 1.0 : 0.2);
+  paint.clearcoatRoughnessNode = float(glossy ? 0.06 : 0.4);
 
   const dark = new THREE.MeshStandardNodeMaterial();
   dark.colorNode = color(0.018, 0.018, 0.02);

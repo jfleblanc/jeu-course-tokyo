@@ -1,6 +1,8 @@
 import type { Race } from '../race/race';
 import type { RouteTurn } from '../race/route';
 
+const IDLE_HINT = '<kbd>Entrée</kbd> course · <kbd>T</kbd> circuit à 3 tours';
+
 const fmtTime = (t: number): string => {
   const m = Math.floor(t / 60);
   const s = t - m * 60;
@@ -17,6 +19,7 @@ export class RaceHud {
   private readonly turn: HTMLElement;
   private readonly results: HTMLElement;
   private readonly hint: HTMLElement;
+  private readonly lap: HTMLElement;
   private timer = 0;
   private lastBig = '';
   private goTimer = 0;
@@ -29,6 +32,7 @@ export class RaceHud {
       <div class="hud race-big" data-r="big"></div>
       <div class="hud race-pos" data-r="pos"></div>
       <div class="hud race-info" data-r="info"></div>
+      <div class="hud race-lap" data-r="lap"></div>
       <div class="hud race-board" data-r="board"></div>
       <div class="hud race-turn" data-r="turn"></div>
       <div class="race-results" data-r="results"></div>
@@ -43,7 +47,8 @@ export class RaceHud {
     this.turn = q('turn');
     this.results = q('results');
     this.hint = q('hint');
-    this.hint.innerHTML = '<kbd>Entrée</kbd> lancer une course';
+    this.lap = q('lap');
+    this.hint.innerHTML = IDLE_HINT;
   }
 
   private setBig(text: string): void {
@@ -63,7 +68,7 @@ export class RaceHud {
       this.setBig('');
       this.results.classList.remove('on');
       this.resultsShown = false;
-      this.hint.innerHTML = '<kbd>Entrée</kbd> lancer une course';
+      this.hint.innerHTML = IDLE_HINT;
       return;
     }
     const route = race.route;
@@ -79,7 +84,7 @@ export class RaceHud {
       this.goTimer -= dt;
       this.setBig(this.goTimer > 0 ? 'GO !' : '');
     }
-    this.hint.innerHTML = race.phase === 'finished' ? '<kbd>Entrée</kbd> nouvelle course · <kbd>Échap</kbd> balade libre' : '<kbd>Échap</kbd> abandonner';
+    this.hint.innerHTML = race.phase === 'finished' ? '<kbd>Entrée</kbd> course · <kbd>T</kbd> circuit · <kbd>Échap</kbd> balade libre' : '<kbd>Échap</kbd> abandonner';
 
     // — Prochain virage : flèche + distance —
     let next: RouteTurn | null = null;
@@ -108,6 +113,7 @@ export class RaceHud {
     const ranking = race.ranking();
     const place = ranking.indexOf(player) + 1;
     this.pos.innerHTML = `<b>${place}</b><span>/${ranking.length}</span>`;
+    this.lap.textContent = route.laps > 1 ? `TOUR ${race.lapOf(player)}/${route.laps}` : '';
     const remaining = Math.max(0, route.length - player.progress);
     this.info.innerHTML = `${fmtTime(race.time)}<small>point ${Math.min(player.nextCheckpoint + (player.finished ? 0 : 1), route.checkpoints.length)}/${route.checkpoints.length} · ${(remaining / 1000).toFixed(2)} km</small>`;
     this.board.innerHTML = ranking
@@ -120,7 +126,7 @@ export class RaceHud {
     if (race.phase === 'finished' && !this.resultsShown) {
       this.resultsShown = true;
       const medal = ['1re place !', '2e place', '3e place', '4e place'][place - 1] ?? `${place}e place`;
-      this.results.innerHTML = `<h2>${medal}</h2><div class="time">${fmtTime(player.finishTime)}</div><div class="list" data-r="list"></div><p><kbd>Entrée</kbd> nouvelle course &nbsp; <kbd>Échap</kbd> balade libre</p>`;
+      this.results.innerHTML = `<h2>${medal}</h2><div class="time">${fmtTime(player.finishTime)}</div><div class="list" data-r="list"></div><p><kbd>Entrée</kbd> course &nbsp; <kbd>T</kbd> circuit &nbsp; <kbd>Échap</kbd> balade libre</p>`;
       this.results.classList.add('on');
     }
     if (this.resultsShown) {

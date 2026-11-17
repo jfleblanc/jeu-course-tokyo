@@ -44,6 +44,8 @@ export class Race {
   countdown = 0;
   /** Incrémenté à chaque départ : le rendu sait qu'il doit reconstruire le décor de course. */
   generation = 0;
+  /** Multiplicateur de niveau des adversaires (1 = normal). */
+  difficulty = 1;
   private readonly hold: DriveInput = emptyDriveInput();
 
   constructor(
@@ -64,9 +66,11 @@ export class Race {
   }
 
   /** Lance une nouvelle course sur un tracé tiré au sort. Renvoie faux si aucun tracé n'a pu être généré. */
-  start(seed: number): boolean {
+  start(seed: number, options: { laps?: number; lapLength?: number; difficulty?: number } = {}): boolean {
     this.stop();
-    const route = generateRoute(this.graph, seed);
+    const laps = options.laps ?? 1;
+    const route = laps > 1 ? generateRoute(this.graph, seed, options.lapLength ?? RACE.circuit.lapLength, laps) : generateRoute(this.graph, seed);
+    this.difficulty = options.difficulty ?? 1;
     if (!route) return false;
     this.route = route;
     const pts = route.points;
@@ -145,7 +149,7 @@ export class Race {
           const t = clamp(gap / RUBBER_BAND.distance, -1, 1);
           factor = t > 0 ? 1 - RUBBER_BAND.maxSlow * t : 1 - RUBBER_BAND.maxBoost * t;
         }
-        driveAlongRoute(r.car, route, r.index, r.level, factor, r.lane, r.input);
+        driveAlongRoute(r.car, route, r.index, r.level, factor * this.difficulty, r.lane, r.input);
       }
       r.car.update(dt, r.input, cfg);
     }
@@ -209,6 +213,13 @@ export class Race {
     }
     const player = this.player;
     if (player?.finished && this.phase === 'running') this.phase = 'finished';
+  }
+
+  /** Tour en cours d'un pilote (1 = premier tour). */
+  lapOf(r: Racer): number {
+    const route = this.route;
+    if (!route) return 1;
+    return Math.min(route.laps, Math.floor(r.index / route.lapPoints) + 1);
   }
 
   /** Classement en direct : arrivés d'abord (par temps), puis par distance parcourue. */

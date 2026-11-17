@@ -86,10 +86,12 @@ html, body { margin: 0; height: 100%; background: #07060f; color: var(--txt); ov
 .race-big { left: 50%; top: 30%; transform: translate(-50%, -50%); font-size: 150px; font-weight: 900; color: #fff; text-shadow: 0 0 30px var(--cyan), 0 0 80px var(--magenta); }
 .race-big.pop { animation: racepop 0.9s ease-out; }
 @keyframes racepop { from { transform: translate(-50%, -50%) scale(1.6); opacity: 0.2; } 30% { opacity: 1; } to { transform: translate(-50%, -50%) scale(1); } }
-.race-pos { right: 28px; bottom: 28px; text-align: right; }
+.race-pos { right: 250px; bottom: 26px; text-align: right; }
 .race-pos b { font-size: 84px; font-weight: 900; line-height: 0.9; color: var(--amber); text-shadow: 0 0 18px rgba(255, 176, 46, 0.6); }
 .race-pos span { font-size: 30px; color: var(--dim); font-weight: 700; }
-.race-info { right: 28px; bottom: 122px; text-align: right; font: 600 26px ui-monospace, Menlo, monospace; }
+.race-info { right: 250px; bottom: 118px; text-align: right; font: 600 26px ui-monospace, Menlo, monospace; }
+#minimap { position: fixed; right: 18px; bottom: 18px; z-index: 10; pointer-events: none; border-radius: 50%; }
+.race-lap { right: 250px; bottom: 176px; text-align: right; font-size: 15px; letter-spacing: 0.12em; color: var(--cyan); font-weight: 700; }
 .race-info small { display: block; font: 12px ui-sans-serif, system-ui, sans-serif; color: var(--dim); margin-top: 2px; }
 .race-board { left: 20px; top: 50%; transform: translateY(-50%); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 6px 4px; min-width: 215px; font-size: 14px; }
 .race-board div, .race-results .list div { display: grid; grid-template-columns: 26px 1fr auto; gap: 8px; padding: 4px 10px; align-items: center; }

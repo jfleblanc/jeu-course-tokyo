@@ -223,10 +223,15 @@ async function cityTest() {
     for (let sd = 1; sd <= 40; sd++) { const r = generateRoute(city.graph, sd * 101); if (r) { ok++; lens.push(r.length); turns.push(r.turns.length); } }
     console.log(`tracés: ${ok}/40 générés, longueur ${Math.min(...lens).toFixed(0)}–${Math.max(...lens).toFixed(0)} m, virages fléchés ${Math.min(...turns)}–${Math.max(...turns)}`);
     (globalThis as any).TRACE_RACE = !!process.env.TRACE_RACE;
-    for (const seed of [7, 4242, 990017]) {
+    {
+      let okC = 0; const lapLens: number[] = [];
+      for (let sd = 1; sd <= 40; sd++) { const r = generateRoute(city.graph, sd * 53, 950, 3); if (r) { okC++; lapLens.push(r.lapLength); } }
+      console.log(`circuits: ${okC}/40 générés, tour de ${Math.min(...lapLens).toFixed(0)}–${Math.max(...lapLens).toFixed(0)} m`);
+    }
+    for (const seed of [7, 4242, 990017, -5, -77]) {
       const me = mk(0, 0, 0);
       const race = new Race(phys, city.graph, CAR_SPEC, me);
-      race.start(seed);
+      if (seed < 0) race.start(-seed * 1000, { laps: 3, difficulty: 1.1 }); else race.start(seed);
       const route = race.route!;
       let steps = 0;
       const idle = emptyDriveInput(); idle.brake = 1;
@@ -238,7 +243,7 @@ async function cityTest() {
         race.afterStep(FIXED_DT);
         steps++;
       }
-      console.log(`course graine ${seed}: tracé ${route.length.toFixed(0)} m, ${route.checkpoints.length} points de passage, ${route.turns.length} virages fléchés — ` + race.racers.filter((r) => !r.isPlayer).map((r) => `${r.name.split(' ')[0]} ${r.finished ? r.finishTime.toFixed(1) + ' s (' + ((route.length / r.finishTime) * 3.6).toFixed(0) + ' km/h moy.)' : 'NON ARRIVÉ à ' + r.progress.toFixed(0) + ' m'}, ${r.resets} replacement(s)`).join(' ; '));
+      console.log(`${route.laps > 1 ? 'CIRCUIT ' + route.laps + ' tours de ' + route.lapLength.toFixed(0) + ' m' : 'course'} graine ${seed}: tracé ${route.length.toFixed(0)} m, ${route.checkpoints.length} points de passage, ${route.turns.length} virages fléchés — ` + race.racers.filter((r) => !r.isPlayer).map((r) => `${r.name.split(' ')[0]} ${r.finished ? r.finishTime.toFixed(1) + ' s (' + ((route.length / r.finishTime) * 3.6).toFixed(0) + ' km/h moy.)' : 'NON ARRIVÉ à ' + r.progress.toFixed(0) + ' m'}, ${r.resets} replacement(s)`).join(' ; '));
       race.stop();
       phys.world.removeRigidBody(me.body);
     }

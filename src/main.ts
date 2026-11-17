@@ -1,5 +1,6 @@
 import * as THREE from 'three/webgpu';
 import { CAR_SPEC } from './config/handling';
+import { RACE } from './config/race';
 import { QUALITY, type Quality } from './config/render';
 import { WORLD } from './config/world';
 import { MusicPlayer } from './audio/musicPlayer';
@@ -14,6 +15,7 @@ import { createCityMaterials } from './render/materials';
 import { createRenderer, type RenderContextInternal } from './render/renderer';
 import { AbPanel } from './ui/abPanel';
 import { Hud } from './ui/hud';
+import { Minimap } from './ui/minimap';
 import { RaceHud } from './ui/raceHud';
 import { createCarVisual, syncCarVisual } from './vehicle/carModel';
 import { REST_HEIGHT, Vehicle } from './vehicle/vehicle';
@@ -123,7 +125,9 @@ async function boot(): Promise<void> {
 
   // ——— Course ———
   const race = new Race(phys, city.graph, CAR_SPEC, car);
-  const raceVisuals = new RaceVisuals(scene, mats, city.graph);
+  // ?barrieres : aperçu des rues transversales barrées (désactivé par défaut).
+  const raceVisuals = new RaceVisuals(scene, mats, city.graph, params.has('barrieres'));
+  const minimap = new Minimap(city);
   const raceHud = new RaceHud();
 
   const respawn = (): void => {
@@ -176,6 +180,12 @@ async function boot(): Promise<void> {
           else hud.toast('Impossible de tracer une course');
         }
         break;
+      case 'circuitStart':
+        if (race.phase === 'idle' || race.phase === 'finished') {
+          if (race.start(Math.floor(Math.random() * 1e9), RACE.circuit)) hud.toast(`Circuit : ${RACE.circuit.laps} tours`);
+          else hud.toast('Impossible de tracer un circuit');
+        }
+        break;
       case 'raceQuit':
         if (race.active) {
           const wasFinished = race.phase === 'finished';
@@ -222,6 +232,7 @@ async function boot(): Promise<void> {
       sky.position.copy(camera.position);
       raceVisuals.update(race, alpha);
       raceHud.update(frameDt, race);
+      minimap.update(frameDt, car, race);
       hud.update(frameDt, car, CAR_SPEC.redlineRpm);
 
       panel.update(frameDt, car, input, perfText);

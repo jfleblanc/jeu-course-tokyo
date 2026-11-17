@@ -2,6 +2,8 @@
 export const RACE = {
   /** Longueur visée d'un tracé (m) : environ 1 min 30 à 2 min. */
   targetLength: 2700,
+  /** Circuit à plusieurs tours (épreuve plus difficile, pensée pour les changements de palier). */
+  circuit: { lapLength: 950, laps: 3, difficulty: 1.1 },
   /** Distance entre deux points de passage (m). */
   checkpointSpacing: 170,
   /** Rayon dans lequel on « tient » la trajectoire (m) : au-delà, la progression ne compte plus. */

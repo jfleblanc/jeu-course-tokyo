@@ -29,6 +29,13 @@ export interface RouteTurn {
 export interface Route {
   seed: number;
   edges: number[];
+  /** Carrefours traversés, dans l'ordre (sert à savoir quelles rues transversales barrer). */
+  nodes: number[];
+  /** Nombre de tours (1 = course d'un point à un autre). */
+  laps: number;
+  /** Nombre de points d'un tour ; les points sont répétés pour chaque tour. */
+  lapPoints: number;
+  lapLength: number;
   points: RoutePoint[];
   length: number;
   /** Indices des points de passage ; le dernier est l'arrivée. */
@@ -94,13 +101,137 @@ function walk(graph: StreetGraph, rng: Rng, target: number): { edges: number[]; 
   return { edges, forward: dirs };
 }
 
-/** Génère un tracé. Renvoie null seulement si le réseau ne permet vraiment aucun parcours. */
-export function generateRoute(graph: StreetGraph, seed: number, target: number = RACE.targetLength): Route | null {
+/** Rue suivante possible depuis un carrefour : pas de demi-tour, pas de carrefour déjà traversé. */
+function optionsAt(graph: StreetGraph, cur: GraphEdge, forward: boolean, visited: Set<number>): { e: GraphEdge; fwd: boolean; cos: number }[] {
+  const p: PathPoint = { x: 0, z: 0, tx: 1, tz: 0 };
+  const nodeId = forward ? cur.b : cur.a;
+  const node = graph.nodes[nodeId] as GraphNode;
+  pointAt(cur, forward ? cur.length - 6 : 6, p);
+  const inx = forward ? p.tx : -p.tx, inz = forward ? p.tz : -p.tz;
+  const out: { e: GraphEdge; fwd: boolean; cos: number }[] = [];
+  for (const eid of node.edges) {
+    if (eid === cur.id) continue;
+    const e = graph.edges[eid] as GraphEdge;
+    const fwd = e.a === nodeId;
+    if (visited.has(fwd ? e.b : e.a)) continue;
+    pointAt(e, fwd ? 6 : e.length - 6, p);
+    const cos = inx * (fwd ? p.tx : -p.tx) + inz * (fwd ? p.tz : -p.tz);
+    if (cos < -0.35) continue;
+    out.push({ e, fwd, cos });
+  }
+  return out;
+}
+
+/**
+ * Circuit fermé : on part du milieu d'une avenue, on s'éloigne au hasard sur la moitié de la
+ * longueur visée, puis on revient au point de départ par le plus court chemin encore libre.
+ */
+function walkLoop(graph: StreetGraph, rng: Rng, target: number): { edges: number[]; forward: boolean[] } | null {
+  const candidates = graph.edges.filter((e) => e.kind === 'avenue' && !e.onRing && e.length - e.trimA - e.trimB > 90);
+  if (candidates.length === 0) return null;
+  const first = rng.pick(candidates);
+  let forward = rng.chance(0.5);
+  const startNode = forward ? first.a : first.b;
+  const edges = [first.id];
+  const dirs = [forward];
+  const visited = new Set<number>([forward ? first.b : first.a, startNode]);
+  let length = first.length;
+  let cur: GraphEdge = first;
+  while (length < target * 0.5) {
+    const opts = optionsAt(graph, cur, forward, visited);
+    if (opts.length === 0) return null;
+    let total = 0;
+    const weights = opts.map((o) => KIND_WEIGHT[o.e.kind] * (o.cos > 0.9 ? 0.8 : 1.3));
+    for (const w of weights) total += w;
+    let r = rng.next() * total;
+    let pick = 0;
+    for (let k = 0; k < opts.length; k++) {
+      r -= weights[k] as number;
+      if (r <= 0) {
+        pick = k;
+        break;
+      }
+    }
+    const chosen = opts[pick] as (typeof opts)[number];
+    cur = chosen.e;
+    forward = chosen.fwd;
+    visited.add(forward ? cur.b : cur.a);
+    edges.push(cur.id);
+    dirs.push(forward);
+    length += cur.length;
+  }
+  // Retour : plus court chemin vers le carrefour de départ, sans repasser par un carrefour déjà pris.
+  visited.delete(startNode);
+  const from = forward ? cur.b : cur.a;
+  const dist = new Map<number, number>([[from, 0]]);
+  const prev = new Map<number, { edge: GraphEdge; fwd: boolean; node: number }>();
+  const open = new Set<number>([from]);
+  while (open.size) {
+    let best = -1, bd = Infinity;
+    for (const id of open) {
+      const d = dist.get(id) as number;
+      if (d < bd) {
+        bd = d;
+        best = id;
+      }
+    }
+    open.delete(best);
+    if (best === startNode) break;
+    for (const eid of (graph.nodes[best] as GraphNode).edges) {
+      const e = graph.edges[eid] as GraphEdge;
+      if (eid === first.id || (best === from && eid === cur.id)) continue;
+      const fwd = e.a === best;
+      const other = fwd ? e.b : e.a;
+      if (visited.has(other) && other !== startNode) continue;
+      if (other === from) continue;
+      // Les petites rues coûtent un peu plus cher : le retour préfère les grands axes.
+      const nd = bd + e.length * (e.kind === 'alley' ? 1.5 : e.kind === 'street' ? 1.15 : 1);
+      if (nd < (dist.get(other) ?? Infinity)) {
+        dist.set(other, nd);
+        prev.set(other, { edge: e, fwd, node: best });
+        open.add(other);
+      }
+    }
+  }
+  if (!prev.has(startNode)) return null;
+  const back: { edge: GraphEdge; fwd: boolean }[] = [];
+  let at = startNode;
+  while (at !== from) {
+    const step = prev.get(at);
+    if (!step) return null;
+    back.unshift({ edge: step.edge, fwd: step.fwd });
+    at = step.node;
+  }
+  for (const b of back) {
+    edges.push(b.edge.id);
+    dirs.push(b.fwd);
+    length += b.edge.length;
+  }
+  if (length < target * 0.8 || length > target * 1.3) return null;
+  // Aucun virage en épingle sur le retour, ni en revenant sur la rue de départ.
+  const p: PathPoint = { x: 0, z: 0, tx: 1, tz: 0 };
+  for (let k = 0; k < edges.length; k++) {
+    const a = graph.edges[edges[k] as number] as GraphEdge, af = dirs[k] as boolean;
+    const b = graph.edges[edges[(k + 1) % edges.length] as number] as GraphEdge, bf = dirs[(k + 1) % edges.length] as boolean;
+    pointAt(a, af ? a.length - 6 : 6, p);
+    const ax = af ? p.tx : -p.tx, az = af ? p.tz : -p.tz;
+    pointAt(b, bf ? 6 : b.length - 6, p);
+    if (ax * (bf ? p.tx : -p.tx) + az * (bf ? p.tz : -p.tz) < -0.35) return null;
+  }
+  return { edges, forward: dirs };
+}
+
+/**
+ * Génère un tracé. Avec `laps` > 1, c'est un circuit fermé de `target` mètres par tour.
+ * Renvoie null seulement si le réseau ne permet vraiment aucun parcours.
+ */
+export function generateRoute(graph: StreetGraph, seed: number, target: number = RACE.targetLength, laps = 1): Route | null {
+  const closed = laps > 1;
   let found: { edges: number[]; forward: boolean[] } | null = null;
   let used = seed;
   for (let attempt = 0; attempt < 300 && !found; attempt++) {
     used = seed + attempt * 7919;
-    found = walk(graph, new Rng(used), target);
+    found = closed ? walkLoop(graph, new Rng(used), target) : walk(graph, new Rng(used), target);
   }
   if (!found) return null;
 
@@ -111,9 +242,9 @@ export function generateRoute(graph: StreetGraph, seed: number, target: number =
     const e = graph.edges[eid] as GraphEdge;
     const fwd = found.forward[k] as boolean;
     const last = k === found.edges.length - 1;
-    const from = fwd ? e.trimA : e.length - e.trimB;
-    // La dernière rue s'arrête en son milieu : c'est l'arrivée.
-    const to = last ? e.length / 2 : fwd ? e.length - e.trimB : e.trimA;
+    // Circuit : on part du milieu de la première rue. Sinon : la dernière rue s'arrête en son milieu (arrivée).
+    const from = closed && k === 0 ? e.length / 2 : fwd ? e.trimA : e.length - e.trimB;
+    const to = !closed && last ? e.length / 2 : fwd ? e.length - e.trimB : e.trimA;
     const span = Math.abs(to - from);
     const steps = Math.max(1, Math.round(span / 4));
     // Sur le boulevard, le milieu est occupé par les piliers de l'autoroute :
@@ -124,6 +255,21 @@ export function generateRoute(graph: StreetGraph, seed: number, target: number =
       const dx = fwd ? p.tx : -p.tx, dz = fwd ? p.tz : -p.tz;
       raw.push(p.x + dz * side, p.z - dx * side);
     }
+  });
+  if (closed) {
+    // Fin du tour : on revient sur la première rue, jusqu'à son milieu.
+    const e = graph.edges[found.edges[0] as number] as GraphEdge;
+    const fwd = found.forward[0] as boolean;
+    const from = fwd ? e.trimA : e.length - e.trimB;
+    const steps = Math.max(1, Math.round(Math.abs(e.length / 2 - from) / 4));
+    for (let q = 0; q <= steps; q++) {
+      pointAt(e, from + ((e.length / 2 - from) * q) / steps, p);
+      raw.push(p.x, p.z);
+    }
+  }
+  const nodes: number[] = found.edges.map((eid, k) => {
+    const e = graph.edges[eid] as GraphEdge;
+    return (found.forward[k] as boolean) ? e.b : e.a;
   });
   // 2. Rééchantillonnage régulier puis lissage : les angles des carrefours deviennent des courbes.
   const resample = (pts: number[]): number[] => {
@@ -212,5 +358,21 @@ export function generateRoute(graph: StreetGraph, seed: number, target: number =
       k++;
     }
   }
-  return { seed: used, edges: found.edges, points, length, checkpoints, turns };
+  // 6. Circuit : on répète les points, les points de passage et les virages pour chaque tour.
+  const lapPoints = n;
+  if (closed) {
+    const lapCheckpoints = checkpoints.slice();
+    const lapTurns = turns.slice();
+    for (let lap = 1; lap < laps; lap++) {
+      const off = points.length;
+      const sOff = length * lap;
+      for (let q = 0; q < n; q++) {
+        const src = points[q] as RoutePoint;
+        points.push({ ...src, s: src.s + sOff });
+      }
+      for (const c of lapCheckpoints) checkpoints.push(c + off);
+      for (const t of lapTurns) turns.push({ index: t.index + off, s: t.s + sOff, angle: t.angle });
+    }
+  }
+  return { seed: used, edges: found.edges, nodes, laps: closed ? laps : 1, lapPoints, lapLength: length, points, length: length * (closed ? laps : 1), checkpoints, turns };
 }

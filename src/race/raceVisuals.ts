@@ -3,7 +3,7 @@ import { CAR_SPEC } from '../config/handling';
 import { GeomBuilder, type Vec3 } from '../render/geomBuilder';
 import type { CityMaterials } from '../render/materials';
 import { createCarVisual, syncCarVisual, type CarVisual } from '../vehicle/carModel';
-import type { StreetGraph } from '../world/streetGraph';
+import { pointAt, type PathPoint, type StreetGraph } from '../world/streetGraph';
 import type { Race } from './race';
 import type { Route, RoutePoint } from './route';
 
@@ -28,6 +28,8 @@ export class RaceVisuals {
     scene: THREE.Scene,
     private readonly mats: CityMaterials,
     private readonly graph: StreetGraph,
+    /** Aperçu : barrer les rues transversales le long du tracé. */
+    private readonly barriers = false,
   ) {
     this.group.name = 'course';
     scene.add(this.group);
@@ -70,10 +72,11 @@ export class RaceVisuals {
     // — Portiques des points de passage (le dernier = arrivée) —
     this.halfWidths = [];
     route.checkpoints.forEach((idx, k) => {
+      if (idx >= route.lapPoints) return; // circuit : les portiques du premier tour servent à tous les tours
       const p = pts[idx] as RoutePoint;
       const half = Math.min(15, this.halfWidthAt(route, p)) + 0.8;
       this.halfWidths.push(half);
-      const last = k === route.checkpoints.length - 1;
+      const last = route.laps > 1 ? idx === route.lapPoints - 1 : k === route.checkpoints.length - 1;
       const yaw = Math.atan2(p.tx, p.tz);
       const color = last ? MAGENTA : CYAN;
       const h = last ? 7 : 6;
@@ -92,6 +95,7 @@ export class RaceVisuals {
 
     // — Panneaux à chevrons : placés dans l'axe d'arrivée, juste après le virage, face au pilote —
     for (const t of route.turns) {
+      if (t.index >= route.lapPoints) continue;
       const before = pts[Math.max(0, t.index - 8)] as RoutePoint;
       const apex = pts[t.index] as RoutePoint;
       const ix = before.tx, iz = before.tz; // direction d'arrivée
@@ -114,6 +118,44 @@ export class RaceVisuals {
         const P = (u: number, v: number): Vec3 => [cx + ux * u + fx, 1.55 + v, cz + uz * u + fz];
         for (const sgn of [1, -1]) {
           glow.quad(P(u0 - 0.5, sgn * 0.62), P(u0 - 0.12, sgn * 0.62), P(u0 + 0.52, 0), P(u0 + 0.14, 0), n, 0, 0, 1, 1, color, [1, 3, 1, 1.5]);
+        }
+      }
+    }
+
+    // — Aperçu « rues barrées » : une rangée de barrières à l'entrée de chaque rue qui quitte le tracé —
+    if (this.barriers) {
+      const used = new Set(route.edges);
+      const pp: PathPoint = { x: 0, z: 0, tx: 1, tz: 0 };
+      for (const nodeId of route.nodes) {
+        const node = this.graph.nodes[nodeId];
+        if (!node) continue;
+        for (const eid of node.edges) {
+          if (used.has(eid)) continue;
+          const e = this.graph.edges[eid];
+          if (!e) continue;
+          const fromA = e.a === nodeId;
+          const trim = fromA ? e.trimA : e.trimB;
+          pointAt(e, fromA ? trim + 2.5 : e.length - trim - 2.5, pp);
+          const yaw = Math.atan2(pp.tx, pp.tz);
+          const span = e.width + 1.5;
+          const count = Math.max(2, Math.round(span / 2.4));
+          const unit = span / count;
+          for (let k = 0; k < count; k++) {
+            const off = (k + 0.5) * unit - span / 2;
+            const x = pp.x + pp.tz * off, z = pp.z - pp.tx * off;
+            // Deux pieds, deux lisses rayées rouge et blanc, un feu orange sur une barrière sur deux.
+            for (const lx of [-unit * 0.4, unit * 0.4]) solid.box(x + pp.tz * lx, 0.55, z - pp.tx * lx, 0.1, 1.1, 0.5, yaw, DARK);
+            const stripes = 6;
+            const sw = (unit * 0.94) / stripes;
+            for (const y of [0.95, 0.5]) {
+              for (let q = 0; q < stripes; q++) {
+                const so = (q + 0.5) * sw - (unit * 0.94) / 2;
+                const red = (q + k) % 2 === 0;
+                glow.box(x + pp.tz * so, y, z - pp.tx * so, sw, 0.26, 0.07, yaw, red ? [1, 0.08, 0.05] : [1, 1, 1], [1, 3, 1, red ? 1.3 : 0.7], true, true);
+              }
+            }
+            if (k % 2 === 0) glow.box(x, 1.28, z, 0.22, 0.22, 0.22, yaw, [1, 0.55, 0.05], [k + 3, 5, 1, 1], true, true);
+          }
         }
       }
     }

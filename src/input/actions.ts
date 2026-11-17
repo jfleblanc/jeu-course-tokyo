@@ -36,6 +36,7 @@ export type ActionEvent =
   | 'musicNext'
   | 'musicToggle'
   | 'raceStart'
+  | 'circuitStart'
   | 'raceQuit';
 
 export const emptyDriveInput = (): DriveInput => ({
