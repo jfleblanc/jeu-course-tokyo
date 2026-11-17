@@ -99,6 +99,7 @@ export class Race {
   events: RaceEvent[] = [];
   private cashValue = 0;
   private readonly hold: DriveInput = emptyDriveInput();
+  private readonly idle: DriveInput = emptyDriveInput();
 
   constructor(
     private readonly phys: PhysicsWorld,
@@ -195,7 +196,10 @@ export class Race {
 
   /** Commandes effectives du joueur : bloquées pendant le décompte. */
   playerInput(raw: DriveInput): DriveInput {
-    return this.phase === 'countdown' ? this.hold : raw;
+    if (this.phase !== 'countdown') return raw;
+    // Sur la grille : seul l'accélérateur passe (pour faire monter le moteur, voiture tenue).
+    this.hold.throttle = raw.throttle;
+    return this.hold;
   }
 
   /** À appeler dans le pas fixe, AVANT world.step() : fait conduire les adversaires. */
@@ -210,7 +214,7 @@ export class Race {
     for (const r of this.racers) {
       if (r.isPlayer || !r.level) continue;
       if (this.phase === 'countdown') {
-        r.car.update(dt, this.hold, cfg);
+        r.car.update(dt, this.idle, cfg);
         continue;
       }
       if (r.finished) {

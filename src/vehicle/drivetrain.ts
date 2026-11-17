@@ -60,6 +60,19 @@ export class Drivetrain {
   }
 
   /**
+   * Moteur débrayé (voiture tenue à l'arrêt) : le régime suit librement l'accélérateur, avec le
+   * rupteur qui fait « ratatouiller » en haut. Aucune force aux roues.
+   */
+  rev(dt: number, throttle: number): number {
+    const s = this.spec;
+    let target = s.idleRpm + throttle * (s.redlineRpm + 250 - s.idleRpm);
+    if (throttle > 0.85 && this.rpm > s.redlineRpm - 80) target = s.redlineRpm - 900;
+    this.rpm += (target - this.rpm) * Math.min(1, dt * (target > this.rpm ? 8 : 5));
+    this.shiftTimer = 0;
+    return 0;
+  }
+
+  /**
    * @param wheelSpeed vitesse longitudinale moyenne des roues motrices (m/s, + = avant)
    * @param throttle 0..1
    * @param sliding vrai si la voiture glisse fort (on retarde alors la boîte auto)

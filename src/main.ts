@@ -4,7 +4,7 @@ import { CAR_SPEC, PRESET_A, type HandlingConfig } from './config/handling';
 import { TIER_TRIAL, aiDifficulty } from './config/progression';
 import { PlayerState } from './progression/playerState';
 import { GarageMenu } from './ui/garageMenu';
-import { CAR_MATCH, RACE } from './config/race';
+import { CAR_MATCH, LAUNCH, RACE } from './config/race';
 import { QUALITY, type Quality } from './config/render';
 import { WORLD } from './config/world';
 import { MusicPlayer } from './audio/musicPlayer';
@@ -309,6 +309,7 @@ async function boot(): Promise<void> {
   let raceKind: 'course' | 'circuit' | 'palier' = 'course';
   let lastPhase = race.phase;
   let nosCharge: number = NOS.seconds;
+  let wasCountdown = false, launchTimer = 0, launchFactor = 1;
   const tuned: HandlingConfig = { ...PRESET_A };
   // Quartiers extérieurs : fermés par une barrière de chantier jusqu'au niveau requis.
   // ?quartiers=ouverts les ouvre tous (essais).
@@ -566,7 +567,24 @@ async function boot(): Promise<void> {
       // NOS : surpuissance tant qu'il en reste ; se recharge seulement en balade libre.
       const hasNos = player.car.nos;
       const boosting = hasNos && input.drive.nos && nosCharge > 0 && input.drive.throttle > 0.2 && race.phase !== 'countdown';
-      car.powerBoost = boosting ? NOS.boost : 1;
+      // Départ : voiture tenue pendant le décompte ; au « GO », on juge le régime.
+      car.launchHold = race.phase === 'countdown';
+      if (wasCountdown && race.phase === 'running') {
+        const f = car.drivetrain.rpm / CAR_SPEC.redlineRpm;
+        if (f >= LAUNCH.low && f <= LAUNCH.high) {
+          launchTimer = LAUNCH.seconds; launchFactor = LAUNCH.boost;
+          const v = car.body.linvel();
+          car.body.setLinvel({ x: v.x + Math.sin(car.yaw) * LAUNCH.kick, y: v.y, z: v.z + Math.cos(car.yaw) * LAUNCH.kick }, true);
+          hud.toast('Départ canon !');
+        } else if (f > LAUNCH.high) {
+          launchTimer = LAUNCH.spinSeconds; launchFactor = LAUNCH.spin;
+          hud.toast('Trop de régime : ça patine !');
+        }
+      }
+      if (race.phase === 'countdown' && !wasCountdown) hud.toast('Faites monter le moteur : aux trois quarts du compte-tours au GO = départ canon');
+      wasCountdown = race.phase === 'countdown';
+      launchTimer = Math.max(0, launchTimer - dt);
+      car.powerBoost = (boosting ? NOS.boost : 1) * (launchTimer > 0 ? launchFactor : 1);
       if (boosting) nosCharge = Math.max(0, nosCharge - dt);
       else if (hasNos && !race.active) nosCharge = Math.min(NOS.seconds, nosCharge + NOS.refill * dt);
       player.applyTo(store.current, tuned);

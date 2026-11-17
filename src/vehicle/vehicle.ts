@@ -303,6 +303,12 @@ export class Vehicle {
       }
     }
     this.reversing = dt_.gear === -1;
+    // Voiture tenue à l'arrêt : sur la grille pendant le décompte, ou frein à main serré à
+    // l'arrêt. Le moteur est débrayé — on peut le faire monter en régime — et les freins serrés.
+    const parked = this.launchHold || (input.drift && planar < 1.2);
+    this.parked = parked;
+    const revThrottle = Math.max(input.throttle, 0);
+    if (parked) { throttleCmd = 0; brakeCmd = 1; }
 
     // ——— Lissage des commandes (gâchettes numériques, clavier) ———
     this.throttle = moveToward(this.throttle, throttleCmd, dt / (throttleCmd > this.throttle ? cfg.throttleRise : 0.12));
@@ -424,7 +430,7 @@ export class Vehicle {
     // une partie des gaz pour qu'elle se remette en ligne au lieu de tourner en rond.
     const slideExcess = clamp((Math.abs(this.bodySlip) - 0.2) / 0.3, 0, 1) * (1 - this.driftAmount);
     const powerCut = 1 - cfg.tractionControl * slideExcess * (vF > 0 ? 1 : 0);
-    const driveForce = dt_.update(dt, vF, this.throttle * powerCut, cfg.enginePower * this.powerBoost * mr, cfg.engineBrake * mr, sliding);
+    const driveForce = parked ? dt_.rev(dt, revThrottle) : dt_.update(dt, vF, this.throttle * powerCut, cfg.enginePower * this.powerBoost * mr, cfg.engineBrake * mr, sliding);
     // Répartition du couple : propulsion, traction ou intégrale.
     const driveFront = this.traits.driveFront;
     const rearContacts = (rl.inContact ? 1 : 0) + (rr.inContact ? 1 : 0);
@@ -623,6 +629,12 @@ export class Vehicle {
         body.applyTorqueImpulse(tq, true);
       }
     }
+    if (parked && contacts >= 2) {
+      // Tenue à l'arrêt : on efface ce qui reste de mouvement (pente, poussée légère).
+      const k = -Math.min(1, 10 * dt) * mass;
+      imp.x = lv.x * k; imp.y = 0; imp.z = lv.z * k;
+      body.applyImpulse(imp, true);
+    }
     if (contacts >= 1) {
       // Anti-tonneau : au-delà de quelques degrés de roulis (appui contre une glissière, bordure
       // prise de travers), on redresse la caisse et on freine sa rotation. En conduite normale
@@ -664,6 +676,10 @@ export class Vehicle {
   }
 
   private readonly bumpForce = [0, 0, 0, 0];
+  /** Tenue sur la grille de départ (décompte) : moteur débrayé, freins serrés. */
+  launchHold = false;
+  /** Vrai quand la voiture est tenue à l'arrêt (grille ou frein à main). */
+  parked = false;
   /** Vrai quand la voiture frotte une glissière (pour le son, les étincelles). */
   scraping = false;
   private readonly railCar: RailCar = { x: 0, y: 0, z: 0, fx: 0, fz: 1, halfWidth: 0.88, halfLength: 2.12, vx: 0, vz: 0 };

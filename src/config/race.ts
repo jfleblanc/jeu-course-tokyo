@@ -108,6 +108,22 @@ export const PICKUPS = {
  */
 export const CAR_MATCH = { power: 0.9, grip: 0.85, topSpeed: 0.3 } as const;
 
+/**
+ * Départ : pendant le décompte on peut faire monter le moteur. Au « GO », si le régime est dans
+ * la bonne plage (part du régime maxi), départ canon ; au-dessus, les roues patinent.
+ */
+export const LAUNCH = {
+  low: 0.58,
+  high: 0.86,
+  /** Départ canon : puissance multipliée pendant `seconds`, plus un élan immédiat (m/s). */
+  boost: 1.35,
+  seconds: 1.8,
+  kick: 3,
+  /** Trop de régime : puissance réduite pendant `spinSeconds`. */
+  spin: 0.55,
+  spinSeconds: 0.9,
+} as const;
+
 /** Effet élastique : les adversaires ralentissent un peu s'ils sont loin devant, accélèrent s'ils sont loin derrière. */
 export const RUBBER_BAND = { distance: 160, maxBoost: 0.1, maxSlow: 0.12 } as const;
 
