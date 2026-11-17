@@ -22,6 +22,8 @@ export interface CarVisual {
   interior: THREE.Group;
   steeringWheel: THREE.Object3D;
   wheels: { pivot: THREE.Group; spin: THREE.Group }[];
+  /** Décalage de chaque roue affichée par rapport à la roue physique (vrais modèles 3D). */
+  wheelOffsets: { x: number; y: number; z: number }[];
   /** Position des yeux du conducteur (volant à droite, comme au Japon). */
   eyePoint: THREE.Vector3;
   headlight: THREE.SpotLight;
@@ -371,6 +373,7 @@ export function createCarVisual(spec: CarSpec, options: CarVisualOptions = {}): 
 
   return {
     paint,
+    wheelOffsets: [],
     nosLevel,
     setPaint(c) {
       (paintUniform.value as THREE.Color).setRGB(c[0], c[1], c[2]);
@@ -409,7 +412,9 @@ export function syncCarVisual(v: CarVisual, car: Vehicle, alpha: number): void {
     const vis = v.wheels[i];
     if (!w || !vis) continue;
     const susp = w.prevSuspLength + (w.suspLength - w.prevSuspLength) * alpha;
-    vis.pivot.position.set(w.mx, w.my - susp, w.mz);
+    const o = v.wheelOffsets[i];
+    if (o) vis.pivot.position.set(w.mx + o.x, w.my - susp + o.y, w.mz + o.z);
+    else vis.pivot.position.set(w.mx, w.my - susp, w.mz);
     vis.pivot.rotation.y = w.steerAngle;
     vis.spin.rotation.x = w.prevSpin + (w.spin - w.prevSpin) * alpha;
   }

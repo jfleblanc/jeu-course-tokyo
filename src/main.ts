@@ -93,21 +93,30 @@ async function boot(): Promise<void> {
   let visualModel = player.car.model;
   let visual = createCarVisual(CAR_SPEC, lookOf());
   scene.add(visual.root);
-  // ?modele=datsun-240k : essai d'un vrai modèle 3D à la place de la voiture procédurale
-  // (joueur et adversaires). Si le fichier ne se charge pas, on garde la voiture procédurale.
-  const testModel = params.get('modele');
-  const dressPlayer = (): void => {
-    if (!testModel) return;
+  // Chaque voiture du garage a son modèle 3D. `?modele=<id>` l'impose à tout le monde (essais) ;
+  // `?modele=aucun` revient aux voitures procédurales. Si un fichier ne se charge pas, on garde
+  // la voiture procédurale.
+  let testModel = params.get('modele');
+  const glbOf = (): string | null => (testModel === 'aucun' ? null : (testModel ?? player.modelOf(player.car).glb));
+  const dressPlayer = (): Promise<void> => {
+    const id = glbOf();
+    if (!id) return Promise.resolve();
     const target = visual;
-    loadCarAsset(testModel)
+    target.root.visible = false;
+    return loadCarAsset(id)
       .then((asset) => {
         if (target !== visual) return;
         applyCarAsset(target, asset, CAR_SPEC, { lod: 0 });
-        rig.applyVisibility(target);
-        hud.toast(`Modèle 3D : ${testModel}`);
+        rig?.applyVisibility(target);
       })
-      .catch((err: unknown) => console.info('Modèle 3D indisponible, voiture procédurale conservée.', err));
+      .catch((err: unknown) => console.info('Modèle 3D indisponible, voiture procédurale conservée.', err))
+      .finally(() => {
+        target.root.visible = true;
+      });
   };
+  // eslint-disable-next-line prefer-const
+  let rig: CameraRig | undefined;
+  await dressPlayer();
   const applyNeon = (): void => {
     const owned = player.car;
     visual.setUnderglow(owned.neon >= 0 ? (NEON_COLORS[owned.neon]?.color ?? null) : null);
@@ -134,8 +143,7 @@ async function boot(): Promise<void> {
   const input = new InputManager();
   const hud = new Hud(ctx.backend);
   hud.setPreset(store.active);
-  const rig = new CameraRig(camera);
-  dressPlayer();
+  rig = new CameraRig(camera);
   rig.applyVisibility(visual);
   let perfText = '';
   const panel = new AbPanel(store, {
@@ -186,12 +194,12 @@ async function boot(): Promise<void> {
         scene.remove(visual.root);
         visual.root.traverse((o) => {
           const m = o as THREE.Mesh;
-          if (m.isMesh) m.geometry.dispose();
+          if (m.isMesh && !m.userData.shared) m.geometry.dispose();
         });
         visual = createCarVisual(CAR_SPEC, lookOf());
         scene.add(visual.root);
         rig.applyVisibility(visual);
-        dressPlayer();
+        void dressPlayer();
         visualModel = player.car.model;
       } else {
         visual.setPaint(lookOf().color);
@@ -367,7 +375,13 @@ async function boot(): Promise<void> {
     render(alpha, frameDt) {
       syncCarVisual(visual, car, alpha);
       visual.root.updateMatrixWorld(true);
-      if (garage.open) {
+      const orbit = (window as unknown as { __orbit?: { a: number; d: number; h: number } }).__orbit;
+      if (orbit) {
+        // Débogage : caméra fixe autour de la voiture (planches de contrôle des modèles 3D).
+        const a = car.yaw + orbit.a;
+        camera.position.set(visual.root.position.x + Math.sin(a) * orbit.d, visual.root.position.y + orbit.h, visual.root.position.z + Math.cos(a) * orbit.d);
+        camera.lookAt(visual.root.position.x, visual.root.position.y + 0.1, visual.root.position.z);
+      } else if (garage.open) {
         // Dans le garage, la caméra tourne lentement autour de la voiture.
         garageTime += frameDt;
         const a = car.yaw + 2.4 + garageTime * 0.25;
@@ -434,7 +448,22 @@ async function boot(): Promise<void> {
   });
 
   // Accès console pour le débogage : window.__jeu
-  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks };
+  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks,
+    /** Éclairage de studio pour les planches de contrôle. */
+    studio: (): void => {
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x8888aa, 3.2));
+    },
+    /** Essayer un modèle 3D sur la voiture du joueur (planches de contrôle). */
+    setModel: (id: string, paint?: [number, number, number]): Promise<void> => {
+      testModel = id;
+      return loadCarAsset(id).then((asset) => {
+        applyCarAsset(visual, asset, CAR_SPEC, { lod: 0 });
+        rig.applyVisibility(visual);
+        const c = paint ?? asset.paint;
+        if (c) visual.setPaint(c);
+      });
+    },
+  };
 
   setBoot('Prêt !');
   // Une première image avant de retirer l'écran de chargement (compile les shaders).

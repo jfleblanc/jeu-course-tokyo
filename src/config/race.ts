@@ -31,6 +31,8 @@ export interface AiLevel {
   lookAhead: number;
   /** Mini-fiche affichée avant le départ. */
   car: string;
+  /** Modèle 3D de sa voiture (`public/models/<glb>.glb`). */
+  glb: string;
   bio: string;
 }
 
@@ -39,14 +41,14 @@ export interface AiLevel {
  * avec le niveau du joueur (voir aiDifficulty dans progression.ts).
  */
 export const AI_DRIVERS: AiLevel[] = [
-  { name: 'Kenji Aoki', color: [0.05, 0.25, 0.75], topSpeed: 168, cornerGrip: 10.5, braking: 8.5, lookAhead: 6.5, car: 'Subaru Impreza WRX', bio: 'Régulier et rapide partout. Le pilote à battre.' },
-  { name: 'Mika Tanabe', color: [0.85, 0.75, 0.05], topSpeed: 160, cornerGrip: 9.9, braking: 8, lookAhead: 6.5, car: 'Mazda RX-7 FD', bio: 'Très à l’aise dans les ruelles, moins en ligne droite.' },
-  { name: 'Ryo Sakamoto', color: [0.1, 0.6, 0.3], topSpeed: 154, cornerGrip: 8.8, braking: 7.5, lookAhead: 7, car: 'Honda Civic Type R', bio: 'Prudent en virage, mais il ne fait jamais d’erreur.' },
-  { name: 'Hana Kuroda', color: [0.75, 0.05, 0.4], topSpeed: 172, cornerGrip: 9.2, braking: 8.2, lookAhead: 7, car: 'Nissan Silvia S15', bio: 'Une fusée sur les avenues. Freine tard, parfois trop.' },
-  { name: 'Daichi Mori', color: [0.85, 0.35, 0.03], topSpeed: 158, cornerGrip: 10.2, braking: 8.8, lookAhead: 6, car: 'Toyota Supra A80', bio: 'Freinages impeccables, sorties de virage musclées.' },
-  { name: 'Yui Hasegawa', color: [0.55, 0.6, 0.65], topSpeed: 164, cornerGrip: 9.6, braking: 8, lookAhead: 6.5, car: 'Mitsubishi Lancer Evo VI', bio: 'Discrète, toujours dans le bon wagon à l’arrivée.' },
-  { name: 'Sora Ishikawa', color: [0.3, 0.08, 0.6], topSpeed: 150, cornerGrip: 9.0, braking: 7.6, lookAhead: 7, car: 'Honda S2000', bio: 'Débute sur le circuit. Parfait pour se faire la main.' },
-  { name: 'Takumi Endo', color: [0.75, 0.75, 0.72], topSpeed: 170, cornerGrip: 10.8, braking: 8.6, lookAhead: 6, car: 'Toyota AE86', bio: 'Légende des cols de montagne. Redoutable en virage.' },
+  { name: 'Kenji Aoki', color: [0.05, 0.25, 0.75], topSpeed: 168, cornerGrip: 10.5, braking: 8.5, lookAhead: 6.5, car: 'Nissan Skyline GT-R R34', glb: 'skyline-r34', bio: 'Régulier et rapide partout. Le pilote à battre.' },
+  { name: 'Mika Tanabe', color: [0.85, 0.75, 0.05], topSpeed: 160, cornerGrip: 9.9, braking: 8, lookAhead: 6.5, car: 'Mazda RX-7', glb: 'rx7', bio: 'Très à l’aise dans les ruelles, moins en ligne droite.' },
+  { name: 'Ryo Sakamoto', color: [0.1, 0.6, 0.3], topSpeed: 154, cornerGrip: 8.8, braking: 7.5, lookAhead: 7, car: 'Honda Integra Type R', glb: 'integra-dc2', bio: 'Prudent en virage, mais il ne fait jamais d’erreur.' },
+  { name: 'Hana Kuroda', color: [0.75, 0.05, 0.4], topSpeed: 172, cornerGrip: 9.2, braking: 8.2, lookAhead: 7, car: 'Nissan Skyline GT-R R32', glb: 'skyline-r32', bio: 'Une fusée sur les avenues. Freine tard, parfois trop.' },
+  { name: 'Daichi Mori', color: [0.85, 0.35, 0.03], topSpeed: 158, cornerGrip: 10.2, braking: 8.8, lookAhead: 6, car: 'Toyota GR Supra', glb: 'gr-supra', bio: 'Freinages impeccables, sorties de virage musclées.' },
+  { name: 'Yui Hasegawa', color: [0.55, 0.6, 0.65], topSpeed: 164, cornerGrip: 9.6, braking: 8, lookAhead: 6.5, car: 'Nissan Fairlady Z', glb: 'fairlady-z', bio: 'Discrète, toujours dans le bon wagon à l’arrivée.' },
+  { name: 'Sora Ishikawa', color: [0.3, 0.08, 0.6], topSpeed: 150, cornerGrip: 9.0, braking: 7.6, lookAhead: 7, car: 'Datsun 280Z', glb: 'datsun-280z', bio: 'Débute sur le circuit. Parfait pour se faire la main.' },
+  { name: 'Takumi Endo', color: [0.75, 0.75, 0.72], topSpeed: 170, cornerGrip: 10.8, braking: 8.6, lookAhead: 6, car: 'Toyota AE86', glb: 'ae86', bio: 'Légende des cols de montagne. Redoutable en virage.' },
 ];
 
 /** Tracés de la banque : mêmes graines = mêmes tracés à chaque partie. */

@@ -1,213 +1,427 @@
 /**
- * Convertit un modèle de voiture glTF (Sketchfab) en GLB léger pour le jeu.
+ * Convertit un modèle de voiture glTF (téléchargé sur Sketchfab, décompressé) en GLB léger pour le jeu.
  *
- *   node tools/convert-car.mjs <dossier du glTF décompressé> <id> <sortie.glb>
+ *   MESHOPT_JS=<meshoptimizer/js> SHARP=<node_modules contenant sharp> \
+ *     node tools/convert-car.mjs <dossier du glTF> <id> <sortie.glb>
  *
- * - applique les transformations, fusionne par matériau, simplifie (meshoptimizer) ;
- * - sépare une roue modèle (réutilisée quatre fois par le jeu) de la carrosserie ;
- * - recentre : origine au sol, au milieu des essieux, z vers l'avant, à l'échelle du jeu ;
- * - produit deux niveaux de détail : `body` / `wheel` (joueur) et `body_lod1` / `wheel_lod1`.
+ * Ce que fait l'outil, sans dépendre de la façon dont le modèle est découpé :
+ * - applique les transformations et oriente la voiture (+Z = avant, +Y = haut), à sa vraie longueur ;
+ * - trouve les quatre roues par leur forme (pièces rondes posées au sol), en garde une comme
+ *   modèle (le jeu la répète quatre fois) et les retire de la carrosserie ;
+ * - range les matériaux dans quelques familles pour limiter les appels de dessin :
+ *   `paint` (peinture réglable), `glass` (vitres), `lens` (verres de feux), `matte` / `metal` /
+ *   `chrome` (couleur par sommet), `emit` (lumineux), `tail` (feux de frein), `head` (phares),
+ *   `tex:<nom>` (texture gardée : plaque, autocollants, livrée) ;
+ * - simplifie (meshoptimizer) à deux niveaux de détail : `body` / `wheel` et `body_lod1` / `wheel_lod1`.
  *
- * meshoptimizer n'est pas une dépendance du jeu : indiquer son dossier `js/` avec MESHOPT_JS.
+ * Réglages par voiture : `tools/cars.config.mjs`.
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-
-const CARS = {
-  'datsun-240k': {
-    credit: '« (FREE) 1972 Datsun 240k GT » par Karol Miklas — CC-BY-SA-4.0 — https://sketchfab.com/3d-models/free-1972-datsun-240k-gt-b2303a552b444e5b8637fdf5169b41cb',
-    root: 'RootNode',
-    wheelNode: 'Cylinder.013', // roue complète servant de modèle
-    wheelNodes: ['Cylinder.013', 'Cylinder.007'], // un essieu chacun (même côté)
-    drop: ['Plane.035', 'Cylinder.007', 'Cylinder.010', 'Cylinder.009'],
-    dropMaterials: ['coat'], // coque de vernis : refaite par le matériau du jeu
-    wheelMaterials: ['alloy', 'tire', 'black_paint'], // retirés de la carrosserie près des roues
-    // matériaux regroupés (moins d'appels de dessin) : nom d'origine → nom final
-    merge: { alloy: 'chrome', black_paint: 'black_matte', tire: 'black_matte' },
-    wheelMerge: { black_paint: 'tire' },
-    wheelbase: 2.62,
-    textures: { license: 256, stickers: 512 },
-    // part des triangles gardée par matériau (niveau 0) ; `*` = défaut
-    keep: { paint: 0.14, glass: 0.4, chrome: 0.024, black_matte: 0.032, black_paint: 0.04, headlights: 0.06, red_glass: 0.15, orange_glass: 0.15, license: 1, stickers: 1, alloy: 0.04, tire: 0.04, '*': 0.05 },
-    wheelKeep: 0.035,
-    lod1: 0.22,
-  },
-};
+import { CARS } from './cars.config.mjs';
 
 const [, , dir, id, out] = process.argv;
 const cfg = CARS[id];
 if (!dir || !cfg || !out) throw new Error('usage : convert-car.mjs <dossier> <' + Object.keys(CARS).join('|') + '> <sortie.glb>');
 const { MeshoptSimplifier } = await import(pathToFileURL(path.join(process.env.MESHOPT_JS ?? '', 'meshopt_simplifier.js')).href);
 await MeshoptSimplifier.ready;
+const sharp = createRequire(path.join(process.env.SHARP ?? process.cwd(), 'x.js'))('sharp');
+const log = (...a) => console.log(...a);
 
+// ───────────────────────── Lecture du glTF ─────────────────────────
 const g = JSON.parse(fs.readFileSync(path.join(dir, 'scene.gltf'), 'utf8'));
 const bin = fs.readFileSync(path.join(dir, g.buffers[0].uri));
 const I = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1];
 const mul = (a, b) => { const o = new Array(16).fill(0); for (let c = 0; c < 4; c++) for (let r = 0; r < 4; r++) for (let k = 0; k < 4; k++) o[c * 4 + r] += a[k * 4 + r] * b[c * 4 + k]; return o; };
 function local(n) {
   if (n.matrix) return n.matrix;
-  const t = n.translation ?? [0, 0, 0], q = n.rotation ?? [0, 0, 0, 1], s = n.scale ?? [1, 1, 1];
-  const [x, y, z, w] = q;
+  const t = n.translation ?? [0, 0, 0], [x, y, z, w] = n.rotation ?? [0, 0, 0, 1], s = n.scale ?? [1, 1, 1];
   return [(1 - 2 * (y * y + z * z)) * s[0], 2 * (x * y + z * w) * s[0], 2 * (x * z - y * w) * s[0], 0, 2 * (x * y - z * w) * s[1], (1 - 2 * (x * x + z * z)) * s[1], 2 * (y * z + x * w) * s[1], 0, 2 * (x * z + y * w) * s[2], 2 * (y * z - x * w) * s[2], (1 - 2 * (x * x + y * y)) * s[2], 0, t[0], t[1], t[2], 1];
 }
 function read(i, comps) {
   const a = g.accessors[i], bv = g.bufferViews[a.bufferView];
-  const off = bin.byteOffset + (bv.byteOffset ?? 0) + (a.byteOffset ?? 0);
+  const dv = new DataView(bin.buffer, bin.byteOffset + (bv.byteOffset ?? 0) + (a.byteOffset ?? 0));
   const n = a.count;
-  if (a.componentType === 5126) {
-    const stride = bv.byteStride ?? comps * 4;
-    const o = new Float32Array(n * comps); const dv = new DataView(bin.buffer, off);
-    for (let k = 0; k < n; k++) for (let c = 0; c < comps; c++) o[k * comps + c] = dv.getFloat32(k * stride + c * 4, true);
+  if (comps > 1 || a.componentType === 5126) {
+    const size = { 5126: 4, 5123: 2, 5121: 1, 5122: 2, 5120: 1 }[a.componentType];
+    const stride = bv.byteStride ?? comps * size;
+    const o = new Float32Array(n * comps);
+    for (let k = 0; k < n; k++) for (let c = 0; c < comps; c++) {
+      const p = k * stride + c * size;
+      o[k * comps + c] = a.componentType === 5126 ? dv.getFloat32(p, true) : a.componentType === 5123 ? dv.getUint16(p, true) / (a.normalized ? 65535 : 1) : a.componentType === 5121 ? dv.getUint8(p) / (a.normalized ? 255 : 1) : a.componentType === 5122 ? Math.max(dv.getInt16(p, true) / 32767, -1) : Math.max(dv.getInt8(p) / 127, -1);
+    }
     return o;
   }
-  const dv = new DataView(bin.buffer, off); const o = new Uint32Array(n);
+  const o = new Uint32Array(n);
   for (let k = 0; k < n; k++) o[k] = a.componentType === 5125 ? dv.getUint32(k * 4, true) : a.componentType === 5123 ? dv.getUint16(k * 2, true) : dv.getUint8(k);
   return o;
 }
 
-/** Morceaux par (pièce, matériau) : listes de tableaux à concaténer. */
-const chunks = new Map();
-function add(part, mat, pos, nor, uv, idx) {
-  const key = part + '|' + mat; let c = chunks.get(key);
-  if (!c) chunks.set(key, (c = { part, mat, pos: [], nor: [], uv: [], idx: [], count: 0 }));
-  const shifted = new Uint32Array(idx.length); for (let k = 0; k < idx.length; k++) shifted[k] = idx[k] + c.count;
-  c.pos.push(pos); c.nor.push(nor); c.uv.push(uv); c.idx.push(shifted); c.count += pos.length / 3;
-}
-function walk(i, m, top) {
+// Orientation : où est l'avant dans le fichier ?
+const front = cfg.front ?? '+z';
+const orient = (x, y, z) => (front === '+z' ? [x, y, z] : front === '-z' ? [-x, y, -z] : front === '+x' ? [-z, y, x] : [z, y, -x]);
+
+/** Primitives à plat, dans le repère monde orienté : { mat, pos, nor, uv, idx }. */
+const prims = [];
+function walk(i, m) {
   const n = g.nodes[i]; const w = mul(m, local(n));
+  if (cfg.dropNodes?.some((d) => (n.name ?? '').includes(d))) return;
   const flip = (w[0] * (w[5] * w[10] - w[6] * w[9]) - w[4] * (w[1] * w[10] - w[2] * w[9]) + w[8] * (w[1] * w[6] - w[2] * w[5])) < 0;
-  if (n.mesh !== undefined && top && !cfg.drop.includes(top)) for (const p of g.meshes[n.mesh].primitives) {
-    const mat = g.materials[p.material].name;
-    if (cfg.dropMaterials.includes(mat)) continue;
-    const P = read(p.attributes.POSITION, 3); const N = p.attributes.NORMAL !== undefined ? read(p.attributes.NORMAL, 3) : new Float32Array(P.length);
-    const U = p.attributes.TEXCOORD_0 !== undefined ? read(p.attributes.TEXCOORD_0, 2) : new Float32Array((P.length / 3) * 2);
-    const idx = read(p.indices, 1);
+  if (n.mesh !== undefined) for (const p of g.meshes[n.mesh].primitives) {
+    if ((p.mode ?? 4) !== 4 || p.material === undefined) continue;
+    const P = read(p.attributes.POSITION, 3);
+    const N = p.attributes.NORMAL !== undefined ? read(p.attributes.NORMAL, 3) : null;
+    const texCoord = g.materials[p.material].pbrMetallicRoughness?.baseColorTexture?.texCoord ?? 0;
+    const U = p.attributes['TEXCOORD_' + texCoord] !== undefined ? read(p.attributes['TEXCOORD_' + texCoord], 2) : new Float32Array((P.length / 3) * 2);
+    const idx = p.indices !== undefined ? read(p.indices, 1) : Uint32Array.from({ length: P.length / 3 }, (_, k) => k);
+    const NN = new Float32Array(P.length);
     for (let k = 0; k < P.length; k += 3) {
       const x = P[k], y = P[k + 1], z = P[k + 2];
-      P[k] = w[0] * x + w[4] * y + w[8] * z + w[12]; P[k + 1] = w[1] * x + w[5] * y + w[9] * z + w[13]; P[k + 2] = w[2] * x + w[6] * y + w[10] * z + w[14];
-      const a = N[k], b = N[k + 1], c = N[k + 2];
-      let nx = w[0] * a + w[4] * b + w[8] * c, ny = w[1] * a + w[5] * b + w[9] * c, nz = w[2] * a + w[6] * b + w[10] * c; const l = Math.hypot(nx, ny, nz) || 1;
-      N[k] = nx / l; N[k + 1] = ny / l; N[k + 2] = nz / l;
+      const q = orient(w[0] * x + w[4] * y + w[8] * z + w[12], w[1] * x + w[5] * y + w[9] * z + w[13], w[2] * x + w[6] * y + w[10] * z + w[14]);
+      P[k] = q[0]; P[k + 1] = q[1]; P[k + 2] = q[2];
+      if (N) {
+        const a = N[k], b = N[k + 1], c = N[k + 2];
+        const r = orient(w[0] * a + w[4] * b + w[8] * c, w[1] * a + w[5] * b + w[9] * c, w[2] * a + w[6] * b + w[10] * c); const l = Math.hypot(r[0], r[1], r[2]) || 1;
+        NN[k] = r[0] / l; NN[k + 1] = r[1] / l; NN[k + 2] = r[2] / l;
+      }
     }
     if (flip) for (let k = 0; k < idx.length; k += 3) { const t = idx[k + 1]; idx[k + 1] = idx[k + 2]; idx[k + 2] = t; }
-    add(top, mat, P, N, U, idx);
+    if (!N) { // normales manquantes : normales de face accumulées
+      for (let k = 0; k < idx.length; k += 3) {
+        const a = idx[k] * 3, b = idx[k + 1] * 3, c = idx[k + 2] * 3;
+        const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2], vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+        for (const v of [a, b, c]) { NN[v] += nx; NN[v + 1] += ny; NN[v + 2] += nz; }
+      }
+      for (let k = 0; k < NN.length; k += 3) { const l = Math.hypot(NN[k], NN[k + 1], NN[k + 2]) || 1; NN[k] /= l; NN[k + 1] /= l; NN[k + 2] /= l; }
+    }
+    prims.push({ mat: p.material, pos: P, nor: NN, uv: U, idx });
   }
-  for (const c of n.children ?? []) walk(c, w, top ?? (n.name === cfg.root ? undefined : top), n.name === cfg.root);
+  for (const c of n.children ?? []) walk(c, w);
 }
-function find(i, m) { const n = g.nodes[i]; const w = mul(m, local(n)); if (n.name === cfg.root) { for (const c of n.children) walk(c, w, g.nodes[c].name); } else for (const c of n.children ?? []) find(c, w); }
-// les roues de référence sont lues même si elles sont dans `drop`
-const dropSaved = cfg.drop; cfg.drop = cfg.drop.filter((d) => !cfg.wheelNodes.includes(d));
-for (const r of g.scenes[0].nodes) find(r, I);
-cfg.drop = dropSaved;
+for (const r of g.scenes[g.scene ?? 0].nodes) walk(r, I);
 
+// ───────────────────────── Matériaux : familles ─────────────────────────
+const texCache = new Map();
+/** Texture décodée en petit (pour la moyenne, la variance et la cuisson en couleurs par sommet). */
+async function texture(index, size = 128) {
+  const key = index + ':' + size;
+  if (!texCache.has(key)) {
+    const img = g.images[g.textures[index].source];
+    const file = path.join(dir, decodeURIComponent(img.uri));
+    const { data, info } = await sharp(file).resize(size, size, { fit: 'fill' }).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+    let s = [0, 0, 0, 0], s2 = 0; const n = info.width * info.height;
+    for (let k = 0; k < n; k++) { for (let c = 0; c < 4; c++) s[c] += data[k * 4 + c] / 255; }
+    s = s.map((v) => v / n);
+    for (let k = 0; k < n; k++) { const l = (data[k * 4] + data[k * 4 + 1] + data[k * 4 + 2]) / 765 - (s[0] + s[1] + s[2]) / 3; s2 += l * l; }
+    texCache.set(key, { data, w: info.width, h: info.height, mean: s, std: Math.sqrt(s2 / n), file });
+  }
+  return texCache.get(key);
+}
+const lin = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+const has = (list, name) => (list ?? []).includes(name);
+const triCount = new Map();
+for (const p of prims) triCount.set(p.mat, (triCount.get(p.mat) ?? 0) + p.idx.length / 3);
+
+const roles = []; // par matériau : { role, color:[r,g,b,a] linéaire, tex?:index, metal, rough }
+for (let i = 0; i < g.materials.length; i++) {
+  const m = g.materials[i], name = m.name ?? 'mat' + i, pbr = m.pbrMetallicRoughness ?? {};
+  const f = pbr.baseColorFactor ?? [1, 1, 1, 1];
+  let metal = pbr.metallicFactor ?? 1, rough = pbr.roughnessFactor ?? 1;
+  if (pbr.metallicRoughnessTexture) { const t = await texture(pbr.metallicRoughnessTexture.index, 32); metal *= t.mean[2]; rough *= t.mean[1]; }
+  const tex = pbr.baseColorTexture ? await texture(pbr.baseColorTexture.index) : null;
+  const color = tex ? [f[0] * lin(tex.mean[0]), f[1] * lin(tex.mean[1]), f[2] * lin(tex.mean[2]), f[3]] : [...f];
+  const blend = m.alphaMode === 'BLEND' || (m.extensions?.KHR_materials_transmission && f[3] < 0.99);
+  const strength = m.extensions?.KHR_materials_emissive_strength?.emissiveStrength ?? 1;
+  const emissive = (m.emissiveFactor ?? [0, 0, 0]).map((v) => v * strength);
+  let role;
+  if (has(cfg.drop, name) || /shadow|ombre/i.test(name)) role = 'drop';
+  else if (has(cfg.paint, name)) role = 'paint';
+  else if (has(cfg.tail, name)) role = 'tail';
+  else if (has(cfg.head, name)) role = 'head';
+  else if (has(cfg.glass, name)) role = 'glass';
+  else if (has(cfg.lens, name)) role = 'lens';
+  else if (has(cfg.emit, name)) role = 'emit';
+  else if (has(cfg.keepTex, name) && tex) role = 'tex';
+  else if (has(cfg.solid, name)) role = 'solid';
+  else if (blend) role = /window|windshield|windscreen|vitre|glass_dark|glass_clear|clear_glass|glasswindow|^glass$/i.test(name) ? 'glass' : 'lens';
+  else if (emissive.some((v) => v > 0.05) && /light|lamp|led|illum|display|lcd/i.test(name)) role = 'emit';
+  else role = 'solid';
+  roles.push({ name, role, color, tex, texIndex: pbr.baseColorTexture?.index, metal, rough, emissive, emissiveTex: m.emissiveTexture?.index, mask: m.alphaMode === 'MASK', doubleSided: !!m.doubleSided, tris: triCount.get(i) ?? 0 });
+}
+// Textures gardées automatiquement : celles qui ont du détail (plaque, feux, livrée), les plus grandes d'abord.
+const autoKeep = roles.filter((r) => r.role === 'solid' && r.tex && (r.tex.std > (cfg.texStd ?? 0.1) || r.mask) && r.tris > 0 && !has(cfg.bake, r.name)).sort((a, b) => b.tris - a.tris).slice(0, cfg.maxTex ?? 5);
+for (const r of autoKeep) r.role = 'tex';
+for (const r of roles) {
+  if (/tire|tyre|rubber|pneu|tread|sidewall|interior|plastic|seat|leather|fabric/i.test(r.name)) r.metal = Math.min(r.metal, 0.2);
+  if (r.role === 'solid') r.bucket = has(cfg.matte, r.name) ? 'matte' : has(cfg.chrome, r.name) ? 'chrome' : r.metal >= 0.5 ? (r.rough < 0.3 ? 'chrome' : 'metal') : 'matte';
+  else if (r.role === 'tex') r.bucket = 'tex:' + r.name;
+  else r.bucket = r.role;
+}
+
+// ───────────────────────── Échelle, composantes connexes, roues ─────────────────────────
+const live = prims.filter((p) => roles[p.mat].role !== 'drop');
+const span = (list, axis) => { let lo = 1e9, hi = -1e9; for (const p of list) for (let k = axis; k < p.pos.length; k += 3) { if (p.pos[k] < lo) lo = p.pos[k]; if (p.pos[k] > hi) hi = p.pos[k]; } return [lo, hi]; };
+
+// Composantes connexes (sommets soudés par position).
+let size0 = span(live, 2); size0 = size0[1] - size0[0];
+const q = size0 * 2e-5;
+const ids = new Map(); const parent = [];
+const find = (a) => { while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; } return a; };
+for (const p of live) {
+  p.gid = new Uint32Array(p.pos.length / 3);
+  for (let v = 0; v < p.gid.length; v++) {
+    const key = Math.round(p.pos[v * 3] / q) + ',' + Math.round(p.pos[v * 3 + 1] / q) + ',' + Math.round(p.pos[v * 3 + 2] / q);
+    let id2 = ids.get(key); if (id2 === undefined) { id2 = parent.length; parent.push(id2); ids.set(key, id2); }
+    p.gid[v] = id2;
+  }
+  for (let k = 0; k < p.idx.length; k += 3) { const a = find(p.gid[p.idx[k]]), b = find(p.gid[p.idx[k + 1]]), c = find(p.gid[p.idx[k + 2]]); parent[b] = a; parent[find(c)] = a; }
+}
+ids.clear();
+const comps = new Map(); // racine → { lo, hi, tris }
+for (const p of live) for (let k = 0; k < p.idx.length; k += 3) {
+  const root = find(p.gid[p.idx[k]]);
+  let c = comps.get(root); if (!c) comps.set(root, (c = { lo: [1e9, 1e9, 1e9], hi: [-1e9, -1e9, -1e9], tris: 0 }));
+  c.tris++;
+  for (let j = 0; j < 3; j++) { const v = p.idx[k + j] * 3; for (let a = 0; a < 3; a++) { const x = p.pos[v + a]; if (x < c.lo[a]) c.lo[a] = x; if (x > c.hi[a]) c.hi[a] = x; } }
+}
+// Plans d'ombre au sol : très plats et très grands → retirés.
+const zs = span(live, 2), xs = span(live, 0);
+for (const c of comps.values()) c.flat = c.hi[1] - c.lo[1] < 0.004 * size0 && (c.hi[0] - c.lo[0]) * (c.hi[2] - c.lo[2]) > 0.5 * (xs[1] - xs[0]) * (zs[1] - zs[0]);
+
+// Pièces rondes posées au sol = pneus et jantes.
+const L0 = cfg.wheelSearchLength ?? size0;
+const cand = [];
+for (const [root, c] of comps) {
+  if (c.flat) continue;
+  const dx = c.hi[0] - c.lo[0], dy = c.hi[1] - c.lo[1], dz = c.hi[2] - c.lo[2];
+  if (Math.abs(dy - dz) / dy < 0.12 && dx / dy > 0.12 && dx / dy < 0.92 && dy > (cfg.wheelMin ?? 0.115) * L0 && dy < (cfg.wheelMax ?? 0.2) * L0 && c.tris > 30) cand.push({ root, c, cx: (c.lo[0] + c.hi[0]) / 2, cy: (c.lo[1] + c.hi[1]) / 2, cz: (c.lo[2] + c.hi[2]) / 2, d: dy });
+}
+if (process.env.DEBUG_WHEELS) for (const [, c] of comps) { const dx = c.hi[0] - c.lo[0], dy = c.hi[1] - c.lo[1], dz = c.hi[2] - c.lo[2]; if (dy > 0.09 * L0 && dy < 0.25 * L0 && dz < 0.3 * L0 && c.tris > 30) log('  cand', c.tris, 'dx/dy', (dx / dy).toFixed(2), 'dy/dz', (dy / dz).toFixed(2), 'dy/L', (dy / L0).toFixed(3), 'x', ((c.lo[0] + c.hi[0]) / 2).toFixed(2), 'y0', c.lo[1].toFixed(2), 'z', ((c.lo[2] + c.hi[2]) / 2).toFixed(2)); }
+if (!cand.length) throw new Error('aucune roue trouvée');
+const ground0 = Math.min(...cand.map((k) => k.c.lo[1]));
+const midX = (xs[0] + xs[1]) / 2;
+const onGround = cand.filter((k) => k.c.lo[1] < ground0 + 0.035 * L0 && Math.abs(k.cx - midX) > 0.2 * (xs[1] - xs[0]));
+const clusters = [];
+for (const k of onGround.sort((a, b) => b.d - a.d)) {
+  const cl = clusters.find((w) => Math.hypot(w.cy - k.cy, w.cz - k.cz) < 0.3 * w.d && Math.abs(w.cx - k.cx) < 0.6 * w.d);
+  if (cl) { cl.xlo = Math.min(cl.xlo, k.c.lo[0]); cl.xhi = Math.max(cl.xhi, k.c.hi[0]); }
+  else clusters.push({ cx: k.cx, cy: k.cy, cz: k.cz, d: k.d, xlo: k.c.lo[0], xhi: k.c.hi[0], aspect: (k.c.hi[0] - k.c.lo[0]) / k.d });
+}
+if (clusters.length < 4) throw new Error(`seulement ${clusters.length} roue(s) trouvée(s)`);
+const wheels = clusters.slice(0, 4).map((w) => ({ ...w, r: w.d / 2, side: Math.sign(w.cx - midX) }));
+const ground = Math.min(...wheels.map((w) => w.cy - w.r));
+// Roues braquées dans le fichier : plus « larges » que les autres. On ne les prend pas comme modèle.
+const minAspect = Math.min(...wheels.map((w) => w.aspect));
+for (const w of wheels) w.turned = w.aspect > minAspect * 1.25;
+// À quelle roue appartient chaque composante ? (entièrement dans le cylindre du pneu, élargi vers l'intérieur)
+const wheelOf = new Map();
+for (const [root, c] of comps) {
+  if (c.flat) { wheelOf.set(root, -2); continue; }
+  for (let k = 0; k < 4; k++) {
+    const w = wheels[k], width = w.xhi - w.xlo;
+    const inner = cfg.wheelInner ?? 0.45, outer = w.turned ? 0.2 : 0.08;
+    const xlo = w.xlo - (w.side > 0 ? inner : outer) * width, xhi = w.xhi + (w.side < 0 ? inner : outer) * width;
+    if (c.lo[0] < xlo || c.hi[0] > xhi) continue;
+    let far = 0; for (const y of [c.lo[1], c.hi[1]]) for (const z of [c.lo[2], c.hi[2]]) far = Math.max(far, Math.hypot(y - w.cy, z - w.cz));
+    // la boîte englobante d'un disque dépasse le cercle : on compare au carré inscrit pour les grandes pièces
+    const dy = c.hi[1] - c.lo[1], dz = c.hi[2] - c.lo[2];
+    const round = Math.abs(dy - dz) / Math.max(dy, dz) < 0.15;
+    const reach = round ? Math.max(Math.abs(c.lo[1] - w.cy), Math.abs(c.hi[1] - w.cy), Math.abs(c.lo[2] - w.cz), Math.abs(c.hi[2] - w.cz)) : far;
+    if (reach <= w.r * (w.turned ? 1.1 : 1.03)) { wheelOf.set(root, k); break; }
+  }
+}
+const frontZ = Math.max(...wheels.map((w) => w.cz)), rearZ = Math.min(...wheels.map((w) => w.cz));
+const isFront = (w) => Math.abs(w.cz - frontZ) < Math.abs(w.cz - rearZ);
+// Roue modèle : à l'avant, celle qui a le plus de triangles.
+const wheelTris = [0, 0, 0, 0];
+for (const [root, c] of comps) { const k = wheelOf.get(root); if (k >= 0) wheelTris[k] += c.tris; }
+let tpl = -1; for (let k = 0; k < 4; k++) if (isFront(wheels[k]) && (tpl < 0 || wheelTris[k] > wheelTris[tpl])) tpl = k;
+if (cfg.wheelTemplate === 'rear' || wheels[tpl].turned) { tpl = -1; for (let k = 0; k < 4; k++) if (!isFront(wheels[k]) && (tpl < 0 || wheelTris[k] > wheelTris[tpl])) tpl = k; }
+
+// Échelle : vraie longueur de la voiture.
+const bodyZ = [1e9, -1e9];
+for (const [root, c] of comps) if (wheelOf.get(root) === undefined) { bodyZ[0] = Math.min(bodyZ[0], c.lo[2]); bodyZ[1] = Math.max(bodyZ[1], c.hi[2]); }
+const scale = cfg.length ? cfg.length / (bodyZ[1] - bodyZ[0]) : (cfg.scale ?? 1);
+const origin = [midX, ground, (frontZ + rearZ) / 2];
+
+// ───────────────────────── Découpe en pièces et familles ─────────────────────────
+/** groupes : clé = pièce|famille|matériau → sommets et triangles */
+const groups = new Map();
+for (const p of live) {
+  const role = roles[p.mat];
+  const sel = { body: [], wheel: [] };
+  for (let k = 0; k < p.idx.length; k += 3) {
+    const w = wheelOf.get(find(p.gid[p.idx[k]]));
+    if (w === undefined) sel.body.push(p.idx[k], p.idx[k + 1], p.idx[k + 2]);
+    else if (w === tpl) sel.wheel.push(p.idx[k], p.idx[k + 1], p.idx[k + 2]);
+  }
+  for (const part of ['body', 'wheel']) {
+    if (!sel[part].length) continue;
+    // Dans la roue : pas de peinture ni de feux, tout est « solide ».
+    let bucket = role.bucket;
+    if (part === 'wheel' && !bucket.startsWith('tex:') && !['matte', 'metal', 'chrome'].includes(bucket)) bucket = role.metal >= 0.5 ? (role.rough < 0.3 ? 'chrome' : 'metal') : 'matte';
+    const key = part + '|' + bucket + '|' + p.mat;
+    let gr = groups.get(key); if (!gr) groups.set(key, (gr = { part, bucket, mat: p.mat, pos: [], nor: [], uv: [], idx: [], count: 0 }));
+    const idx = Uint32Array.from(sel[part], (v) => v + gr.count);
+    gr.pos.push(p.pos); gr.nor.push(p.nor); gr.uv.push(p.uv); gr.idx.push(idx); gr.count += p.pos.length / 3;
+  }
+}
 const cat = (list, T) => { const n = list.reduce((s, a) => s + a.length, 0); const o = new T(n); let off = 0; for (const a of list) { o.set(a, off); off += a.length; } return o; };
-const meshes = [...chunks.values()].map((c) => ({ part: c.part, mat: c.mat, pos: cat(c.pos, Float32Array), nor: cat(c.nor, Float32Array), uv: cat(c.uv, Float32Array), idx: cat(c.idx, Uint32Array) }));
-const bbox = (list) => { const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; for (const m of list) for (let k = 0; k < m.pos.length; k++) { const a = k % 3; if (m.pos[k] < lo[a]) lo[a] = m.pos[k]; if (m.pos[k] > hi[a]) hi[a] = m.pos[k]; } return { lo, hi, c: lo.map((v, k) => (v + hi[k]) / 2) }; };
+const meshes = [];
+for (const gr of groups.values()) {
+  const m = { part: gr.part, bucket: gr.bucket, mat: gr.mat, pos: cat(gr.pos, Float32Array), nor: cat(gr.nor, Float32Array), uv: cat(gr.uv, Float32Array), idx: cat(gr.idx, Uint32Array) };
+  const c = gr.part === 'wheel' ? [wheels[tpl].cx, wheels[tpl].cy, wheels[tpl].cz] : origin;
+  for (let k = 0; k < m.pos.length; k += 3) { m.pos[k] = (m.pos[k] - c[0]) * scale; m.pos[k + 1] = (m.pos[k + 1] - c[1]) * scale; m.pos[k + 2] = (m.pos[k + 2] - c[2]) * scale; }
+  meshes.push(m);
+}
 
-// — Repère du jeu —
-const wheelBoxes = cfg.wheelNodes.map((n) => bbox(meshes.filter((m) => m.part === n)));
-const bodyAll = meshes.filter((m) => !cfg.wheelNodes.includes(m.part));
-const bb = bbox(bodyAll);
-const axleZ = wheelBoxes.map((b) => b.c[2]).sort((a, b) => a - b);
-const scale = cfg.wheelbase / (axleZ[1] - axleZ[0]);
-const origin = [bb.c[0], Math.min(...wheelBoxes.map((b) => b.lo[1])), (axleZ[0] + axleZ[1]) / 2];
-const wheelRadius = ((wheelBoxes[0].hi[1] - wheelBoxes[0].lo[1]) / 2) * scale;
-const halfTrack = Math.abs(wheelBoxes[0].c[0] - bb.c[0]) * scale;
-const wheelSide = Math.sign(wheelBoxes[0].c[0] - bb.c[0]);
-const wheelCentres = []; for (const b of wheelBoxes) for (const s of [1, -1]) wheelCentres.push([bb.c[0] + s * Math.abs(b.c[0] - bb.c[0]), b.c[1], b.c[2]]);
-
-// — Carrosserie : retirer les roues modélisées dedans —
-const rawR = (wheelBoxes[0].hi[1] - wheelBoxes[0].lo[1]) / 2, rawW = wheelBoxes[0].hi[0] - wheelBoxes[0].lo[0];
-for (const m of bodyAll) {
-  if (!cfg.wheelMaterials.includes(m.mat)) continue;
-  const keep = [];
-  for (let k = 0; k < m.idx.length; k += 3) {
-    let cx = 0, cy = 0, cz = 0; for (let j = 0; j < 3; j++) { const v = m.idx[k + j] * 3; cx += m.pos[v] / 3; cy += m.pos[v + 1] / 3; cz += m.pos[v + 2] / 3; }
-    const inWheel = wheelCentres.some((c) => Math.abs(cx - c[0]) < rawW * 0.75 && Math.hypot(cy - c[1], cz - c[2]) < rawR * 1.04);
-    if (!inWheel) keep.push(m.idx[k], m.idx[k + 1], m.idx[k + 2]);
+// Couleurs par sommet (familles sans texture) : couleur du matériau, ou texture cuite.
+async function colorsOf(m) {
+  const role = roles[m.mat]; const n = m.pos.length / 3; const col = new Float32Array(n * 4);
+  const useEmissive = m.bucket === 'emit' || m.bucket === 'tail' || m.bucket === 'head';
+  let base = role.color;
+  let tex = role.texIndex !== undefined ? await texture(role.texIndex) : null;
+  let factor = (g.materials[m.mat].pbrMetallicRoughness?.baseColorFactor) ?? [1, 1, 1, 1];
+  if (useEmissive && role.emissive.some((v) => v > 0.05)) {
+    factor = [...role.emissive.map((v) => Math.min(v, 1)), 1]; base = factor;
+    tex = role.emissiveTex !== undefined ? await texture(role.emissiveTex) : null;
   }
-  m.idx = new Uint32Array(keep);
+  for (let v = 0; v < n; v++) {
+    if (tex && tex.std > 0.02) {
+      const u = m.uv[v * 2] - Math.floor(m.uv[v * 2]), w = m.uv[v * 2 + 1] - Math.floor(m.uv[v * 2 + 1]);
+      const p = (Math.min(tex.h - 1, Math.floor(w * tex.h)) * tex.w + Math.min(tex.w - 1, Math.floor(u * tex.w))) * 4;
+      col[v * 4] = factor[0] * lin(tex.data[p] / 255); col[v * 4 + 1] = factor[1] * lin(tex.data[p + 1] / 255); col[v * 4 + 2] = factor[2] * lin(tex.data[p + 2] / 255); col[v * 4 + 3] = factor[3];
+    } else { col[v * 4] = base[0]; col[v * 4 + 1] = base[1]; col[v * 4 + 2] = base[2]; col[v * 4 + 3] = base[3]; }
+  }
+  return col;
 }
+for (const m of meshes) m.col = m.bucket.startsWith('tex:') || m.bucket === 'paint' || m.bucket === 'glass' ? null : await colorsOf(m);
 
-function toGame(m, centre) {
-  for (let k = 0; k < m.pos.length; k += 3) { m.pos[k] = (m.pos[k] - centre[0]) * scale; m.pos[k + 1] = (m.pos[k + 1] - centre[1]) * scale; m.pos[k + 2] = (m.pos[k + 2] - centre[2]) * scale; }
-}
-/** Fusionne les pièces de même matériau. */
-function mergeByMat(list) {
-  const by = new Map();
-  for (const m of list) { if (!m.idx.length) continue; const a = by.get(m.mat) ?? []; a.push(m); by.set(m.mat, a); }
-  return [...by.entries()].map(([mat, ms]) => {
-    let off = 0; const idx = [];
-    for (const m of ms) { const s = new Uint32Array(m.idx.length); for (let k = 0; k < s.length; k++) s[k] = m.idx[k] + off; idx.push(s); off += m.pos.length / 3; }
-    return { mat, pos: cat(ms.map((m) => m.pos), Float32Array), nor: cat(ms.map((m) => m.nor), Float32Array), uv: cat(ms.map((m) => m.uv), Float32Array), idx: cat(idx, Uint32Array) };
-  });
-}
+// ───────────────────────── Simplification ─────────────────────────
 function simplify(m, ratio) {
   let idx = m.idx;
-  if (ratio < 1 && idx.length > 600) {
-    const target = Math.max(300, Math.floor((idx.length * ratio) / 3) * 3);
-    [idx] = MeshoptSimplifier.simplifyWithAttributes(idx, m.pos, 3, m.nor, 3, [0.6, 0.6, 0.6], null, target, 0.05, ['Prune']);
+  const want = Math.max(60, Math.floor((idx.length * ratio) / 3) * 3);
+  if (ratio < 0.98 && idx.length > want) {
+    const textured = m.bucket.startsWith('tex:');
+    const stride = textured ? 5 : 3; const attr = new Float32Array((m.pos.length / 3) * stride);
+    for (let v = 0; v < m.pos.length / 3; v++) { attr[v * stride] = m.nor[v * 3]; attr[v * stride + 1] = m.nor[v * 3 + 1]; attr[v * stride + 2] = m.nor[v * 3 + 2]; if (textured) { attr[v * stride + 3] = m.uv[v * 2]; attr[v * stride + 4] = m.uv[v * 2 + 1]; } }
+    const weights = textured ? [0.5, 0.5, 0.5, 1.5, 1.5] : [0.6, 0.6, 0.6];
+    let res = MeshoptSimplifier.simplifyWithAttributes(idx, m.pos, 3, attr, stride, weights, null, want, 0.04, ['Prune'])[0];
+    // Beaucoup de petites pièces détachées : on accepte plus d'erreur plutôt que de garder trop de triangles.
+    if (res.length > want * 1.6) res = MeshoptSimplifier.simplifyWithAttributes(res, m.pos, 3, attr, stride, weights, null, want, 0.25, ['Prune'])[0];
+    if (res.length > want * 2.5 && !textured) res = MeshoptSimplifier.simplifySloppy(res, m.pos, 3, null, want, 0.3)[0];
+    idx = res;
   }
-  // compacter
-  const remap = new Int32Array(m.pos.length / 3).fill(-1); let n = 0; const oi = new Uint32Array(idx.length);
-  for (let k = 0; k < idx.length; k++) { const v = idx[k]; if (remap[v] < 0) remap[v] = n++; oi[k] = remap[v]; }
-  const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), uv = new Float32Array(n * 2);
-  for (let v = 0; v < remap.length; v++) { const r = remap[v]; if (r < 0) continue; pos.set(m.pos.subarray(v * 3, v * 3 + 3), r * 3); nor.set(m.nor.subarray(v * 3, v * 3 + 3), r * 3); uv.set(m.uv.subarray(v * 2, v * 2 + 2), r * 2); }
-  return { mat: m.mat, pos, nor, uv, idx: oi };
+  return { ...m, idx };
 }
-
-for (const m of bodyAll) m.mat = cfg.merge?.[m.mat] ?? m.mat;
-const wheelRaw = meshes.filter((m) => m.part === cfg.wheelNode); for (const m of wheelRaw) m.mat = cfg.wheelMerge?.[m.mat] ?? m.mat;
-const body = mergeByMat(bodyAll); body.forEach((m) => toGame(m, origin));
-const wheelSrc = mergeByMat(wheelRaw); wheelSrc.forEach((m) => toGame(m, wheelBoxes[cfg.wheelNodes.indexOf(cfg.wheelNode)].c));
-const ratio = (mat) => cfg.keep[mat] ?? cfg.keep['*'];
+/** Fusionne les groupes d'une même famille et compacte les sommets. */
+function mergeBuckets(list) {
+  const by = new Map();
+  for (const m of list) { if (!m.idx.length) continue; const a = by.get(m.bucket) ?? []; a.push(m); by.set(m.bucket, a); }
+  const outList = [];
+  for (const [bucket, ms] of by) {
+    const pos = [], nor = [], uv = [], col = [], idx = []; let n = 0;
+    for (const m of ms) {
+      const remap = new Int32Array(m.pos.length / 3).fill(-1);
+      for (let k = 0; k < m.idx.length; k++) {
+        const v = m.idx[k];
+        if (remap[v] < 0) { remap[v] = n++; pos.push(m.pos[v * 3], m.pos[v * 3 + 1], m.pos[v * 3 + 2]); nor.push(m.nor[v * 3], m.nor[v * 3 + 1], m.nor[v * 3 + 2]); uv.push(m.uv[v * 2], m.uv[v * 2 + 1]); if (m.col) col.push(m.col[v * 4], m.col[v * 4 + 1], m.col[v * 4 + 2], m.col[v * 4 + 3]); }
+        idx.push(remap[v]);
+      }
+    }
+    outList.push({ bucket, mat: ms[0].mat, pos: new Float32Array(pos), nor: new Float32Array(nor), uv: new Float32Array(uv), col: col.length ? new Float32Array(col) : null, idx: new Uint32Array(idx) });
+  }
+  return outList;
+}
+const weight = (m) => (cfg.weights?.[roles[m.mat].name] ?? cfg.weights?.[m.bucket] ?? ({ paint: 3, glass: 2.5, tail: 2, head: 2, lens: 1.5 }[m.bucket] ?? (m.bucket.startsWith('tex:') ? 2 : 1)));
+function level(part, target) {
+  const ms = meshes.filter((m) => m.part === part);
+  const total = ms.reduce((s, m) => s + m.idx.length / 3, 0);
+  if (total <= target) return mergeBuckets(ms);
+  const weighted = ms.reduce((s, m) => s + (m.idx.length / 3) * weight(m), 0);
+  // deux passes : les petits groupes plafonnés à 100 % rendent leur part aux autres
+  let k = target / weighted;
+  for (let pass = 0; pass < 4; pass++) { const got = ms.reduce((s, m) => s + (m.idx.length / 3) * Math.min(1, k * weight(m)), 0); k *= target / got; }
+  return mergeBuckets(ms.map((m) => (m.idx.length < 1800 ? m : simplify(m, Math.min(1, k * weight(m))))));
+}
 const parts = {
-  body: body.map((m) => simplify(m, ratio(m.mat))),
-  body_lod1: body.map((m) => simplify(m, Math.min(1, ratio(m.mat) * cfg.lod1 * (ratio(m.mat) >= 1 ? 1 / cfg.lod1 : 1)))),
-  wheel: wheelSrc.map((m) => simplify(m, cfg.wheelKeep)),
-  wheel_lod1: wheelSrc.map((m) => simplify(m, cfg.wheelKeep * cfg.lod1)),
+  body: level('body', cfg.target ?? 70000),
+  body_lod1: level('body', cfg.targetLod1 ?? 20000),
+  wheel: level('wheel', cfg.wheelTarget ?? 3200),
+  wheel_lod1: level('wheel', cfg.wheelTargetLod1 ?? 900),
 };
 
-// — Écriture du GLB —
+// ───────────────────────── Écriture du GLB ─────────────────────────
 const buffers = []; let length = 0;
 const views = [], accessors = [], images = [], textures = [], materials = [], gm = [], nodes = [];
 function view(data, target) { const b = Buffer.from(data.buffer, data.byteOffset, data.byteLength); const pad = (4 - (b.length % 4)) % 4; views.push({ buffer: 0, byteOffset: length, byteLength: b.length, ...(target ? { target } : {}) }); buffers.push(b, Buffer.alloc(pad)); length += b.length + pad; return views.length - 1; }
-function accessor(data, type, comp, minmax) { const n = { SCALAR: 1, VEC2: 2, VEC3: 3 }[type]; const a = { bufferView: view(data, comp === 5125 ? 34963 : 34962), componentType: comp, count: data.length / n, type }; if (minmax) { const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; for (let k = 0; k < data.length; k++) { lo[k % 3] = Math.min(lo[k % 3], data[k]); hi[k % 3] = Math.max(hi[k % 3], data[k]); } a.min = lo; a.max = hi; } accessors.push(a); return accessors.length - 1; }
+function accessor(data, type, comp, opts = {}) {
+  const n = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 }[type];
+  const a = { bufferView: view(data, type === 'SCALAR' ? 34963 : 34962), componentType: comp, count: data.length / n, type, ...(opts.normalized ? { normalized: true } : {}) };
+  if (opts.minmax) { const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9]; for (let k = 0; k < data.length; k++) { lo[k % 3] = Math.min(lo[k % 3], data[k]); hi[k % 3] = Math.max(hi[k % 3], data[k]); } a.min = lo; a.max = hi; }
+  accessors.push(a); return accessors.length - 1;
+}
 const matIndex = new Map();
-function material(name) {
-  if (matIndex.has(name)) return matIndex.get(name);
-  const src = g.materials.find((m) => m.name === name); const pbr = { ...(src.pbrMetallicRoughness ?? {}) };
-  delete pbr.metallicRoughnessTexture;
-  if (pbr.baseColorTexture) {
-    const size = cfg.textures[name];
-    if (size) {
-      const file = path.join(process.env.TEX_DIR ?? dir, `${id}-${name}.png`);
-      images.push({ bufferView: view(new Uint8Array(fs.readFileSync(file))), mimeType: 'image/png' });
-      textures.push({ source: images.length - 1 }); pbr.baseColorTexture = { index: textures.length - 1 };
-    } else delete pbr.baseColorTexture;
-  }
-  const m = { name, pbrMetallicRoughness: pbr }; if (src.alphaMode) m.alphaMode = src.alphaMode; if (src.alphaCutoff !== undefined) m.alphaCutoff = src.alphaCutoff; if (src.doubleSided) m.doubleSided = true;
-  materials.push(m); matIndex.set(name, materials.length - 1); return materials.length - 1;
+async function material(bucket, mat) {
+  if (matIndex.has(bucket)) return matIndex.get(bucket);
+  const role = roles[mat]; const m = { name: bucket, pbrMetallicRoughness: {} };
+  if (bucket === 'paint') m.pbrMetallicRoughness = { baseColorFactor: [...role.color.slice(0, 3), 1], metallicFactor: 0.5, roughnessFactor: 0.3 };
+  else if (bucket === 'glass') { m.pbrMetallicRoughness = { baseColorFactor: [0.02, 0.03, 0.04, 0.5], metallicFactor: 0.6, roughnessFactor: 0.06 }; m.alphaMode = 'BLEND'; }
+  else if (bucket === 'lens') { m.pbrMetallicRoughness = { metallicFactor: 0.2, roughnessFactor: 0.1 }; m.alphaMode = 'BLEND'; }
+  else if (bucket.startsWith('tex:')) {
+    const t = role.tex; const big = role.tris > 2000 ? (cfg.texSize ?? 1024) : role.tris > 200 ? 512 : 256;
+    const meta = await sharp(t.file).metadata();
+    const alpha = meta.hasAlpha && (role.mask || g.materials[mat].alphaMode === 'BLEND');
+    const img = sharp(t.file).resize(big, big, { fit: 'inside', withoutEnlargement: true });
+    const buf = alpha ? await img.png({ compressionLevel: 9, palette: true }).toBuffer() : await img.flatten({ background: '#000' }).jpeg({ quality: 84 }).toBuffer();
+    images.push({ bufferView: view(new Uint8Array(buf)), mimeType: alpha ? 'image/png' : 'image/jpeg' });
+    textures.push({ source: images.length - 1, sampler: 0 });
+    const f = g.materials[mat].pbrMetallicRoughness?.baseColorFactor ?? [1, 1, 1, 1];
+    m.pbrMetallicRoughness = { baseColorFactor: f, baseColorTexture: { index: textures.length - 1 }, metallicFactor: Math.min(role.metal, 0.9), roughnessFactor: Math.max(role.rough, 0.25) };
+    if (role.mask) { m.alphaMode = 'MASK'; m.alphaCutoff = g.materials[mat].alphaCutoff ?? 0.5; }
+    if (role.doubleSided) m.doubleSided = true;
+  } else m.pbrMetallicRoughness = { metallicFactor: bucket === 'matte' ? 0 : 1, roughnessFactor: bucket === 'chrome' ? 0.12 : bucket === 'metal' ? 0.42 : 0.62 };
+  materials.push(m); matIndex.set(bucket, materials.length - 1); return materials.length - 1;
 }
-const stats = {};
+const stats = {}; const draws = {};
 for (const [name, list] of Object.entries(parts)) {
-  const prims = []; let tri = 0;
-  for (const m of list) {
-    if (!m.idx.length) continue; tri += m.idx.length / 3;
-    const attributes = { POSITION: accessor(m.pos, 'VEC3', 5126, true), NORMAL: accessor(m.nor, 'VEC3', 5126) };
-    if (cfg.textures[m.mat]) attributes.TEXCOORD_0 = accessor(m.uv, 'VEC2', 5126);
-    prims.push({ attributes, indices: accessor(m.idx, 'SCALAR', 5125), material: material(m.mat) });
+  const primsOut = []; let tri = 0;
+  for (const m of list.sort((a, b) => a.bucket.localeCompare(b.bucket))) {
+    tri += m.idx.length / 3;
+    const attributes = { POSITION: accessor(m.pos, 'VEC3', 5126, { minmax: true }), NORMAL: accessor(m.nor, 'VEC3', 5126) };
+    if (m.bucket.startsWith('tex:')) attributes.TEXCOORD_0 = accessor(m.uv, 'VEC2', 5126);
+    if (m.col) attributes.COLOR_0 = accessor(Uint8Array.from(m.col, (v) => Math.round(Math.min(1, Math.max(0, v)) * 255)), 'VEC4', 5121, { normalized: true });
+    const small = m.pos.length / 3 < 65536;
+    primsOut.push({ attributes, indices: accessor(small ? Uint16Array.from(m.idx) : m.idx, 'SCALAR', small ? 5123 : 5125), material: await material(m.bucket, m.mat) });
   }
-  gm.push({ name, primitives: prims }); nodes.push({ name, mesh: gm.length - 1 }); stats[name] = tri;
+  gm.push({ name, primitives: primsOut }); nodes.push({ name, mesh: gm.length - 1 }); stats[name] = tri; draws[name] = primsOut.length;
 }
-const gb = bbox(parts.body);
-const extras = { id, credit: cfg.credit, wheelRadius: +wheelRadius.toFixed(4), halfTrack: +halfTrack.toFixed(4), axleFrontZ: +(cfg.wheelbase / 2).toFixed(4), axleRearZ: -+(cfg.wheelbase / 2).toFixed(4), wheelSide, size: gb.hi.map((v, k) => +(v - gb.lo[k]).toFixed(3)), min: gb.lo.map((v) => +v.toFixed(3)), max: gb.hi.map((v) => +v.toFixed(3)), triangles: stats };
-const json = { asset: { version: '2.0', generator: 'jeu-course-tokyo convert-car', copyright: cfg.credit }, scene: 0, scenes: [{ nodes: nodes.map((_, k) => k), extras }], nodes, meshes: gm, materials, accessors, bufferViews: views, buffers: [{ byteLength: length }], ...(images.length ? { images, textures, samplers: [{}] } : {}) };
-if (images.length) textures.forEach((t) => (t.sampler = 0));
+const r3 = (v) => +v.toFixed(3);
+const bb = { lo: [1e9, 1e9, 1e9], hi: [-1e9, -1e9, -1e9] };
+for (const m of parts.body) for (let k = 0; k < m.pos.length; k++) { bb.lo[k % 3] = Math.min(bb.lo[k % 3], m.pos[k]); bb.hi[k % 3] = Math.max(bb.hi[k % 3], m.pos[k]); }
+const fw = wheels.filter(isFront), rw = wheels.filter((w) => !isFront(w));
+const avg = (l, f) => l.reduce((s, w) => s + f(w), 0) / l.length;
+const paintRole = roles.find((r) => r.role === 'paint');
+const extras = {
+  id, credit: cfg.credit,
+  wheelSide: wheels[tpl].side,
+  wheelRadius: r3(wheels[tpl].r * scale),
+  axleFrontZ: r3((frontZ - origin[2]) * scale), axleRearZ: r3((rearZ - origin[2]) * scale),
+  halfTrackFront: r3(avg(fw, (w) => Math.abs(w.cx - midX)) * scale), halfTrackRear: r3(avg(rw, (w) => Math.abs(w.cx - midX)) * scale),
+  radiusFront: r3(avg(fw, (w) => w.r) * scale), radiusRear: r3(avg(rw, (w) => w.r) * scale),
+  paint: paintRole ? paintRole.color.slice(0, 3).map(r3) : null,
+  min: bb.lo.map(r3), max: bb.hi.map(r3), triangles: stats, draws,
+};
+const json = { asset: { version: '2.0', generator: 'jeu-course-tokyo convert-car', copyright: cfg.credit }, scene: 0, scenes: [{ nodes: nodes.map((_, k) => k), extras }], nodes, meshes: gm, materials, accessors, bufferViews: views, buffers: [{ byteLength: length }], ...(images.length ? { images, textures, samplers: [{ magFilter: 9729, minFilter: 9987 }] } : {}) };
 let jb = Buffer.from(JSON.stringify(json)); jb = Buffer.concat([jb, Buffer.alloc((4 - (jb.length % 4)) % 4, 0x20)]);
 const body2 = Buffer.concat(buffers); const head = Buffer.alloc(12); head.writeUInt32LE(0x46546c67, 0); head.writeUInt32LE(2, 4); head.writeUInt32LE(12 + 8 + jb.length + 8 + body2.length, 8);
 const h1 = Buffer.alloc(8); h1.writeUInt32LE(jb.length, 0); h1.writeUInt32LE(0x4e4f534a, 4); const h2 = Buffer.alloc(8); h2.writeUInt32LE(body2.length, 0); h2.writeUInt32LE(0x004e4942, 4);
 fs.mkdirSync(path.dirname(out), { recursive: true }); fs.writeFileSync(out, Buffer.concat([head, h1, jb, h2, body2]));
-console.log(JSON.stringify(extras, null, 1)); console.log('fichier', (fs.statSync(out).size / 1e6).toFixed(2), 'Mo');
-for (const [n, l] of Object.entries(parts)) console.log(n, l.map((m) => `${m.mat}:${m.idx.length / 3}`).join(' '));
+
+log(`${id} : ${(fs.statSync(out).size / 1e6).toFixed(2)} Mo — taille ${r3(bb.hi[0] - bb.lo[0])} × ${r3(bb.hi[1] - bb.lo[1])} × ${r3(bb.hi[2] - bb.lo[2])} m, échelle ${scale.toFixed(4)}`);
+log(`  roues : rayon av ${extras.radiusFront} ar ${extras.radiusRear}, voie ${extras.halfTrackFront}/${extras.halfTrackRear}, essieux ${extras.axleFrontZ}/${extras.axleRearZ}, triangles par roue ${wheelTris.join('/')}`);
+for (const [n, l] of Object.entries(parts)) log(`  ${n} (${stats[n]}) : ` + l.map((m) => `${m.bucket}:${m.idx.length / 3}`).join(' '));
+if (process.env.ROLES) for (const r of roles) if (r.tris) log(`    ${r.bucket.padEnd(18)} ${String(r.tris).padStart(7)} ${r.name}`);

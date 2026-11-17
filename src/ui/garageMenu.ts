@@ -125,7 +125,7 @@ export class GarageMenu {
       <div class="scroll">
         <h3>Mes voitures (${p.cars.length}/${MAX_CARS})</h3>${cars}
         <h3>Améliorations — ${model.name}</h3>${upgrades}${nos}
-        <h3>Peinture <small>${yen(PAINT_PRICE)} le changement</small></h3><div class="g-swatches">${paints}</div>
+        <h3>Peinture <small>${model.paintable ? `${yen(PAINT_PRICE)} le changement` : 'livrée d’origine, non modifiable'}</small></h3>${model.paintable ? `<div class="g-swatches">${paints}</div>` : ''}
         <h3>Néon sous la voiture <small>${car.neonOwned ? 'installé : couleur au choix' : yen(NEON_PRICE)}</small></h3><div class="g-swatches">${neonOff}${neons}</div>
         <h3>Concessionnaire</h3>${dealer}
         <p class="g-note">Revente : 50 % du prix d'achat et des améliorations. ${p.races} course${p.races > 1 ? 's' : ''}, ${p.wins} victoire${p.wins > 1 ? 's' : ''}.</p>

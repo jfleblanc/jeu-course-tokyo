@@ -43,7 +43,7 @@ export class RaceVisuals {
     /** Aperçu : barrer les rues transversales le long du tracé. */
     private readonly barriers = false,
     tracks: Track[] = [],
-    /** Modèle 3D d'essai pour les adversaires (null = voiture procédurale). */
+    /** Modèle 3D imposé à tous les adversaires (`?modele=`) ; null = celui de chaque pilote. */
     private readonly carModelId: string | null = null,
   ) {
     this.group.name = 'course';
@@ -218,11 +218,17 @@ export class RaceVisuals {
     for (const r of race.racers) {
       if (r.isPlayer || !r.level) continue;
       const v = createCarVisual(CAR_SPEC, { color: r.level.color, lights: false });
-      if (this.carModelId) {
-        loadCarAsset(this.carModelId)
-          .then((asset) => applyCarAsset(v, asset, CAR_SPEC, { lod: 1 }))
-          .catch(() => undefined);
+      // Vrai modèle 3D : la voiture reste cachée le temps du chargement (sinon on verrait la voiture procédurale).
+      if (this.carModelId === 'aucun') {
+        this.group.add(v.root);
+        this.cars.push(v);
+        continue;
       }
+      v.root.visible = false;
+      loadCarAsset(this.carModelId ?? r.level.glb)
+        .then((asset) => applyCarAsset(v, asset, CAR_SPEC, { lod: 1 }))
+        .catch(() => undefined)
+        .finally(() => (v.root.visible = true));
       this.group.add(v.root);
       this.cars.push(v);
     }
@@ -236,7 +242,7 @@ export class RaceVisuals {
       this.group.remove(child);
       child.traverse((o) => {
         const mesh = o as THREE.Mesh;
-        if (mesh.isMesh) mesh.geometry.dispose();
+        if (mesh.isMesh && !mesh.userData.shared) mesh.geometry.dispose();
       });
     }
     this.cars = [];
