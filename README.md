@@ -28,6 +28,7 @@ npm install
 npm run dev        # serveur local
 npm run build      # vérification des types + build de production
 npm run sim        # banc d'essai physique sans affichage (0-100, virages, drift…)
+npm run smoke      # test de fumée du build dans un navigateur sans tête (après npm run build)
 ```
 
 Options d'adresse : `?q=bas|moyen|haut` (qualité), `?webgl` (forcer WebGL2), `?graine=1234` (autre ville).

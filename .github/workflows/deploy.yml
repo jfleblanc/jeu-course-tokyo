@@ -27,6 +27,17 @@ jobs:
           if [ -f package-lock.json ]; then npm ci; else npm install --no-audit --no-fund; fi
       - name: Vérifier les types et construire
         run: npm run build
+      - name: Test de fumée (le jeu démarre, la voiture roule, aucune erreur console)
+        run: |
+          npx playwright install --with-deps chromium
+          npm run smoke
+      - name: Garder la capture d'écran du test
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: capture-test
+          path: smoke-test.png
+          if-no-files-found: ignore
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
