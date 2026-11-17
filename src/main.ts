@@ -21,6 +21,7 @@ import { Sfx } from './audio/sfx';
 import { Traffic, type TrafficActor } from './world/traffic';
 import { TrafficVisuals } from './render/trafficVisuals';
 import { LampVisuals } from './render/lampVisuals';
+import { testSpots } from './debug/spots';
 import { LampField, type LampStriker } from './world/lampField';
 import { DistrictGates } from './world/districtGates';
 import { FullMap } from './ui/fullMap';
@@ -190,7 +191,7 @@ async function boot(): Promise<void> {
   const sound = sfx;
 
   // ——— Écran titre, tutoriel, paramètres ———
-  const direct = params.has('direct'); // ?direct : sans écran titre ni tutoriel (essais automatiques)
+  const direct = params.has('direct') || params.has('lieu'); // ?direct : sans écran titre ni tutoriel (essais automatiques)
   let titlePhase: 'attente' | 'glisse' | 'fini' = direct ? 'fini' : 'attente';
   let titleTime = 0;
   let glide = 0;
@@ -312,8 +313,34 @@ async function boot(): Promise<void> {
   // Quartiers extérieurs : fermés par une barrière de chantier jusqu'au niveau requis.
   // ?quartiers=ouverts les ouvre tous (essais).
   const gates = new DistrictGates(scene, phys, [...city.graph.districts, ...city.links.map((l) => ({ name: l.name, unlockLevel: l.unlockLevel, gate: l.gate, link: true }))]);
-  const allDistrictsOpen = params.get('quartiers') === 'ouverts';
+  const allDistrictsOpen = params.get('quartiers') === 'ouverts' || params.has('lieu');
   gates.setLevel(player.level, allDistrictsOpen);
+  // ?lieu=<id> : téléporte la voiture à un endroit à essayer ; PagePréc / PageSuiv : endroit voisin.
+  if (params.has('lieu')) {
+    const spots = testSpots(city);
+    let at = Math.max(0, spots.findIndex((sp) => sp.id === params.get('lieu')));
+    const go = (): void => {
+      const sp = spots[at];
+      if (!sp) return;
+      if (race.phase !== 'idle') race.stop();
+      car.teleport(sp.x, sp.y + REST_HEIGHT + 0.25, sp.z, sp.yaw);
+      hud.toast(`${sp.label} — ?lieu=${sp.id}`);
+    };
+    if (params.get('lieu') === 'liste' || !spots.some((sp) => sp.id === params.get('lieu'))) {
+      const box = document.createElement('pre');
+      box.style.cssText = 'position:fixed;left:16px;bottom:120px;z-index:50;margin:0;padding:12px 14px;background:rgba(10,8,24,.88);color:#dfe6ff;font:12px/1.5 ui-monospace,monospace;border:1px solid rgba(255,255,255,.15);border-radius:8px;max-height:60vh;overflow:auto';
+      box.textContent = 'Endroits (?lieu=…) — PagePréc / PageSuiv pour changer, L pour masquer\n\n' + spots.map((sp) => `${sp.id.padEnd(18)} ${sp.label}`).join('\n');
+      document.body.append(box);
+      window.addEventListener('keydown', (e) => { if (e.code === 'KeyL') box.style.display = box.style.display === 'none' ? '' : 'none'; });
+    }
+    window.addEventListener('keydown', (e) => {
+      if (e.code !== 'PageDown' && e.code !== 'PageUp') return;
+      e.preventDefault();
+      at = (at + (e.code === 'PageDown' ? 1 : spots.length - 1)) % spots.length;
+      go();
+    });
+    go();
+  }
   const refreshProgress = (): void => {
     hud.setProgress(player.level, player.tierName, player.xp, player.xpNeeded, player.money, player.trialPending);
     for (const d of gates.setLevel(player.level, allDistrictsOpen)) hud.toast(d.link ? `Liaison ouverte : ${d.name} !` : `Nouveau quartier ouvert : ${d.name} !`);

@@ -107,6 +107,14 @@ palier. La mini-carte tourne avec la voiture et montre le tracé, les objets et 
 L'option d'adresse `?barrieres` affiche un aperçu des rues transversales barrées (désactivé par
 défaut). Réglages : `src/config/race.ts` (pilotes, banque, objets).
 
+## Se téléporter pour essayer
+
+Ajouter `?lieu=<nom>` à l'adresse place la voiture à un endroit précis, ouvre tous les quartiers
+et saute l'écran titre. `PagePréc` / `PageSuiv` passent à l'endroit voisin. `?lieu=liste` affiche
+tous les noms. Les principaux : `autoroute`, `rampe`, `ceinture`, `baie`, `docks`, `collines`,
+`docks-limite` (le quai), `pont-hakone`, `col`, `lacets`, `sommet`, `tunnel`, `tunnel-milieu`,
+`pont`, `pont-milieu`. Liste : `src/debug/spots.ts`.
+
 ## Quartiers extérieurs
 
 Trois quartiers **aussi grands que la ville principale** (environ 20 km de rues chacun) se
