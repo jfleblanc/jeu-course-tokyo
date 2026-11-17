@@ -30,6 +30,8 @@ export interface Racer {
   finishTime: number;
   /** Décalage latéral sur la ligne de course (m). */
   lane: number;
+  /** Écart momentané pour contourner une voiture de la circulation (m). */
+  avoid: number;
   input: DriveInput;
   stuckTime: number;
   resets: number;
@@ -72,6 +74,8 @@ export class Race {
   time = 0;
   /** Temps restant avant le départ (s). */
   countdown = 0;
+  /** Voitures de la circulation que les adversaires doivent contourner (mis à jour par le jeu). */
+  obstacles: { x: number; z: number }[] = [];
   /** Incrémenté à chaque départ : le rendu sait qu'il doit reconstruire le décor de course. */
   generation = 0;
   /** Multiplicateur de niveau des adversaires (1 = normal). */
@@ -159,7 +163,7 @@ export class Race {
   }
 
   private makeRacer(name: string, isPlayer: boolean, car: Vehicle, level: AiLevel | null, index: number, lane: number): Racer {
-    return { name, isPlayer, car, level, index, progress: index * 3, nextCheckpoint: 0, finished: false, finishTime: 0, lane, input: emptyDriveInput(), stuckTime: 0, resets: 0 };
+    return { name, isPlayer, car, level, index, progress: index * 3, nextCheckpoint: 0, finished: false, finishTime: 0, lane, avoid: 0, input: emptyDriveInput(), stuckTime: 0, resets: 0 };
   }
 
   /** Arrête la course et retire les adversaires. */
@@ -205,7 +209,20 @@ export class Race {
           const t = clamp(gap / RUBBER_BAND.distance, -1, 1);
           factor = t > 0 ? 1 - RUBBER_BAND.maxSlow * t : 1 - RUBBER_BAND.maxBoost * t;
         }
-        driveAlongRoute(r.car, route, r.index, r.level, factor * this.difficulty, r.lane, r.input);
+        // Circulation : on contourne la voiture ordinaire la plus proche devant soi.
+        const hx = Math.sin(r.car.yaw), hz = Math.cos(r.car.yaw);
+        let want = 0, nearest = 45;
+        for (const o of this.obstacles) {
+          const dx = o.x - r.car.pos.x, dz = o.z - r.car.pos.z;
+          const along = dx * hx + dz * hz;
+          if (along < 2 || along > nearest) continue;
+          const lat = dx * hz - dz * hx; // > 0 : obstacle à gauche
+          if (Math.abs(lat) > 3) continue;
+          nearest = along;
+          want = lat >= 0 ? -3.6 : 3.6;
+        }
+        r.avoid += clamp(want - r.avoid, -7 * dt, 7 * dt);
+        driveAlongRoute(r.car, route, r.index, r.level, factor * this.difficulty, r.lane + r.avoid, r.input);
       }
       r.car.update(dt, r.input, cfg);
     }

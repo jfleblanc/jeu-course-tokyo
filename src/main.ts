@@ -202,7 +202,10 @@ async function boot(): Promise<void> {
   // Circulation (essai) : en balade seulement. ?trafic=non la coupe.
   const traffic = new Traffic(phys, city.graph, seed);
   const trafficVisuals = new TrafficVisuals(scene, traffic);
+  // ?trafic=non : aucune circulation ; ?trafic=balade : pas pendant les courses.
   const trafficOn = params.get('trafic') !== 'non';
+  const trafficInRace = params.get('trafic') !== 'balade';
+  let lastTrafficRoute: unknown = null;
   const actors: TrafficActor[] = [{ x: 0, z: 0, vx: 0, vz: 0 }];
   const tutorial = new Tutorial();
   let cheat = '';
@@ -487,11 +490,27 @@ async function boot(): Promise<void> {
       player.applyTo(store.current, tuned);
       car.update(dt, race.playerInput(input.drive), tuned);
       race.beforeStep(dt, store.current);
-      // Circulation : absente pendant les courses.
-      traffic.enabled = trafficOn && race.phase === 'idle';
+      // Circulation : partout en balade ; sur le tracé pendant une course (obstacles).
+      const trafficRoute = race.active ? race.route : null;
+      if (trafficRoute !== lastTrafficRoute) {
+        lastTrafficRoute = trafficRoute;
+        traffic.setRoute(trafficRoute && trafficInRace ? trafficRoute.edges : null);
+      }
+      traffic.enabled = trafficOn && (!race.active || trafficInRace) && race.phase !== 'finished';
+      traffic.keepOut = race.phase === 'countdown' ? 130 : 0;
+      actors.length = 1;
       const me = actors[0] as TrafficActor;
       const lv = car.body.linvel();
       me.x = car.pos.x; me.z = car.pos.z; me.vx = lv.x; me.vz = lv.z;
+      race.obstacles.length = 0;
+      if (race.active) {
+        for (const r of race.racers) {
+          if (r.isPlayer) continue;
+          const v = r.car.body.linvel();
+          actors.push({ x: r.car.pos.x, z: r.car.pos.z, vx: v.x, vz: v.z });
+        }
+        for (const c of traffic.cars) if (c.active) race.obstacles.push(c);
+      }
       traffic.beforeStep(dt, actors);
       phys.world.step();
       car.afterStep();
