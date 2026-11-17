@@ -21,6 +21,8 @@ export const KEY_EVENTS: Record<string, ActionEvent> = {
   KeyB: 'toggleAB',
   KeyR: 'reset',
   KeyH: 'toggleHelp',
+  KeyN: 'musicNext',
+  KeyP: 'musicToggle',
 };
 
 /**
@@ -41,5 +43,7 @@ export const GAMEPAD = {
     8: 'togglePanel', // −
     9: 'toggleAB', // +
     10: 'reset', // clic du stick gauche
+    15: 'musicNext', // croix : droite
+    13: 'musicToggle', // croix : bas
   } as Record<number, ActionEvent>,
 } as const;

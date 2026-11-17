@@ -54,7 +54,7 @@ export class AbPanel {
         <div class="tabs">
           <button data-tab="conduite" class="active">Conduite</button>
           <button data-tab="telemetrie">Télémétrie</button>
-          <button data-tab="rendu">Rendu</button>
+          <button data-tab="rendu">Rendu et son</button>
         </div>
       </header>
       <div class="scroll">
@@ -69,7 +69,7 @@ export class AbPanel {
           <div class="note" data-ref="pad"></div>
         </section>
         <section data-page="rendu" hidden>
-          <h3>Ambiance</h3>
+          <h3>Ambiance et musique</h3>
           <div data-ref="render"></div>
           <h3>Qualité</h3>
           <div class="row"><select data-ref="quality">

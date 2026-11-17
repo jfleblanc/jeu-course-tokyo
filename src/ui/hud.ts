@@ -52,6 +52,7 @@ export class Hud {
       <kbd>Espace</kbd> drift · <kbd>C</kbd> caméra · <kbd>R</kbd> replacer la voiture<br>
       <kbd>M</kbd> boîte auto / manuelle · <kbd>↑</kbd> <kbd>↓</kbd> rapports (manuelle)<br>
       <kbd>F1</kbd> panneau de réglage · <kbd>B</kbd> basculer conduite A / B<br>
+      <kbd>N</kbd> musique suivante · <kbd>P</kbd> musique oui / non<br>
       <kbd>H</kbd> masquer cette aide
       <div class="pad" id="hud-pad"></div>`;
 

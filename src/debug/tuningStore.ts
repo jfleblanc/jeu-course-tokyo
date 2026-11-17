@@ -5,7 +5,7 @@ export type PresetName = 'A' | 'B';
 
 const KEY = 'jeu-course-tokyo.reglages';
 /** À augmenter quand les préréglages par défaut changent : les anciens réglages locaux sont alors ignorés. */
-const VERSION = 2;
+const VERSION = 3;
 
 interface Saved {
   version: number;
@@ -13,6 +13,8 @@ interface Saved {
   B: HandlingConfig;
   active: PresetName;
   render: RenderConfig;
+  musicTrack?: number;
+  musicOn?: boolean;
 }
 
 /** Réglages A/B courants, sauvegardés dans le navigateur. */
@@ -21,6 +23,8 @@ export class TuningStore {
   B: HandlingConfig = { ...PRESET_B };
   active: PresetName = 'A';
   render: RenderConfig = { ...RENDER_DEFAULTS };
+  musicTrack = 0;
+  musicOn = true;
 
   constructor() {
     try {
@@ -33,6 +37,8 @@ export class TuningStore {
           this.B = { ...PRESET_B, ...s.B };
           this.active = s.active === 'B' ? 'B' : 'A';
           this.render = { ...RENDER_DEFAULTS, ...s.render };
+          this.musicTrack = s.musicTrack ?? 0;
+          this.musicOn = s.musicOn ?? true;
         }
       }
     } catch {
@@ -59,7 +65,7 @@ export class TuningStore {
 
   save(): void {
     try {
-      const s: Saved = { version: VERSION, A: this.A, B: this.B, active: this.active, render: this.render };
+      const s: Saved = { version: VERSION, A: this.A, B: this.B, active: this.active, render: this.render, musicTrack: this.musicTrack, musicOn: this.musicOn };
       localStorage.setItem(KEY, JSON.stringify(s));
     } catch {
       // Navigation privée, quota… ce n'est pas grave.

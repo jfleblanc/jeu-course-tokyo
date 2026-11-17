@@ -467,6 +467,17 @@ export class Vehicle {
     }
     body.applyImpulse(imp, true);
 
+    // Accroche en drift : on rend à la voiture, au centre de masse (donc sans effet sur le lacet),
+    // une partie de l'adhérence retirée aux pneus arrière. La trajectoire se courbe vers le nez
+    // au lieu de filer tout droit, et la glisse fait perdre un peu de vitesse.
+    if (contacts >= 2 && this.driftAmount > 0.01 && cfg.driftCarve > 0) {
+      const want = cfg.driftCarve * 9.81 * spec.mass * this.driftAmount * clamp(Math.abs(this.bodySlip) / 0.2, 0, 1);
+      const f = Math.min(want, (Math.abs(vL) * spec.mass) / dt * 0.5);
+      const k = -Math.sign(vL) * f * dt;
+      imp.x = lx * k; imp.y = 0; imp.z = lz * k;
+      body.applyImpulse(imp, true);
+    }
+
     if (contacts >= 2) {
       const iy = spec.inertia.y;
       // Amortissement du lacet (réduit pendant le drift pour laisser pivoter)

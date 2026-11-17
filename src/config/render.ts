@@ -7,6 +7,8 @@ export interface RenderConfig {
   fogDensity: number;
   neon: number;
   wetness: number;
+  /** Volume de la musique (0 = coupée). */
+  musicVolume: number;
 }
 
 export const RENDER_DEFAULTS: RenderConfig = {
@@ -17,6 +19,7 @@ export const RENDER_DEFAULTS: RenderConfig = {
   fogDensity: 0.003,
   neon: 1.0,
   wetness: 1.0,
+  musicVolume: 0.6,
 };
 
 export const RENDER_SLIDERS: { key: keyof RenderConfig; label: string; min: number; max: number; step: number }[] = [
@@ -27,6 +30,7 @@ export const RENDER_SLIDERS: { key: keyof RenderConfig; label: string; min: numb
   { key: 'fogDensity', label: 'Brouillard', min: 0, max: 0.012, step: 0.0002 },
   { key: 'neon', label: 'Intensité des néons', min: 0.3, max: 2, step: 0.05 },
   { key: 'wetness', label: 'Reflets chaussée mouillée', min: 0, max: 1.6, step: 0.05 },
+  { key: 'musicVolume', label: 'Volume de la musique', min: 0, max: 1, step: 0.05 },
 ];
 
 export type Quality = 'bas' | 'moyen' | 'haut';

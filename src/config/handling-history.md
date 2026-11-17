@@ -36,4 +36,22 @@ braquage, ce sont les pneus avant qui limitent le virage.
 Mesures : rayon de virage à 100 km/h, 58 m (A) contre 53 m (B). Un essai plus fort
 (adhérence avant 1.78) partait en tête-à-queue à haute vitesse : écarté.
 
+**Choix retenu (2026-11-16, version da5b578) : B.** Remarque : en drift, la voiture glisse
+« comme sur une plaque de glace » et file tout droit vers le mur.
+
+## 2026-11-16 — Troisième essai : l'accroche en drift
+
+Cause : pendant le drift, l'arrière n'avait plus que 42 % de son adhérence, donc presque plus
+rien ne courbait la trajectoire (et la voiture accélérait). Nouveau réglage `driftCarve` :
+une force appliquée au centre de masse qui ramène la trajectoire vers le nez de la voiture,
+sans freiner la rotation.
+
+| | A — base (ancien B) | B — « Drift qui accroche » |
+|---|---|---|
+| Accroche en drift (`driftCarve`) | 0.3 | 0.75 |
+| Angle de drift max. (`driftMaxAngleDeg`) | 38° | 32° |
+
+Mesures, drift de 4 s lancé à 110 km/h, volant braqué : la trajectoire tourne de 84° sans
+accroche (ancienne version), 114° en A, 160° en B ; la vitesse finit à 114, 87 et 63 km/h.
+
 _Choix retenu : à remplir après les essais._

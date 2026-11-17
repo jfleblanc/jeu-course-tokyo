@@ -73,7 +73,10 @@ async function run(name: string, cfg: HandlingConfig) {
     step(60 * 20, () => { input.throttle = kmh() < 110 ? 1 : 0; input.brake = kmh() > 118 ? 0.5 : 0; });
     input.brake = 0; input.steer = 1; input.drift = true; input.throttle = 1;
     let peak = 0; const td = t; const trace: string[] = [];
+    // Courbure de la trajectoire : de combien la direction du déplacement tourne pendant le drift.
+    const dir0 = Math.atan2(car.body.linvel().x, car.body.linvel().z); let turned = 0; let prevDir = dir0; const v0 = kmh();
     step(60 * 4, () => {
+      const lv = car.body.linvel(); const dirNow = Math.atan2(lv.x, lv.z); let dd = dirNow - prevDir; dd = Math.atan2(Math.sin(dd), Math.cos(dd)); turned += dd; prevDir = dirNow;
       const e = t - td;
       if (e > 0.6 && mode.includes('droit')) input.steer = 0;
       if (e > 0.6 && mode.includes('contre')) input.steer = mode.includes('1.0') ? -1 : -0.4;
@@ -81,7 +84,7 @@ async function run(name: string, cfg: HandlingConfig) {
       peak = Math.max(peak, Math.abs(car.bodySlip));
       if (Math.abs((e * 2) % 1) < FIXED_DT * 2) trace.push((car.bodySlip * 57.3).toFixed(0));
     });
-    console.log(`drift [${mode}]: angle max ${(peak * 57.3).toFixed(0)}°  trace(0.5s) ${trace.join(' ')}  v fin=${kmh().toFixed(0)}`);
+    console.log(`drift [${mode}]: angle max ${(peak * 57.3).toFixed(0)}°  trace(0.5s) ${trace.join(' ')}  v ${v0.toFixed(0)}→${(car.speed * 3.6).toFixed(0)}  trajectoire tournée de ${(Math.abs(turned) * 57.3).toFixed(0)}° en 4 s`);
     input.drift = false; input.steer = 0; input.throttle = 0.5;
     let recover = -1; const tr = t;
     step(60 * 5, () => { if (recover < 0 && Math.abs(car.bodySlip) < 0.05 && Math.abs(car.yawRate) < 0.1) recover = t - tr; });

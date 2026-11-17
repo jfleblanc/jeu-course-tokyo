@@ -2,6 +2,7 @@ import * as THREE from 'three/webgpu';
 import { CAR_SPEC } from './config/handling';
 import { QUALITY, type Quality } from './config/render';
 import { WORLD } from './config/world';
+import { MusicPlayer } from './audio/musicPlayer';
 import { FixedLoop } from './core/loop';
 import { TuningStore } from './debug/tuningStore';
 import { InputManager } from './input/input';
@@ -99,7 +100,10 @@ async function boot(): Promise<void> {
       hud.setPreset(p);
       hud.toast(`Conduite ${p}`);
     },
-    onRender: (cfg) => ctx.apply(cfg),
+    onRender: (cfg) => {
+      ctx.apply(cfg);
+      music.setVolume(cfg.musicVolume);
+    },
     onQuality: (q) => {
       try {
         localStorage.setItem('jeu-course-tokyo.qualite', q);
@@ -112,6 +116,7 @@ async function boot(): Promise<void> {
     },
   });
   ctx.apply(store.render);
+  const music = new MusicPlayer(store.musicTrack, store.musicOn, store.render.musicVolume);
 
   const respawn = (): void => {
     let best = city.respawns[0] ?? city.spawn;
@@ -147,6 +152,17 @@ async function boot(): Promise<void> {
         break;
       case 'toggleHelp':
         hud.toggleHelp();
+        break;
+      case 'musicNext':
+        hud.toast(`♪ ${music.next()}`);
+        store.musicTrack = music.trackIndex;
+        store.musicOn = true;
+        store.save();
+        break;
+      case 'musicToggle':
+        store.musicOn = music.toggle();
+        store.save();
+        hud.toast(store.musicOn ? `♪ ${music.trackName}` : 'Musique coupée');
         break;
       default:
         break;
@@ -185,7 +201,7 @@ async function boot(): Promise<void> {
         const info = renderer.info.render;
         perfText = `${Math.round(frames / perfTimer)} i/s · ${info.drawCalls} appels · ${Math.round(info.triangles / 1000)}k tri`;
         hud.setPerf(perfText);
-        hud.setPad(input.gamepad.connected ? `🎮 Manette : ZR gaz · ZL frein · B/A drift · R/L rapports · X caméra · Y boîte · + A/B · − panneau` : '');
+        hud.setPad(input.gamepad.connected ? `🎮 Manette : ZR gaz · ZL frein · B/A drift · R/L rapports · X caméra · Y boîte · + A/B · − panneau · croix → musique` : '');
         frames = 0;
         perfStart = nowMs;
       }

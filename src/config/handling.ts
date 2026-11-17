@@ -56,6 +56,11 @@ export interface HandlingConfig {
   // ——— Drift (espace) ———
   /** Adhérence arrière pendant le drift (fraction de l'adhérence normale). */
   driftRearGrip: number;
+  /**
+   * Accroche en drift : force qui ramène la trajectoire vers le nez de la voiture pendant la glisse.
+   * 0 = plaque de glace (la voiture pivote mais file tout droit), 1 = la voiture « taille » le virage.
+   */
+  driftCarve: number;
   /** Angle de drift maximal (°) avant que l'aide ne retienne la voiture. */
   driftMaxAngleDeg: number;
   /** Coup de lacet au déclenchement du drift (rad/s). */
@@ -77,17 +82,17 @@ export interface HandlingConfig {
 }
 
 /**
- * Préréglage A — « Joueuse de l'arrière » (ancien B, retenu le 2026-11-16).
- * C'est la base actuelle : l'arrière glisse un peu, les drifts tiennent.
+ * Préréglage A — base actuelle (choisie par les joueurs le 2026-11-16) :
+ * arrière joueur + braquage nerveux. Son drift glisse beaucoup (peu d'accroche).
  */
 export const PRESET_A: HandlingConfig = {
   enginePower: 1.0,
   engineBrake: 0.35,
 
-  gripFront: 1.55,
+  gripFront: 1.64,
   gripRear: 1.52,
   gripLong: 1.5,
-  peakSlipDeg: 8,
+  peakSlipDeg: 7,
   slideGrip: 0.82,
   tractionControl: 0.7,
 
@@ -100,12 +105,13 @@ export const PRESET_A: HandlingConfig = {
   steerMaxDeg: 32,
   steerMinDeg: 7,
   steerSpeedRef: 170,
-  steerRate: 4.5,
+  steerRate: 6.5,
 
   yawDamping: 1.2,
   counterSteer: 0.45,
 
   driftRearGrip: 0.42,
+  driftCarve: 0.3,
   driftMaxAngleDeg: 38,
   driftKick: 0.55,
   driftRecovery: 0.6,
@@ -118,19 +124,15 @@ export const PRESET_A: HandlingConfig = {
 };
 
 /**
- * Préréglage B — « Braquage plus nerveux ».
- * Identique à A sauf TROIS réglages (pour bien sentir la différence) :
- *   - gripFront    1.55 → 1.64  (le nez mord plus : la voiture tourne plus court)
- *   - peakSlipDeg  8    → 7     (les pneus répondent plus tôt au volant)
- *   - steerRate    4.5  → 6.5   (le volant réagit plus vite)
- * Note : augmenter l'angle de braquage seul ne change presque rien, car à plein
- * braquage ce sont les pneus avant qui limitent le virage, pas l'angle des roues.
+ * Préréglage B — « Drift qui accroche ».
+ * Identique à A sauf DEUX réglages de drift :
+ *   - driftCarve        0.3 → 0.75  (la trajectoire suit le nez : on prend vraiment le virage)
+ *   - driftMaxAngleDeg  38  → 32    (angle un peu plus fermé, plus facile à tenir)
  */
 export const PRESET_B: HandlingConfig = {
   ...PRESET_A,
-  gripFront: 1.64,
-  peakSlipDeg: 7,
-  steerRate: 6.5,
+  driftCarve: 0.75,
+  driftMaxAngleDeg: 32,
 };
 
 export interface SliderDef {
@@ -190,6 +192,7 @@ export const HANDLING_SLIDERS: SliderGroup[] = [
     title: 'Drift (espace)',
     sliders: [
       { key: 'driftRearGrip', label: 'Adhérence arrière en drift', min: 0.2, max: 0.9, step: 0.01, hint: 'Plus bas = drift plus large et plus long.' },
+      { key: 'driftCarve', label: 'Accroche en drift', min: 0, max: 1.2, step: 0.05, hint: '0 = plaque de glace. Plus haut = la voiture suit son nez dans le virage.' },
       { key: 'driftMaxAngleDeg', label: 'Angle de drift max. (°)', min: 15, max: 70, step: 1, hint: 'Au-delà, l’aide retient la voiture.' },
       { key: 'driftKick', label: 'Coup de lacet', min: 0, max: 1.5, step: 0.05, hint: 'Impulsion au déclenchement du drift.' },
       { key: 'driftRecovery', label: 'Sortie de drift (s)', min: 0.1, max: 2, step: 0.05, hint: 'Temps pour retrouver l’adhérence.' },

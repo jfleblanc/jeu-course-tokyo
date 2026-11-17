@@ -32,7 +32,9 @@ export type ActionEvent =
   | 'togglePanel'
   | 'toggleAB'
   | 'reset'
-  | 'toggleHelp';
+  | 'toggleHelp'
+  | 'musicNext'
+  | 'musicToggle';
 
 export const emptyDriveInput = (): DriveInput => ({
   throttle: 0,

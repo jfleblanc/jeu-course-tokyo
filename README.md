@@ -19,6 +19,7 @@ Le numéro de version (hash du commit) est affiché en haut à droite.
 | Panneau de réglage A/B | `F1` | `−` |
 | Basculer conduite A ↔ B | `B` | `+` |
 | Replacer la voiture | `R` | clic du stick gauche |
+| Musique suivante / musique oui-non | `N` / `P` | croix → / croix ↓ |
 | Afficher / masquer l'aide | `H` | |
 
 ## Développer
@@ -44,6 +45,7 @@ src/
   vehicle/    simulation (sans Three.js), moteur/boîte, modèle 3D procédural
   world/      graphe de rues → données de la ville → maillages et collisions
   render/     rendu WebGPU, matériaux TSL, bloom, caméras
+  audio/      musique générée par code (pistes décrites dans config/music.ts)
   ui/         HUD et panneau A/B
   debug/      stockage des réglages A/B
 scripts/      banc d'essai physique
