@@ -77,15 +77,15 @@ export interface HandlingConfig {
 }
 
 /**
- * Préréglage A — « Collée à la route ».
- * Référence de départ : stable, l'arrière suit, le drift demande la touche espace.
+ * Préréglage A — « Joueuse de l'arrière » (ancien B, retenu le 2026-11-16).
+ * C'est la base actuelle : l'arrière glisse un peu, les drifts tiennent.
  */
 export const PRESET_A: HandlingConfig = {
   enginePower: 1.0,
   engineBrake: 0.35,
 
   gripFront: 1.55,
-  gripRear: 1.7,
+  gripRear: 1.52,
   gripLong: 1.5,
   peakSlipDeg: 8,
   slideGrip: 0.82,
@@ -102,10 +102,10 @@ export const PRESET_A: HandlingConfig = {
   steerSpeedRef: 170,
   steerRate: 4.5,
 
-  yawDamping: 2.2,
+  yawDamping: 1.2,
   counterSteer: 0.45,
 
-  driftRearGrip: 0.55,
+  driftRearGrip: 0.42,
   driftMaxAngleDeg: 38,
   driftKick: 0.55,
   driftRecovery: 0.6,
@@ -118,17 +118,19 @@ export const PRESET_A: HandlingConfig = {
 };
 
 /**
- * Préréglage B — « Joueuse de l'arrière ».
+ * Préréglage B — « Braquage plus nerveux ».
  * Identique à A sauf TROIS réglages (pour bien sentir la différence) :
- *   - gripRear        1.70 → 1.52  (l'arrière décroche plus tôt en virage)
- *   - yawDamping      2.2  → 1.2   (la voiture pivote plus librement)
- *   - driftRearGrip   0.55 → 0.42  (drifts plus longs et plus larges)
+ *   - gripFront    1.55 → 1.64  (le nez mord plus : la voiture tourne plus court)
+ *   - peakSlipDeg  8    → 7     (les pneus répondent plus tôt au volant)
+ *   - steerRate    4.5  → 6.5   (le volant réagit plus vite)
+ * Note : augmenter l'angle de braquage seul ne change presque rien, car à plein
+ * braquage ce sont les pneus avant qui limitent le virage, pas l'angle des roues.
  */
 export const PRESET_B: HandlingConfig = {
   ...PRESET_A,
-  gripRear: 1.52,
-  yawDamping: 1.2,
-  driftRearGrip: 0.42,
+  gripFront: 1.64,
+  peakSlipDeg: 7,
+  steerRate: 6.5,
 };
 
 export interface SliderDef {

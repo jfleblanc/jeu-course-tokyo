@@ -17,3 +17,23 @@ Point de départ, avant tout essai par les joueurs. Chiffres mesurés au banc d'
 Tout le reste est identique. Questions posées aux joueurs : voir le README.
 
 _Choix retenu : à remplir après les essais._
+
+**Choix retenu (2026-11-16, version 7359035) : B.** Les joueurs préfèrent l'arrière plus
+joueur. Remarque : le braquage pourrait tourner un peu plus et être plus nerveux.
+
+## 2026-11-16 — Deuxième essai : le braquage
+
+L'ancien B devient le nouveau A (base). Le nouveau B rend le train avant plus mordant.
+Augmenter seulement l'angle de braquage ne change presque rien au banc d'essai : à plein
+braquage, ce sont les pneus avant qui limitent le virage.
+
+| | A — base (ancien B) | B — « Braquage plus nerveux » |
+|---|---|---|
+| Adhérence avant (`gripFront`) | 1.55 | 1.64 |
+| Angle de dérive max. (`peakSlipDeg`) | 8° | 7° |
+| Rapidité du volant (`steerRate`) | 4.5 | 6.5 |
+
+Mesures : rayon de virage à 100 km/h, 58 m (A) contre 53 m (B). Un essai plus fort
+(adhérence avant 1.78) partait en tête-à-queue à haute vitesse : écarté.
+
+_Choix retenu : à remplir après les essais._
