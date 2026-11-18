@@ -15,6 +15,8 @@ const css = (c: readonly [number, number, number]): string => {
 export class GarageMenu {
   private readonly root: HTMLElement;
   open = false;
+  /** Onglet affiché dans le bandeau. */
+  private tab: 'voitures' | 'ameliorations' | 'apparence' | 'concession' = 'voitures';
 
   constructor(
     private readonly player: PlayerState,
@@ -28,6 +30,11 @@ export class GarageMenu {
       const t = (ev.target as HTMLElement).closest('[data-act]') as HTMLElement | null;
       if (!t || t.hasAttribute('disabled')) return;
       const act = t.getAttribute('data-act') as string;
+      if (act === 'tab') {
+        this.tab = (t.getAttribute('data-id') ?? 'voitures') as typeof this.tab;
+        this.render();
+        return;
+      }
       const arg = Number(t.getAttribute('data-arg') ?? 0);
       const id = t.getAttribute('data-id') ?? '';
       let kind: 'voiture' | 'apparence' | 'achat' = 'achat';
@@ -114,23 +121,29 @@ export class GarageMenu {
       })
       .join('');
 
+    // Bandeau en bas de l'écran : l'atelier reste visible au-dessus. Un onglet à la fois.
+    const tabs: [typeof this.tab, string][] = [['voitures', `Mes voitures (${p.cars.length}/${MAX_CARS})`], ['ameliorations', 'Améliorations'], ['apparence', 'Peinture et néon'], ['concession', 'Concessionnaire']];
+    const body =
+      this.tab === 'voitures' ? cars
+      : this.tab === 'ameliorations' ? upgrades + nos
+      : this.tab === 'apparence' ? `<div class="g-look"><h3>Peinture <small>${model.paintable ? `${yen(PAINT_PRICE)} le changement` : 'livrée d’origine, non modifiable'}</small></h3>${model.paintable ? `<div class="g-swatches">${paints}</div>` : ''}</div>
+          <div class="g-look"><h3>Néon sous la voiture <small>${car.neonOwned ? 'installé : couleur au choix' : yen(NEON_PRICE)}</small></h3><div class="g-swatches">${neonOff}${neons}</div></div>`
+      : dealer;
     this.root.innerHTML = `
       <header>
-        <div class="g-top"><h2>Garage</h2><button data-act="close">Fermer <kbd>G</kbd></button></div>
-        <div class="g-status">
-          <div><span>Niveau</span><b>${p.level}</b><small>${p.tierName}</small></div>
-          <div class="g-xp"><span>XP ${p.level >= MAX_LEVEL ? 'max' : `${Math.round(p.xp)} / ${need}`}</span><div class="bar"><i style="width:${Math.min(100, (p.xp / need) * 100).toFixed(0)}%"></i></div>${p.trialPending ? '<small class="trial">Épreuve de palier prête : appuyez sur Entrée en balade.</small>' : ''}</div>
-          <div><span>Argent</span><b class="money">${yen(p.money)}</b></div>
+        <div class="g-top">
+          <h2>Garage</h2>
+          <div class="g-status">
+            <div><span>Niveau</span><b>${p.level}</b> <small>${p.tierName}</small></div>
+            <div class="g-xp"><span>XP ${p.level >= MAX_LEVEL ? 'max' : `${Math.round(p.xp)} / ${need}`}</span><div class="bar"><i style="width:${Math.min(100, (p.xp / need) * 100).toFixed(0)}%"></i></div></div>
+            <div><span>Argent</span><b class="money">${yen(p.money)}</b></div>
+          </div>
+          <button data-act="close">Fermer <kbd>G</kbd></button>
         </div>
+        <nav class="g-tabs">${tabs.map(([id, label]) => `<button data-act="tab" data-id="${id}" class="${id === this.tab ? 'on' : ''}">${label}</button>`).join('')}
+          <span class="g-car">Au volant : <b>${model.name}</b></span>
+          <button class="danger small" data-act="reset">Recommencer à zéro</button></nav>
       </header>
-      <div class="scroll">
-        <h3>Mes voitures (${p.cars.length}/${MAX_CARS})</h3>${cars}
-        <h3>Améliorations — ${model.name}</h3>${upgrades}${nos}
-        <h3>Peinture <small>${model.paintable ? `${yen(PAINT_PRICE)} le changement` : 'livrée d’origine, non modifiable'}</small></h3>${model.paintable ? `<div class="g-swatches">${paints}</div>` : ''}
-        <h3>Néon sous la voiture <small>${car.neonOwned ? 'installé : couleur au choix' : yen(NEON_PRICE)}</small></h3><div class="g-swatches">${neonOff}${neons}</div>
-        <h3>Concessionnaire</h3>${dealer}
-        <p class="g-note">Revente : 50 % du prix d'achat et des améliorations. ${p.races} course${p.races > 1 ? 's' : ''}, ${p.wins} victoire${p.wins > 1 ? 's' : ''}.</p>
-        <button class="danger small" data-act="reset">Recommencer à zéro</button>
-      </div>`;
+      <div class="scroll g-strip">${body}</div>`;
   }
 }

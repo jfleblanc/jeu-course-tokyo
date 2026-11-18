@@ -22,6 +22,7 @@ import { Traffic, type TrafficActor } from './world/traffic';
 import { TrafficVisuals } from './render/trafficVisuals';
 import { LampVisuals } from './render/lampVisuals';
 import { GarageScene, type GarageCar } from './world/garageScene';
+import { GARAGE, garageToWorld } from './world/garageSite';
 import { ProfileSelect } from './ui/profileSelect';
 import { profileSummary, setActiveProfile, type Profile } from './progression/profiles';
 import { CAR_MODELS } from './config/cars';
@@ -239,8 +240,32 @@ async function boot(): Promise<void> {
   const garageScene = new GarageScene(scene, city.garage);
   let garageView = false;
   let parkedFor = 0;
+  /** Montée en voiture en cours (0..1), ou −1. */
+  let boardT = -1;
+  const BOARD_SECONDS = 0.7;
+  const parkedNear = (): boolean => { const b = garageScene.bayPose(); return Math.hypot(car.pos.x - b.x, car.pos.z - b.z) < 2.2 && car.speed < 0.6; };
   /** Vrai juste après avoir été posé dans l'atelier (début de partie, touche G) : la caméra de surveillance vient tout de suite. */
   let justParked = false;
+  // Voitures garées le long du mur : solides seulement sur les places occupées.
+  const bayColliders = city.garage
+    ? GARAGE.bays.map((b) => {
+        const [wx, wz] = garageToWorld(city.garage as NonNullable<typeof city.garage>, b.x, b.z);
+        const yaw = (city.garage as NonNullable<typeof city.garage>).yaw + b.yaw;
+        const col = phys.world.createCollider(phys.rapier.ColliderDesc.cuboid(0.92, 0.65, 2.15).setTranslation(wx, GARAGE.floor + 0.65, wz).setRotation({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }).setFriction(0.3));
+        col.setEnabled(false);
+        return col;
+      })
+    : [];
+  garageScene.onFurniture = (boxes): void => {
+    const site = city.garage;
+    if (!site) return;
+    for (const f of boxes) {
+      const [wx, wz] = garageToWorld(site, (f.x0 + f.x1) / 2, (f.z0 + f.z1) / 2);
+      phys.world.createCollider(phys.rapier.ColliderDesc.cuboid((f.x1 - f.x0) / 2, f.h / 2, (f.z1 - f.z0) / 2).setTranslation(wx, GARAGE.floor + f.h / 2, wz).setRotation({ x: 0, y: Math.sin(site.yaw / 2), z: 0, w: Math.cos(site.yaw / 2) }).setFriction(0.3));
+    }
+    (window as unknown as { __meubles?: unknown }).__meubles = boxes;
+  };
+  const syncBayColliders = (): void => bayColliders.forEach((c, k) => c.setEnabled(k < player.cars.length - 1));
   /** Pose la voiture du joueur à sa place dans l'atelier, à l'arrêt. */
   const parkInGarage = (): void => {
     const b = garageScene.bayPose();
@@ -645,7 +670,7 @@ async function boot(): Promise<void> {
       const hasNos = player.car.nos;
       const boosting = hasNos && input.drive.nos && nosCharge > 0 && input.drive.throttle > 0.2 && race.phase !== 'countdown';
       // Départ : voiture tenue pendant le décompte ; au « GO », on juge le régime.
-      car.launchHold = race.phase === 'countdown';
+      car.launchHold = race.phase === 'countdown' || boardT >= 0;
       if (wasCountdown && race.phase === 'running') {
         const f = car.drivetrain.rpm / CAR_SPEC.redlineRpm;
         if (f >= LAUNCH.low && f <= LAUNCH.high) {
@@ -720,6 +745,7 @@ async function boot(): Promise<void> {
         }
         const bay = garageScene.bayPose();
         garageScene.showMechanic(menu || Math.hypot(car.pos.x - bay.x, car.pos.z - bay.z) < 2.5);
+        syncBayColliders();
         garageScene.update(frameDt, camera, null);
         // Débogage : `window.__zoom = 20` resserre la caméra du garage (contrôle du personnage).
         const zoom = (window as unknown as { __zoom?: number }).__zoom;
@@ -808,7 +834,14 @@ async function boot(): Promise<void> {
       const bayNow = garageScene.bayPose();
       const waiting = titlePhase === 'fini' && garageScene.contains(car.pos.x, car.pos.y, car.pos.z) && Math.hypot(car.pos.x - bayNow.x, car.pos.z - bayNow.z) < 2.2 && car.speed < 0.6 && input.drive.throttle < 0.05 && input.drive.brake < 0.05;
       parkedFor = waiting ? parkedFor + frameDt : 0;
-      const view = menus || (waiting && (garageView || parkedFor > 1.2 || justParked));
+      // Il met les gaz : le personnage rejoint la portière et monte (voiture tenue une demi-seconde).
+      if (garageView && !menus && boardT < 0 && garageScene.boarding === 0 && input.drive.throttle > 0.05 && parkedNear()) boardT = 0;
+      if (boardT >= 0) {
+        boardT += frameDt / BOARD_SECONDS;
+        garageScene.boarding = Math.min(1, boardT);
+        if (boardT >= 1) { boardT = -1; garageScene.boarding = 0; justParked = false; }
+      }
+      const view = menus || boardT >= 0 || (waiting && (garageView || parkedFor > 1.2 || justParked));
       if (!waiting) justParked = false;
       if (view !== garageView) {
         garageView = view;

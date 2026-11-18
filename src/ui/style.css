@@ -256,3 +256,24 @@ body.cctv-menu .hud, body.cctv-menu #minimap, body.cctv-menu #race-hud { visibil
 #profils .pf-x.pf-edit { right: 24px; font-size: 13px; top: 5px; }
 #profils .pf-check { flex-direction: row; align-items: center; gap: 6px; }
 #profils .pf-form { width: min(440px, 94vw); }
+
+/* ——— Garage : un bandeau en bas, pour laisser voir l'atelier ——— */
+#garage.side-menu { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-width: none; max-height: 46vh; border-right: 0; border-top: 1px solid var(--line); transform: translateY(105%); background: linear-gradient(180deg, rgba(10, 8, 24, 0.72), rgba(10, 8, 24, 0.92)); }
+#garage.side-menu.open { transform: none; }
+#garage header { padding: 8px 14px 6px; border-bottom: 0; }
+#garage .g-top { gap: 18px; }
+#garage h2 { font-size: 16px; }
+#garage .g-status { margin-top: 0; flex: 1; grid-template-columns: auto minmax(120px, 260px) auto; justify-content: start; gap: 18px; }
+#garage .g-status b { font-size: 17px; }
+#garage .g-status small { display: inline; }
+#garage .g-status .money { font-size: 16px; }
+#garage .g-tabs { display: flex; gap: 6px; align-items: center; margin-top: 7px; flex-wrap: wrap; }
+#garage .g-tabs button.on { background: rgba(46, 230, 255, 0.2); border-color: var(--cyan); }
+#garage .g-tabs .g-car { margin-left: auto; font-size: 12px; color: var(--dim); }
+#garage .g-tabs .g-car b { color: var(--txt); }
+#garage .g-tabs .small { margin-top: 0; }
+#garage .g-strip { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 6px 14px 14px; align-items: stretch; }
+#garage .g-strip .g-card, #garage .g-strip .g-row { flex: 0 0 auto; width: 250px; margin-bottom: 0; flex-direction: column; align-items: flex-start; justify-content: space-between; white-space: normal; }
+#garage .g-strip .g-row small, #garage .g-strip .g-card small { white-space: normal; }
+#garage .g-look { flex: 0 0 auto; max-width: 46vw; }
+#garage .g-look h3 { margin-top: 2px; }

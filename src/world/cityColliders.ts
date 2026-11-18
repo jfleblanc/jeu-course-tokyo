@@ -143,6 +143,17 @@ export function buildCityColliders(city: CityData, phys: PhysicsWorld): number {
     // Mur entre l'atelier et le palier, de part et d'autre de la porte.
     block(G.halfW, G.landingZ0, G.rampX0, G.doorZ0, 0, 0.3);
     block(G.halfW, G.doorZ1, G.rampX0, G.halfD + G.wall, 0, 0.3);
+    // Accessoires fixes de l'atelier : étagères au fond, piles de pneus, fûts (le mobilier du modèle 3D est mesuré au chargement).
+    {
+      const solid = (x0: number, z0: number, x1: number, z1: number, h: number): void => {
+        const [wx, wz] = garageToWorld(site, (x0 + x1) / 2, (z0 + z1) / 2);
+        box(wx, G.floor + h / 2, wz, (x1 - x0) / 2, h / 2, (z1 - z0) / 2, site.yaw, 0.3);
+      };
+      solid(-11.5, -G.halfD, -7.7, -G.halfD + 0.75, 3.2); // étagères
+      solid(10.2, 7.0, 12.3, G.halfD, 1.1); // pneus
+      solid(-12.6, 7.0, -10.5, G.halfD, 1.3);
+      solid(3.9, 7.2, 6.7, G.halfD, 0.9); // fûts
+    }
     // Rampe : une dalle inclinée du palier jusqu'à la rue.
     {
       const run = G.rampZ1 - G.rampZ0, rise = -G.floor;

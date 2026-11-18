@@ -22,6 +22,8 @@ const W = G.halfW * 2, D = G.halfD * 2, H = G.height;
  * Sa coque (murs, toit, auvent) ne sert pas : l'atelier a ses propres murs.
  */
 // (le chargeur retire les points des noms : « Cube.003 » devient « Cube003 »)
+/** Emprise au sol d'un meuble (repère de l'atelier) et sa hauteur. */
+export interface FurnitureBox { x0: number; z0: number; x1: number; z1: number; h: number }
 const MODEL_KEEP = /^(Circle|Cube003|Cube006|Cube010|Cube005|Cube007|Cube014|Cube01[123]|Cube02[123]|Cylinder00[67])$/;
 /** Le modèle a son mur d'outils en x = −8 : on le colle contre le mur −x de l'atelier. */
 const MODEL_X = -G.halfW + 8;
@@ -33,6 +35,8 @@ const MODEL_X = -G.halfW + 8;
  */
 export class GarageScene {
   readonly group = new THREE.Group();
+  /** Appelé une fois le mobilier chargé, avec l'emprise de chaque meuble. */
+  onFurniture: ((boxes: FurnitureBox[]) => void) | null = null;
   private readonly room = new THREE.Group();
   private readonly cars: CarVisual[] = [];
   private readonly mech = new THREE.Group();
@@ -218,6 +222,23 @@ export class GarageScene {
           holder.add(o);
         }
         g.add(holder);
+        // Encombrement de chaque meuble posé au sol, dans le repère de l'atelier : il devient solide.
+        holder.updateMatrixWorld(true);
+        const bb = new THREE.Box3();
+        const boxes: FurnitureBox[] = [];
+        for (const o of keep) {
+          bb.setFromObject(o);
+          // (boîte en coordonnées du monde : on la ramène dans le repère de l'atelier, sol à 0)
+          const y0 = bb.min.y - this.group.position.y - G.floor, y1 = bb.max.y - this.group.position.y - G.floor;
+          if (bb.isEmpty() || y0 > 0.5 || y1 < 0.35) continue; // accroché au mur, posé sur l'établi ou à plat au sol
+          let x0 = Infinity, z0 = Infinity, x1 = -Infinity, z1 = -Infinity;
+          for (const [wx, wz] of [[bb.min.x, bb.min.z], [bb.max.x, bb.min.z], [bb.min.x, bb.max.z], [bb.max.x, bb.max.z]] as const) {
+            const [lx, lz] = garageToLocal(this.site, wx, wz);
+            x0 = Math.min(x0, lx); x1 = Math.max(x1, lx); z0 = Math.min(z0, lz); z1 = Math.max(z1, lz);
+          }
+          boxes.push({ x0, z0, x1, z1, h: Math.min(y1, 2.2) });
+        }
+        this.onFurniture?.(boxes);
       })
       .catch((err: unknown) => console.info('Mobilier du garage indisponible.', err));
     // ——— Le personnage du joueur : « Kaku » (Cyrone, CC BY 4.0), à la place de la silhouette ———
@@ -251,6 +272,15 @@ export class GarageScene {
         const inv = new THREE.Matrix4().copy(this.mech.matrixWorld).invert();
         const v = new THREE.Vector3();
         for (const e of this.bones.values()) e.side = Math.sign(v.setFromMatrixPosition(e.bone.matrixWorld).applyMatrix4(inv).x) || 1;
+        // Une clé plate dans la main droite (taille compensée : les os ne sont pas à l'échelle 1).
+        const hand = this.bones.get('RightHand')?.bone;
+        if (hand) {
+          const tool = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.26, 0.02), steel);
+          const ws = hand.getWorldScale(new THREE.Vector3()).x || 1;
+          tool.scale.setScalar(1 / ws);
+          tool.position.set(0, 0.09 / ws, 0.02 / ws);
+          hand.add(tool);
+        }
         this.hasCharacter = true;
       })
       .catch((err: unknown) => console.info('Personnage indisponible, silhouette conservée.', err));
@@ -288,6 +318,9 @@ export class GarageScene {
     }
     this.turn('Head', working ? 0.25 : 0, 0, 0);
   }
+
+  /** Montée en voiture : 0 = pas commencée, puis de 0 à 1 (il va à la portière et s'installe). */
+  boarding = 0;
 
   /** Le mécano n'est là que si une voiture est sur le plateau. */
   showMechanic(on: boolean): void {
@@ -399,7 +432,22 @@ export class GarageScene {
     const w = Math.min(1, phase / move);
     const e = w * w * (3 - 2 * w);
     this.mech.position.lerpVectors(this.from, this.to, e);
-    const working = phase > move;
+    let working = phase > move;
+    if (this.boarding > 0) {
+      // Il lâche tout, rejoint la portière du conducteur et se glisse au volant.
+      const f = Math.min(1, this.boarding);
+      const door = this.from.set(G.mainBay.x + 1.25 * cs + 0.1 * sn, 0, G.mainBay.z - 1.25 * sn + 0.1 * cs);
+      this.mech.position.lerp(door, Math.min(1, f * 1.6));
+      this.mech.rotation.y = Math.atan2(G.mainBay.x - this.mech.position.x, G.mainBay.z - this.mech.position.z);
+      const duck = Math.max(0, (f - 0.6) / 0.4);
+      this.mech.scale.setScalar(1 - duck * 0.85);
+      this.mech.position.x += (G.mainBay.x - this.mech.position.x) * duck * 0.5;
+      this.mech.position.z += (G.mainBay.z - this.mech.position.z) * duck * 0.5;
+      if (this.hasCharacter) { this.mech.updateMatrixWorld(true); this.poseCharacter(false, t * 1.4); }
+      this.placeCamera(camera, follow);
+      return;
+    }
+    this.mech.scale.setScalar(1);
     this.mech.rotation.y = working ? yawNow : Math.atan2(this.to.x - this.from.x, this.to.z - this.from.z);
     if (this.hasCharacter) {
       this.mech.position.y = working ? 0 : Math.abs(Math.sin(t * 9)) * 0.02;
@@ -410,6 +458,11 @@ export class GarageScene {
       this.mech.position.y = working ? -0.05 : Math.abs(Math.sin(t * 9)) * 0.03;
       this.arm.rotation.x = working ? -1.2 + Math.sin(t * 7) * 0.35 : Math.sin(t * 9) * 0.5;
     }
+    this.placeCamera(camera, follow);
+  }
+
+  private placeCamera(camera: THREE.PerspectiveCamera, follow: { x: number; y: number; z: number } | null): void {
+    const t = this.time;
     // Caméra de surveillance : en hauteur dans le coin près de la porte ; elle balaie lentement,
     // ou accompagne la voiture qui roule.
     this.group.updateMatrixWorld();
