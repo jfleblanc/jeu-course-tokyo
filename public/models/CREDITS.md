@@ -14,6 +14,7 @@ familial, gratuit).
 | `integra-dc2.glb` | [Honda Integra (DC2) Type-R 1995](https://sketchfab.com/3d-models/honda-integra-dc2-type-r-1995-554e0b342697492391c71d4b882b61fc) | Lexyc16 | CC-BY-NC-4.0 |
 | `caspita.glb` | [Jiotto Caspita F1 Road Car 1989 By Alex.Ka.](https://sketchfab.com/3d-models/jiotto-caspita-f1-road-car-1989-by-alexka-828c84b390624f0389287bd036d7dbf5) | Alex.Ka. | CC-BY-NC-4.0 |
 | `kansai-spirit.glb` | [Kansai Spirit 3.0 TDI](https://sketchfab.com/3d-models/kansai-spirit-30-tdi-4d56a0852c774b8881524906422237d1) | dark_igorek | CC-BY-4.0 |
+| `carry.glb` | [Carry Pickup | Suzuki | Game ready](https://sketchfab.com/3d-models/carry-pickup-suzuki-game-ready-e1654a399b9d448a9a7ce200410ac91d) | by__Rx | CC-BY-4.0 |
 | `rx7.glb` | [Mazda RX-7](https://sketchfab.com/3d-models/mazda-rx-7-45cb02e634ed477a9a04bb19813443f2) | wallon | CC-BY-4.0 |
 | `fairlady-z.glb` | [Nissan Fairlady Z S30(240Z) 1978](https://sketchfab.com/3d-models/nissan-fairlady-z-s30240z-1978-0d9286ebb8cc426e993e1d398b874a34) | Lexyc16 | CC-BY-NC-4.0 |
 | `skyline-r32.glb` | [Nissan Skyline (R32) GT-R](https://sketchfab.com/3d-models/nissan-skyline-r32-gt-r-8810e677eca543a6b840cf67dd064aa4) | Lexyc16 | CC-BY-NC-4.0 |

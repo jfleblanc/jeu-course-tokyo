@@ -752,6 +752,7 @@ async function boot(): Promise<void> {
       // Bruitages
       sound.update(frameDt, {
         rpm: car.drivetrain.rpm,
+        gear: car.drivetrain.gear,
         redline: CAR_SPEC.redlineRpm,
         throttle: car.throttle,
         speed: car.speed,

@@ -19,6 +19,8 @@ export interface SfxState {
   slip: number;
   drifting: boolean;
   nos: boolean;
+  /** Rapport engagé (pour le bruit du turbo aux changements de rapport). */
+  gear?: number;
   /** Faux : tout est coupé (menus, pause). */
   active: boolean;
   /** Caractère du moteur de la voiture conduite. */
@@ -34,6 +36,12 @@ export class Sfx {
   private nos: { gain: GainNode } | null = null;
   private volume = 0.7;
   private lastSpeed = 0;
+  private noiseBuffer: AudioBuffer | null = null;
+  /** Pression du turbo (0..1) : monte quand on reste sur les gaz, retombe sinon. */
+  private boostLevel = 0;
+  private lastThrottle = 0;
+  private lastGear = 0;
+  private blowCooldown = 0;
   private thudCooldown = 0;
   enabled = true;
 
@@ -72,6 +80,7 @@ export class Sfx {
 
       // Bruit blanc en boucle, partagé par les pneus, le vent et le NOS.
       const noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+      this.noiseBuffer = noise;
       const data = noise.getChannelData(0);
       let seed = 24680;
       for (let i = 0; i < data.length; i++) {
@@ -197,6 +206,22 @@ export class Sfx {
     const boost = en.turbo * s.throttle * Math.max(0, rev - 0.3);
     e.whistle.frequency.setTargetAtTime(1800 + rev * 2600, t, 0.15);
     e.whistleGain.gain.setTargetAtTime(on * boost * 0.035, t, 0.12);
+    // Soupape de décharge : un turbo sous pression « souffle » quand on lâche les gaz ou qu'on
+    // change de rapport. La pression met une demi-seconde à monter.
+    if (en.turbo > 0.05) {
+      const target = s.throttle * Math.max(0, Math.min(1, (rev - 0.35) / 0.4));
+      this.boostLevel += (target - this.boostLevel) * Math.min(1, dt * (target > this.boostLevel ? 2.2 : 4));
+      this.blowCooldown = Math.max(0, this.blowCooldown - dt);
+      const lifted = this.lastThrottle > 0.6 && s.throttle < 0.25;
+      const shifted = s.gear !== undefined && s.gear !== this.lastGear && s.gear > 1 && this.lastGear >= 1;
+      if (on && (lifted || shifted) && this.boostLevel > 0.45 && this.blowCooldown === 0) {
+        this.blowOff(en.turbo * this.boostLevel, shifted && !lifted);
+        this.blowCooldown = 0.5;
+        this.boostLevel *= 0.25;
+      }
+    } else this.boostLevel = 0;
+    this.lastThrottle = s.throttle;
+    if (s.gear !== undefined) this.lastGear = s.gear;
     e.gain.gain.setTargetAtTime(on * (0.05 + s.throttle * 0.1 + rev * 0.05), t, 0.06);
 
     const kmh = s.speed * 3.6;
@@ -260,6 +285,47 @@ export class Sfx {
   finish(win: boolean): void {
     const notes = win ? [523, 659, 784, 1047] : [523, 659];
     notes.forEach((n, k) => this.tone(n, k * 0.13, k === notes.length - 1 ? 0.6 : 0.16, 0.14, 'triangle'));
+  }
+
+  /**
+   * Soupape de décharge du turbo : un souffle aigu qui retombe (« pschhh »), suivi sur les gros
+   * turbos d'un battement rapide (« tu-tu-tu »). Plus court à un changement de rapport.
+   */
+  private blowOff(level: number, short: boolean): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master || !this.noiseBuffer) return;
+    const t = ctx.currentTime;
+    const dur = short ? 0.22 : 0.42;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    src.loop = true;
+    const band = ctx.createBiquadFilter();
+    band.type = 'bandpass';
+    band.Q.value = 1.6;
+    band.frequency.setValueAtTime(5200, t);
+    band.frequency.exponentialRampToValueAtTime(1700, t + dur);
+    const g = ctx.createGain();
+    const peak = Math.min(0.2, 0.06 + level * 0.14);
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(peak, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0008, t + dur);
+    // Battement : la pression qui repart par à-coups dans le compresseur.
+    const flutter = ctx.createGain();
+    flutter.gain.value = 1;
+    if (level > 0.5 && !short) {
+      const lfo = ctx.createOscillator();
+      lfo.type = 'square';
+      lfo.frequency.setValueAtTime(34, t);
+      lfo.frequency.linearRampToValueAtTime(16, t + dur);
+      const depth = ctx.createGain();
+      depth.gain.value = 0.55;
+      lfo.connect(depth).connect(flutter.gain);
+      lfo.start(t + 0.08);
+      lfo.stop(t + dur + 0.05);
+    }
+    src.connect(band).connect(flutter).connect(g).connect(this.master);
+    src.start(t, Math.random());
+    src.stop(t + dur + 0.05);
   }
 
   /** Lampadaire fauché : choc sourd et tintement métallique. */
