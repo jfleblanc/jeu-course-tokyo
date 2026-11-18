@@ -16,8 +16,12 @@ export interface TrafficCar {
   collider: RAPIER.Collider;
   active: boolean;
   /** 'rue' = suit une rue, 'carrefour' = traverse un carrefour, 'choc' = percutée (physique libre). */
-  state: 'rue' | 'carrefour' | 'choc';
+  state: 'rue' | 'carrefour' | 'choc' | 'liaison';
   edge: number;
+  /** Sur une liaison (tunnel, pont) : laquelle, et altitude / pente à cet endroit. */
+  link: number;
+  y: number;
+  pitch: number;
   forward: boolean;
   s: number;
   speed: number;
@@ -73,7 +77,7 @@ export class Traffic {
       );
       body.setEnabled(false);
       this.cars.push({
-        body, collider, active: false, state: 'rue', edge: 0, forward: true, s: 0, speed: 0, x: 0, z: 0, yaw: 0,
+        body, collider, active: false, state: 'rue', link: -1, y: 0, pitch: 0, edge: 0, forward: true, s: 0, speed: 0, x: 0, z: 0, yaw: 0,
         jx0: 0, jz0: 0, jx1: 0, jz1: 0, jyaw0: 0, jyaw1: 0, jt: 0, jlen: 1, nextEdge: 0, nextForward: true, hitTime: 0,
         color: i % TRAFFIC.colors.length, travel: 0, braking: false, stuck: 0,
       });
@@ -98,6 +102,68 @@ export class Traffic {
   }
 
   private readonly tmp = { x: 0, z: 0, yaw: 0 };
+
+  /** Routes hors réseau (tunnel, pont) où la circulation passe aussi. */
+  links: { samples: { x: number; y: number; z: number; tx: number; tz: number; s: number }[]; halfWidth: number }[] = [];
+
+  /** Place la voiture sur sa liaison, à la distance `c.s`, sur la voie de gauche du sens de marche. */
+  private linkPoint(c: TrafficCar): void {
+    const L = this.links[c.link] as (typeof this.links)[number];
+    const n = L.samples.length;
+    const total = (L.samples[n - 1] as { s: number }).s;
+    const f = Math.max(0, Math.min(n - 1.001, (c.s / total) * (n - 1)));
+    const k = Math.floor(f), u = f - k;
+    const a = L.samples[k] as (typeof L.samples)[number], b = L.samples[k + 1] as (typeof L.samples)[number];
+    const dir = c.forward ? 1 : -1;
+    const tx = (a.tx + (b.tx - a.tx) * u) * dir, tz = (a.tz + (b.tz - a.tz) * u) * dir;
+    const off = L.halfWidth * 0.5;
+    c.x = a.x + (b.x - a.x) * u + tz * off;
+    c.z = a.z + (b.z - a.z) * u - tx * off;
+    c.y = a.y + (b.y - a.y) * u;
+    c.yaw = Math.atan2(tx, tz);
+    c.pitch = -Math.atan2((b.y - a.y) * dir, Math.max(0.1, b.s - a.s));
+  }
+
+  /** Pose le corps : à plat dans les rues, à l'altitude et à la pente de la route sur une liaison. */
+  private place(c: TrafficCar, teleport: boolean): void {
+    const onLink = c.state === 'liaison';
+    const hy = Math.sin(c.yaw / 2), cy = Math.cos(c.yaw / 2);
+    const hp = onLink ? Math.sin(c.pitch / 2) : 0, cp = onLink ? Math.cos(c.pitch / 2) : 1;
+    const pos = { x: c.x, y: REST_HEIGHT + (onLink ? c.y : 0), z: c.z };
+    const rot = { x: cy * hp, y: hy * cp, z: -hy * hp, w: cy * cp };
+    if (teleport) {
+      c.body.setTranslation(pos, true);
+      c.body.setRotation(rot, true);
+    } else {
+      c.body.setNextKinematicTranslation(pos);
+      c.body.setNextKinematicRotation(rot);
+    }
+  }
+
+  private spawnOnLink(c: TrafficCar, fx: number, fz: number): boolean {
+    for (let li = 0; li < this.links.length; li++) {
+      const L = this.links[li] as (typeof this.links)[number];
+      const total = (L.samples[L.samples.length - 1] as { s: number }).s;
+      const forward = this.rng.chance(0.5);
+      const s = 25 + this.rng.next() * (total - 50);
+      const k = Math.round((s / total) * (L.samples.length - 1));
+      const q = L.samples[k] as { x: number; z: number };
+      const d = Math.hypot(q.x - fx, q.z - fz);
+      if (d > TRAFFIC.spawnMax || d < TRAFFIC.spawnMin || d < this.keepOut) continue;
+      let free = true;
+      for (const o of this.cars) if (o !== c && o.active && Math.hypot(o.x - q.x, o.z - q.z) < 30) free = false;
+      if (!free) continue;
+      c.link = li; c.forward = forward; c.s = s; c.state = 'liaison';
+      this.linkPoint(c);
+      c.speed = TRAFFIC.linkSpeed * 0.8;
+      c.active = true; c.hitTime = 0; c.stuck = 0;
+      c.body.setBodyType(this.phys.rapier.RigidBodyType.KinematicPositionBased, true);
+      c.body.setEnabled(true);
+      this.place(c, true);
+      return true;
+    }
+    return false;
+  }
   /** Rues du tracé de la course en cours : la circulation y apparaît. null = toute la ville. */
   private routeEdges: GraphEdge[] | null = null;
 
@@ -109,6 +175,7 @@ export class Traffic {
 
 
   private spawn(c: TrafficCar, fx: number, fz: number, anywhere: boolean): boolean {
+    if (this.links.length && this.rng.chance(TRAFFIC.linkShare) && this.spawnOnLink(c, fx, fz)) return true;
     for (let attempt = 0; attempt < 12; attempt++) {
       const e = this.rng.pick(this.routeEdges && this.routeEdges.length ? this.routeEdges : this.usable);
       const forward = this.rng.chance(0.5);
@@ -119,7 +186,7 @@ export class Traffic {
       let free = true;
       for (const o of this.cars) if (o !== c && o.active && Math.hypot(o.x - this.tmp.x, o.z - this.tmp.z) < 22) free = false;
       if (!free) continue;
-      c.edge = e.id; c.forward = forward; c.s = s; c.state = 'rue';
+      c.edge = e.id; c.forward = forward; c.s = s; c.state = 'rue'; c.link = -1;
       c.x = this.tmp.x; c.z = this.tmp.z; c.yaw = this.tmp.yaw;
       c.speed = TRAFFIC.speed[e.kind] * 0.8;
       c.active = true; c.hitTime = 0; c.stuck = 0;
@@ -248,6 +315,23 @@ export class Traffic {
       for (const a of actors) ahead(a.x, a.z);
       for (const o of this.cars) if (o !== c && o.active) ahead(o.x, o.z);
 
+      if (c.state === 'liaison') {
+        // Tunnel ou pont : on file tout droit sur sa voie, puis on s'efface au bout (hors de vue).
+        const L = this.links[c.link] as (typeof this.links)[number];
+        const total = (L.samples[L.samples.length - 1] as { s: number }).s;
+        const goal = blocked ? 0 : TRAFFIC.linkSpeed;
+        c.braking = c.speed > goal + 0.3;
+        c.speed += Math.max(-TRAFFIC.brake * dt, Math.min(TRAFFIC.accel * dt, goal - c.speed));
+        c.travel += c.speed * dt;
+        c.s += (c.forward ? 1 : -1) * c.speed * dt;
+        if (c.s < 14 || c.s > total - 14) {
+          this.retire(c);
+          continue;
+        }
+        this.linkPoint(c);
+        this.place(c, false);
+        continue;
+      }
       const e = this.graph.edges[c.edge] as GraphEdge;
       const end = c.forward ? e.length - e.trimB : e.trimA;
       const toEnd = c.state === 'rue' ? Math.abs(end - c.s) : 0;
@@ -288,8 +372,7 @@ export class Traffic {
           c.state = 'rue';
         }
       }
-      c.body.setNextKinematicTranslation({ x: c.x, y: REST_HEIGHT, z: c.z });
-      c.body.setNextKinematicRotation({ x: 0, y: Math.sin(c.yaw / 2), z: 0, w: Math.cos(c.yaw / 2) });
+      this.place(c, false);
     }
   }
 }

@@ -291,13 +291,88 @@ export function routeFromPath(path: { x: number; y: number; z: number }[], seed:
   const raw: number[] = [];
   for (const p of path) raw.push(p.x, p.z);
   const route = finishRoute(raw, [], [], 1, seed, 2);
-  // Altitude : celle du point d'axe le plus proche (on avance en même temps sur les deux listes).
+  applyHeights(route, path);
+  route.halfWidth = halfWidth;
+  return route;
+}
+
+/** Altitude de chaque point du tracé : celle du point d'axe le plus proche (on avance en même temps sur les deux listes). */
+function applyHeights(route: Route, path: { x: number; y: number; z: number }[]): void {
   let k = 0;
   for (const q of route.points) {
-    while (k < path.length - 1 && Math.hypot((path[k + 1] as { x: number }).x - q.x, (path[k + 1] as { z: number }).z - q.z) <= Math.hypot((path[k] as { x: number }).x - q.x, (path[k] as { z: number }).z - q.z)) k++;
+    // (fenêtre de recherche courte : le tracé peut repasser près d'un point déjà vu)
+    for (let j = k + 1; j < Math.min(path.length, k + 12); j++) {
+      if (Math.hypot((path[j] as { x: number }).x - q.x, (path[j] as { z: number }).z - q.z) <= Math.hypot((path[k] as { x: number }).x - q.x, (path[k] as { z: number }).z - q.z)) k = j;
+    }
     q.y = (path[k] as { y: number }).y;
   }
-  route.halfWidth = halfWidth;
+}
+
+/** Plus court chemin dans le réseau de rues, d'un carrefour à un autre (dans un seul quartier si `district` ≥ 0). */
+export function graphPath(graph: StreetGraph, from: number, to: number | ((node: GraphNode, dist: number) => boolean), district = -2): { edges: number[]; forward: boolean[]; end: number } | null {
+  const dist = new Map<number, number>([[from, 0]]);
+  const prev = new Map<number, { edge: number; node: number }>();
+  const done = new Set<number>();
+  let end = -1;
+  for (;;) {
+    let cur = -1, best = Infinity;
+    for (const [id, d] of dist) if (!done.has(id) && d < best) { best = d; cur = id; }
+    if (cur < 0) break;
+    done.add(cur);
+    const node = graph.nodes[cur] as GraphNode;
+    if (typeof to === 'number' ? cur === to : to(node, best)) { end = cur; break; }
+    for (const eid of node.edges) {
+      const e = graph.edges[eid] as GraphEdge;
+      if (district > -2 && e.district !== district) continue;
+      const other = e.a === cur ? e.b : e.a;
+      // (les ruelles coûtent plus cher : une grande course passe par les grandes rues)
+      const nd = best + e.length * (e.kind === 'alley' ? 2.5 : e.kind === 'street' ? 1.3 : 1);
+      if (nd < (dist.get(other) ?? Infinity)) { dist.set(other, nd); prev.set(other, { edge: eid, node: cur }); }
+    }
+  }
+  if (end < 0) return null;
+  const edges: number[] = [], forward: boolean[] = [];
+  for (let n = end; n !== from; ) {
+    const p = prev.get(n) as { edge: number; node: number };
+    edges.unshift(p.edge);
+    forward.unshift((graph.edges[p.edge] as GraphEdge).b === n);
+    n = p.node;
+  }
+  return { edges, forward, end };
+}
+
+/** Une étape d'une grande course : des rues du réseau, ou une route hors réseau (tunnel, pont) avec son altitude. */
+export type RouteLeg = { edges: number[]; forward: boolean[] } | { path: { x: number; y: number; z: number }[] };
+
+/** Grande course entre quartiers : rues, pont, rues, tunnel… bout à bout. */
+export function routeFromLegs(graph: StreetGraph, legs: RouteLeg[], seed: number): Route {
+  const path: { x: number; y: number; z: number }[] = [];
+  const edges: number[] = [], nodes: number[] = [];
+  const p: PathPoint = { x: 0, z: 0, tx: 1, tz: 0 };
+  for (const leg of legs) {
+    if ('path' in leg) {
+      for (const q of leg.path) path.push({ x: q.x, y: q.y, z: q.z });
+      continue;
+    }
+    leg.edges.forEach((eid, k) => {
+      const e = graph.edges[eid] as GraphEdge;
+      const fwd = leg.forward[k] as boolean;
+      const from = fwd ? e.trimA : e.length - e.trimB, to = fwd ? e.length - e.trimB : e.trimA;
+      const steps = Math.max(1, Math.round(Math.abs(to - from) / 4));
+      const side = e.kind === 'boulevard' ? 9.5 : 0;
+      for (let q = 0; q <= steps; q++) {
+        pointAt(e, from + ((to - from) * q) / steps, p);
+        const dx = fwd ? p.tx : -p.tx, dz = fwd ? p.tz : -p.tz;
+        path.push({ x: p.x + dz * side, y: 0, z: p.z - dx * side });
+      }
+      edges.push(eid);
+      nodes.push(fwd ? e.b : e.a);
+    });
+  }
+  const raw: number[] = [];
+  for (const q of path) raw.push(q.x, q.z);
+  const route = finishRoute(raw, edges, nodes, 1, seed, 8);
+  applyHeights(route, path);
   return route;
 }
 

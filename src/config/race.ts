@@ -58,7 +58,10 @@ export const AI_DRIVERS: AiLevel[] = [
  * `district` : secteur du tracé (absent = ville principale ; 0 = baie, 1 = docks, 2 = collines).
  * `col` : la route du col de montagne, dans un sens (1) ou dans l'autre (−1).
  */
-export const TRACK_BANK: { name: string; seed: number; circuit: boolean; district?: number; col?: 1 | -1 }[] = [
+/** `via` : grande course qui enchaîne des liaisons entre quartiers (noms dans `WORLD.links`), dans cet ordre. */
+export const TRACK_BANK: { name: string; seed: number; circuit: boolean; district?: number; col?: 1 | -1; via?: string[] }[] = [
+  { name: 'Tour de la région : des Docks à la Baie', seed: 9101, circuit: false, via: ['Pont du port', 'Tunnel de la baie'] },
+  { name: 'Tour de la région : de la Baie aux Docks', seed: 9203, circuit: false, via: ['Tunnel de la baie', 'Pont du port'] },
   { name: 'Sprint de Shibuya', seed: 1101, circuit: false },
   { name: 'Traversée de Shinjuku', seed: 2203, circuit: false },
   { name: 'Les néons d’Akihabara', seed: 3307, circuit: false },

@@ -19,7 +19,7 @@ const city = generateCity(WORLD.seed);
 buildCityColliders(city, phys);
 const car = new Vehicle(phys, CAR_SPEC, { x: city.spawn.x, y: 0.8, z: city.spawn.z, yaw: city.spawn.yaw });
 const input = emptyDriveInput();
-const bank = buildTrackBank(city.graph, city.mountain?.road);
+const bank = buildTrackBank(city.graph, city.mountain?.road, city.links);
 const names = ['ville', ...city.graph.districts.map((d) => d.name)];
 for (let s = -1; s < city.graph.districts.length; s++) console.log(`${names[s + 1]}: ` + bank.filter((t) => t.district === s).map((t) => `${t.name} (${t.circuit ? t.route.laps + ' × ' : ''}${Math.round(t.route.lapLength)} m)`).join(' ; '));
 const only = process.env.SEUL;

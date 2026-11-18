@@ -117,6 +117,9 @@ export interface Link {
   name: string;
   kind: 'tunnel' | 'pont';
   road: Highway;
+  /** Carrefours aux deux bouts (début et fin de `road`). */
+  nodeA: number;
+  nodeB: number;
   unlockLevel: number;
   /** Barrière de chantier (fermée tant que le niveau n'est pas atteint). */
   gate: { x: number; z: number; yaw: number; width: number };
@@ -942,7 +945,7 @@ export function generateCity(seed: number = WORLD.seed): CityData {
     bridges.push(road);
     for (let q = 0; q < N; q += 8) { const a = samples[q] as HighwaySample, b = samples[Math.min(N, q + 8)] as HighwaySample; accessLines.push([a.x, a.z, b.x, b.z]); }
     const gs = samples[samples.length - 12] as HighwaySample;
-    links.push({ name: def.name, kind: def.kind, road, unlockLevel: def.unlockLevel, gate: { x: gs.x, z: gs.z, yaw: Math.atan2(gs.tx, gs.tz), width: L.halfWidth * 2 } });
+    links.push({ name: def.name, kind: def.kind, road, nodeA: na.id, nodeB: nb.id, unlockLevel: def.unlockLevel, gate: { x: gs.x, z: gs.z, yaw: Math.atan2(gs.tx, gs.tz), width: L.halfWidth * 2 } });
     const hw = L.halfWidth;
     const at = (sp: HighwaySample, side: number, out: number): [number, number] => [sp.x - sp.tz * side * out, sp.z + sp.tx * side * out];
     if (def.kind === 'tunnel') {

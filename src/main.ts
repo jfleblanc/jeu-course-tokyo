@@ -211,6 +211,7 @@ async function boot(): Promise<void> {
   }
   // Circulation (essai) : en balade seulement. ?trafic=non la coupe.
   const traffic = new Traffic(phys, city.graph, seed);
+  traffic.links = city.links.map((l) => l.road);
   const trafficVisuals = new TrafficVisuals(scene, traffic);
   // Lampadaires renversables
   const lampField = new LampField(city.lamps);
@@ -385,7 +386,7 @@ async function boot(): Promise<void> {
 
   // ——— Course ———
   const race = new Race(phys, CAR_SPEC, car);
-  const tracks = buildTrackBank(city.graph, city.mountain?.road);
+  const tracks = buildTrackBank(city.graph, city.mountain?.road, city.links);
   // ?barrieres : aperçu des rues transversales barrées (désactivé par défaut).
   const raceVisuals = new RaceVisuals(scene, mats, city.graph, params.has('barrieres'), tracks, testModel);
   const minimap = new Minimap(city, tracks.map((t) => ({ x: t.start.x, z: t.start.z, circuit: t.circuit })));
@@ -502,9 +503,9 @@ async function boot(): Promise<void> {
   const sectorOpen = (id: number): boolean => id < 0 || allDistrictsOpen || player.level >= (city.graph.districts[id]?.unlockLevel ?? 0);
   /** Un tracé au hasard : dans le secteur où l'on se trouve s'il en a, sinon parmi les secteurs débloqués. */
   const pickTrack = (circuit: boolean): Track | null => {
-    const open = tracks.filter((t) => sectorOpen(t.district));
+    const open = tracks.filter((t) => sectorOpen(t.district) && (t.also ?? []).every(sectorOpen));
     const here = sectorHere();
-    const local = open.filter((t) => t.district === here);
+    const local = open.filter((t) => t.district === here || (t.also ?? []).includes(here));
     const pool = local.length ? local : open;
     const list = pool.filter((t) => t.circuit === circuit);
     const fallback = list.length ? list : pool;

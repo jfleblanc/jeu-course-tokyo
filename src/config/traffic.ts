@@ -8,6 +8,9 @@ export const TRAFFIC = {
   count: 24,
   /** Part de la circulation gardée à la campagne (Collines de Hakone) : 0,3 = 30 %. */
   countryShare: 0.3,
+  /** Tunnel et pont entre quartiers : part des apparitions qui s'y font quand le joueur en est proche, et vitesse (m/s). */
+  linkShare: 0.4,
+  linkSpeed: 15,
   /** Nombre de voitures pendant une course (elles apparaissent sur le tracé). */
   raceCount: 14,
   /** Elles apparaissent entre ces deux distances du joueur (m), et disparaissent au-delà de la troisième. */
