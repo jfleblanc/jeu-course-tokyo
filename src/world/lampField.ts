@@ -4,6 +4,8 @@ import type { Lamp } from './cityGen';
 /** Ce qu'il faut savoir d'une voiture pour savoir si elle fauche un lampadaire. */
 export interface LampStriker {
   x: number; z: number; yaw: number; vx: number; vz: number;
+  /** Altitude et masse (kg) : servent aux arbres (pentes, gros troncs à casser). */
+  y?: number; mass?: number;
   /** Appelé quand la voiture renverse un lampadaire : `keep` = part de vitesse conservée. */
   slow(keep: number): void;
 }

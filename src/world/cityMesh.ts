@@ -240,7 +240,14 @@ export interface CityMeshes {
   triangles: number;
   /** Quartiers extérieurs : leurs maillages sont masqués quand la caméra est loin (ils sont dans le brouillard). */
   zones: { cx: number; cz: number; radius: number; group: THREE.Group }[];
+  /** Par numéro d'arbre : le maillage qui le contient et sa plage de sommets (pour l'effacer quand il est renversé). */
+  treeSlots: (TreeSlot | undefined)[];
 }
+
+export interface TreeSlot { mesh: THREE.Mesh; v0: number; v1: number }
+
+/** Ville principale : les arbres sont regroupés par carrés de ce côté (m), pour ne retoucher qu'un petit maillage. */
+const TREE_CELL = 320;
 
 /** Masque les quartiers trop lointains pour être vus : à appeler de temps en temps. */
 export function updateCityZones(meshes: CityMeshes, x: number, z: number): void {
@@ -251,17 +258,18 @@ export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes
   const root = new THREE.Group();
   root.name = 'ville';
   const zones: CityMeshes['zones'] = [];
+  const treeSlots: CityMeshes['treeSlots'] = [];
   let total = 0;
   // La ville principale d'un bloc, puis les quartiers extérieurs par morceaux : ce qui est hors
   // champ ou trop loin (dans le brouillard) n'est pas dessiné.
-  const main = buildZone(city, mats, -1, null);
+  const main = buildZone(city, mats, -1, null, treeSlots);
   total += main.triangles;
   root.add(main.group);
   // Chaque quartier est découpé en carrés de CHUNK mètres de côté.
   for (const d of city.graph.districts) {
     const n = Math.ceil((d.radius + 130) / CHUNK);
     for (let i = -n; i < n; i++) for (let j = -n; j < n; j++) {
-      const part = buildZone(city, mats, d.id, { x0: d.cx + i * CHUNK, z0: d.cz + j * CHUNK });
+      const part = buildZone(city, mats, d.id, { x0: d.cx + i * CHUNK, z0: d.cz + j * CHUNK }, treeSlots);
       if (part.triangles === 0) continue;
       total += part.triangles;
       root.add(part.group);
@@ -273,7 +281,7 @@ export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes
     // Massif : forêt et route par morceaux ; le relief d'un seul tenant, visible de loin.
     const n = Math.ceil(mt.radius / CHUNK);
     for (let i = -n; i < n; i++) for (let j = -n; j < n; j++) {
-      const part = buildZone(city, mats, MOUNTAIN_ZONE, { x0: mt.cx + i * CHUNK, z0: mt.cz + j * CHUNK });
+      const part = buildZone(city, mats, MOUNTAIN_ZONE, { x0: mt.cx + i * CHUNK, z0: mt.cz + j * CHUNK }, treeSlots);
       if (part.triangles === 0) continue;
       total += part.triangles;
       root.add(part.group);
@@ -291,7 +299,7 @@ export function buildCityMeshes(city: CityData, mats: CityMaterials): CityMeshes
     total += geo.index ? geo.index.count / 3 : 0;
     zones.push({ cx: mt.cx, cz: mt.cz, radius: mt.radius + 600, group: g });
   }
-  return { group: root, triangles: total, zones };
+  return { group: root, triangles: total, zones, treeSlots };
 }
 
 /**
@@ -359,7 +367,7 @@ function addTerrain(solid: GeomBuilder, T: Terrain): void {
 /** Côté d'un morceau de quartier (m). */
 const CHUNK = 300;
 
-function buildZone(city: CityData, mats: CityMaterials, zone: number, cell: { x0: number; z0: number } | null): { group: THREE.Group; triangles: number } {
+function buildZone(city: CityData, mats: CityMaterials, zone: number, cell: { x0: number; z0: number } | null, treeSlots: (TreeSlot | undefined)[]): { group: THREE.Group; triangles: number } {
   const group = new THREE.Group();
   group.name = zone < 0 ? 'ville principale' : `quartier ${zone}`;
   const main = zone < 0;
@@ -443,24 +451,18 @@ function buildZone(city: CityData, mats: CityMaterials, zone: number, cell: { x0
     if (!here(r.cx, r.cz)) continue;
     solid.box(r.cx, 0.0, r.cz, r.w, 0.06, r.d, r.yaw, [0.02, 0.05, 0.03]);
   }
-  for (const t of city.trees) {
-    if (!here(t.x, t.z)) continue;
-    if (t.palm) {
-      // Palmier : tronc fin, palmes retombantes en étoile.
-      solid.cylinder(t.x, sh, t.z, 0.2, 0.13, t.height, 6, [0.07, 0.05, 0.035], [0, 0, 0, 0], false);
-      for (let k = 0; k < 7; k++) {
-        const a = (k / 7) * Math.PI * 2 + t.x;
-        const dx = Math.sin(a), dz = Math.cos(a);
-        solid.box(t.x + dx * t.radius * 0.5, t.height - 0.15, t.z + dz * t.radius * 0.5, 0.55, 0.1, t.radius, a, [0.03, 0.11, 0.05], [0, 0, 0, 0], true, true);
-        solid.box(t.x + dx * t.radius * 1.1, t.height - 0.75, t.z + dz * t.radius * 1.1, 0.4, 0.1, t.radius * 0.5, a, [0.025, 0.09, 0.045], [0, 0, 0, 0], true, true);
-      }
-      continue;
-    }
-    const ty = sh + (t.y ?? 0);
-    solid.cylinder(t.x, ty, t.z, 0.22, 0.14, t.height * 0.5, 6, [0.05, 0.035, 0.025], [0, 0, 0, 0], false);
-    solid.cylinder(t.x, ty + t.height * 0.35, t.z, t.radius, t.radius * 0.55, t.height * 0.35, 7, [0.02, 0.07, 0.04], [0, 0, 0, 0], false);
-    solid.cylinder(t.x, ty + t.height * 0.7, t.z, t.radius * 0.55, 0.05, t.height * 0.3, 7, [0.025, 0.08, 0.045], [0, 0, 0, 0], false);
-  }
+  // Arbres : dans des maillages à eux, en notant la plage de sommets de chacun (voir treeVisuals).
+  const treeGeos = new Map<number, { gb: GeomBuilder; ids: number[]; from: number[]; to: number[] }>();
+  city.trees.forEach((t, id) => {
+    if (!here(t.x, t.z)) return;
+    const key = main ? Math.floor(t.x / TREE_CELL) * 4099 + Math.floor(t.z / TREE_CELL) : 0;
+    let tg = treeGeos.get(key);
+    if (!tg) { tg = { gb: new GeomBuilder(), ids: [], from: [], to: [] }; treeGeos.set(key, tg); }
+    tg.ids.push(id);
+    tg.from.push(tg.gb.vertexCount);
+    addTree(tg.gb, t, t.x, sh + (t.y ?? 0), t.z, 1, 1);
+    tg.to.push(tg.gb.vertexCount);
+  });
   // (les lampadaires sont dessinés à part, par instances : src/render/lampVisuals.ts)
   for (const p of city.props) if (here(p.x, p.z)) solid.box(p.x, p.y, p.z, p.sx, p.sy, p.sz, p.yaw, p.color);
   for (const g of city.glowBoxes) if (here(g.x, g.z)) glow.box(g.x, g.y, g.z, g.sx, g.sy, g.sz, g.yaw, g.color, g.level ? [1, 3, 1, g.level] : [1, 4, 1, 1.5], true, false);
@@ -582,9 +584,35 @@ function buildZone(city: CityData, mats: CityMaterials, zone: number, cell: { x0
   }
   triangles += tri(roadGeo);
   add(roadGeo, mats.road, 'routes');
+  for (const tg of treeGeos.values()) {
+    const geo = tg.gb.build();
+    triangles += tri(geo);
+    const m = add(geo, mats.solid, 'arbres');
+    m.frustumCulled = true;
+    tg.ids.forEach((id, k) => { treeSlots[id] = { mesh: m, v0: tg.from[k] as number, v1: tg.to[k] as number }; });
+  }
   const poolGeo = pools.build();
   triangles += tri(poolGeo);
   add(poolGeo, mats.pool, 'flaques', 2);
 
   return { group, triangles };
+}
+
+/** Dessine un arbre au point (x, y, z). `kr`, `kh` : échelles du rayon et de la hauteur (1 = taille réelle). */
+export function addTree(gb: GeomBuilder, t: { height: number; radius: number; palm?: boolean; x: number }, x: number, y: number, z: number, kr: number, kh: number): void {
+  const h = t.height * kh, r = t.radius * kr;
+  if (t.palm) {
+    // Palmier : tronc fin, palmes retombantes en étoile.
+    gb.cylinder(x, y, z, 0.2, 0.13, h, 6, [0.07, 0.05, 0.035], [0, 0, 0, 0], false);
+    for (let k = 0; k < 7; k++) {
+      const a = (k / 7) * Math.PI * 2 + t.x;
+      const dx = Math.sin(a), dz = Math.cos(a);
+      gb.box(x + dx * r * 0.5, y + h - 0.15, z + dz * r * 0.5, 0.55, 0.1, r, a, [0.03, 0.11, 0.05], [0, 0, 0, 0], true, true);
+      gb.box(x + dx * r * 1.1, y + h - 0.75, z + dz * r * 1.1, 0.4, 0.1, r * 0.5, a, [0.025, 0.09, 0.045], [0, 0, 0, 0], true, true);
+    }
+    return;
+  }
+  gb.cylinder(x, y, z, 0.22, 0.14, h * 0.5, 6, [0.05, 0.035, 0.025], [0, 0, 0, 0], false);
+  gb.cylinder(x, y + h * 0.35, z, r, r * 0.55, h * 0.35, 7, [0.02, 0.07, 0.04], [0, 0, 0, 0], false);
+  gb.cylinder(x, y + h * 0.7, z, r * 0.55, 0.05, h * 0.3, 7, [0.025, 0.08, 0.045], [0, 0, 0, 0], false);
 }

@@ -257,23 +257,30 @@ body.cctv-menu .hud, body.cctv-menu #minimap, body.cctv-menu #race-hud { visibil
 #profils .pf-check { flex-direction: row; align-items: center; gap: 6px; }
 #profils .pf-form { width: min(440px, 94vw); }
 
-/* ——— Garage : un bandeau en bas, pour laisser voir l'atelier ——— */
-#garage.side-menu { left: 0; right: 0; top: auto; bottom: 0; width: auto; max-width: none; max-height: 46vh; border-right: 0; border-top: 1px solid var(--line); transform: translateY(105%); background: linear-gradient(180deg, rgba(10, 8, 24, 0.72), rgba(10, 8, 24, 0.92)); }
-#garage.side-menu.open { transform: none; }
-#garage header { padding: 8px 14px 6px; border-bottom: 0; }
-#garage .g-top { gap: 18px; }
-#garage h2 { font-size: 16px; }
-#garage .g-status { margin-top: 0; flex: 1; grid-template-columns: auto minmax(120px, 260px) auto; justify-content: start; gap: 18px; }
-#garage .g-status b { font-size: 17px; }
-#garage .g-status small { display: inline; }
-#garage .g-status .money { font-size: 16px; }
-#garage .g-tabs { display: flex; gap: 6px; align-items: center; margin-top: 7px; flex-wrap: wrap; }
+/* ——— Garage : panneau à gauche, vignettes des voitures, fiche technique au survol ——— */
+#garage.side-menu { width: 400px; }
+#garage .g-tabs { display: flex; gap: 5px; margin-top: 12px; }
+#garage .g-tabs button { flex: 1; padding: 6px 4px; font-size: 12.5px; }
 #garage .g-tabs button.on { background: rgba(46, 230, 255, 0.2); border-color: var(--cyan); }
-#garage .g-tabs .g-car { margin-left: auto; font-size: 12px; color: var(--dim); }
-#garage .g-tabs .g-car b { color: var(--txt); }
-#garage .g-tabs .small { margin-top: 0; }
-#garage .g-strip { display: flex; gap: 8px; overflow-x: auto; overflow-y: hidden; padding: 6px 14px 14px; align-items: stretch; }
-#garage .g-strip .g-card, #garage .g-strip .g-row { flex: 0 0 auto; width: 250px; margin-bottom: 0; flex-direction: column; align-items: flex-start; justify-content: space-between; white-space: normal; }
-#garage .g-strip .g-row small, #garage .g-strip .g-card small { white-space: normal; }
-#garage .g-look { flex: 0 0 auto; max-width: 46vw; }
-#garage .g-look h3 { margin-top: 2px; }
+#garage .scroll { padding-top: 12px; }
+#garage .g-card { align-items: center; padding: 7px; }
+#garage .g-thumb { width: 104px; height: 58px; object-fit: cover; border-radius: 6px; flex: 0 0 auto; background: #15122a; }
+#garage .g-txt { flex: 1; min-width: 0; }
+#garage .g-txt b { display: block; font-size: 13.5px; line-height: 1.2; }
+#garage .g-card .g-btns { flex-direction: column; align-items: stretch; gap: 4px; }
+#garage .g-card .g-btns button { padding: 4px 9px; font-size: 12.5px; }
+#g-fiche { position: fixed; z-index: 26; width: 300px; padding: 10px 12px 12px; background: rgba(10, 8, 22, 0.9); border: 1px solid var(--line); border-radius: 10px; font-size: 12.5px; color: var(--txt); pointer-events: none; opacity: 0; transition: opacity 0.12s; backdrop-filter: blur(8px); }
+#g-fiche.on { opacity: 1; }
+#g-fiche img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 7px; display: block; background: #15122a; }
+#g-fiche h4 { margin: 9px 0 3px; font-size: 15px; }
+#g-fiche p { margin: 0 0 9px; color: var(--dim); line-height: 1.35; }
+#g-fiche .f-bar { display: grid; grid-template-columns: 78px 1fr 92px; gap: 8px; align-items: center; margin-bottom: 5px; }
+#g-fiche .f-bar span, #g-fiche .f-row span { color: var(--dim); }
+#g-fiche .f-bar .bar { height: 6px; background: rgba(255, 255, 255, 0.12); border-radius: 3px; overflow: hidden; }
+#g-fiche .f-bar .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--cyan), var(--magenta)); }
+#g-fiche .f-bar b { text-align: right; font-weight: 600; }
+#g-fiche em { color: var(--amber); font-style: normal; font-weight: 400; }
+#g-fiche .f-row { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0; border-top: 1px solid var(--line); }
+#g-fiche .f-row b { font-weight: 500; text-align: right; }
+body.garage-ouvert #cctv .cc-label { left: 418px; }
+body.garage-ouvert #tuto { visibility: hidden; }

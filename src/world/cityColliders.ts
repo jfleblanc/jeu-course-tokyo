@@ -7,6 +7,9 @@ import type { CityData, Highway, HighwaySample } from './cityGen';
  * Collisions de la ville : des boîtes simples (jamais le maillage visuel),
  * plus un maillage de triangles pour l'autoroute surélevée.
  */
+/** Troncs des gros arbres, par numéro d'arbre : on peut les désactiver quand l'arbre est cassé. */
+export const treeTrunks = new Map<number, { setEnabled(on: boolean): void }>();
+
 export function buildCityColliders(city: CityData, phys: PhysicsWorld): number {
   const R = phys.rapier;
   const world = phys.world;
@@ -228,5 +231,11 @@ export function buildCityColliders(city: CityData, phys: PhysicsWorld): number {
     count++;
   }
   for (const b of city.solids) box(b.x, b.y, b.z, b.hx, b.hy, b.hz, b.yaw, 0.3);
+  treeTrunks.clear();
+  city.trees.forEach((t, i) => {
+    if (!t.solid) return;
+    treeTrunks.set(i, world.createCollider(R.ColliderDesc.cuboid(0.3, 1.5, 0.3).setTranslation(t.x, (t.y ?? 0) + 1.5, t.z).setFriction(0.3).setRestitution(0.05).setCollisionGroups(GROUP_WORLD)));
+    count++;
+  });
   return count;
 }

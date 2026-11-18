@@ -28,6 +28,8 @@ import { profileSummary, setActiveProfile, type Profile } from './progression/pr
 import { CAR_MODELS } from './config/cars';
 import { testSpots } from './debug/spots';
 import { LampField, type LampStriker } from './world/lampField';
+import { TreeField } from './world/treeField';
+import { TreeVisuals } from './render/treeVisuals';
 import { DistrictGates } from './world/districtGates';
 import { FullMap } from './ui/fullMap';
 import { emptyDriveInput } from './input/actions';
@@ -46,7 +48,7 @@ import { RaceHud } from './ui/raceHud';
 import { createCarVisual, syncCarVisual } from './vehicle/carModel';
 import { applyCarAsset, loadCarAsset } from './vehicle/glbCar';
 import { REST_HEIGHT, Vehicle } from './vehicle/vehicle';
-import { buildCityColliders } from './world/cityColliders';
+import { buildCityColliders, treeTrunks } from './world/cityColliders';
 import { generateCity } from './world/cityGen';
 import { buildCityMeshes, updateCityZones } from './world/cityMesh';
 
@@ -216,22 +218,27 @@ async function boot(): Promise<void> {
   // Lampadaires renversables
   const lampField = new LampField(city.lamps);
   const lampVisuals = new LampVisuals(scene, lampField, mats);
+  const treeField = new TreeField(city.trees);
+  treeField.setSolid = (id, on): void => treeTrunks.get(id)?.setEnabled(on);
+  const treeVisuals = new TreeVisuals(scene, treeField, meshes.treeSlots, mats.solid);
+  let treesHeard = 0, trunksHeard = 0;
   const strikers: LampStriker[] = [];
   const strikerOf = new Map<Vehicle, LampStriker>();
   const strikerFor = (v: Vehicle): LampStriker => {
     let s = strikerOf.get(v);
     if (!s) {
-      s = { x: 0, z: 0, yaw: 0, vx: 0, vz: 0, slow: (keep) => { const lv = v.body.linvel(); v.body.setLinvel({ x: lv.x * keep, y: lv.y, z: lv.z * keep }, true); } };
+      s = { x: 0, z: 0, yaw: 0, vx: 0, vz: 0, y: 0, mass: v.body.mass(), slow: (keep) => { const lv = v.body.linvel(); v.body.setLinvel({ x: lv.x * keep, y: lv.y, z: lv.z * keep }, true); } };
       strikerOf.set(v, s);
     }
     const lv = v.body.linvel();
-    s.x = v.pos.x; s.z = v.pos.z; s.yaw = v.yaw; s.vx = lv.x; s.vz = lv.z;
+    s.x = v.pos.x; s.z = v.pos.z; s.yaw = v.yaw; s.vx = lv.x; s.vz = lv.z; s.y = v.pos.y - 0.5; s.mass = v.body.mass();
     return s;
   };
   let lampsHeard = 0;
   // ?trafic=non : aucune circulation ; ?trafic=balade : pas pendant les courses.
   const trafficOn = params.get('trafic') !== 'non';
-  const trafficInRace = params.get('trafic') !== 'balade';
+  // Pas de circulation en course (choix des joueurs) ; « ?trafic=course » la remet pour un essai.
+  const trafficInRace = params.get('trafic') === 'course';
   let lastTrafficRoute: unknown = null;
   const actors: TrafficActor[] = [{ x: 0, z: 0, vx: 0, vz: 0 }];
   const tutorial = new Tutorial();
@@ -240,6 +247,8 @@ async function boot(): Promise<void> {
   // ——— Garage en vrai (vu par une caméra de surveillance) et choix du joueur ———
   const garageScene = new GarageScene(scene, city.garage);
   let garageView = false;
+  /** Décalage de l'image de la caméra du garage (px), quand le menu occupe la gauche. */
+  let viewShift = 0;
   let parkedFor = 0;
   /** Montée en voiture en cours (0..1), ou −1. */
   let boardT = -1;
@@ -722,6 +731,9 @@ async function boot(): Promise<void> {
       if (race.active) for (const r of race.racers) if (!r.isPlayer) strikers.push(strikerFor(r.car));
       lampField.update(dt, strikers, car.pos.x, car.pos.z);
       if (lampField.knocked !== lampsHeard) { lampsHeard = lampField.knocked; sfx.clang(); }
+      treeField.update(dt, strikers, car.pos.x, car.pos.z);
+      if (treeField.knocked !== treesHeard) { treesHeard = treeField.knocked; sfx.crack(0.5); }
+      if (treeField.broken !== trunksHeard) { trunksHeard = treeField.broken; sfx.crack(1); }
       race.afterStep(dt);
       // Filet de sécurité : sortie de carte ou chute sous le sol.
       const b = city.bounds;
@@ -748,6 +760,13 @@ async function boot(): Promise<void> {
         garageScene.showMechanic(menu || Math.hypot(car.pos.x - bay.x, car.pos.z - bay.z) < 2.5);
         syncBayColliders();
         garageScene.update(frameDt, camera, null);
+        // Menu ouvert : l'image de la caméra est décalée pour tenir dans la partie droite de l'écran.
+        const shift = Math.round(garage.panelWidth / 2);
+        if (shift !== viewShift) {
+          viewShift = shift;
+          if (shift > 0) camera.setViewOffset(window.innerWidth, window.innerHeight, -shift, 0, window.innerWidth, window.innerHeight);
+          else camera.clearViewOffset();
+        }
         // Débogage : `window.__zoom = 20` resserre la caméra du garage (contrôle du personnage).
         const zoom = (window as unknown as { __zoom?: number }).__zoom;
         if (zoom) { camera.fov = zoom; camera.updateProjectionMatrix(); }
@@ -826,6 +845,7 @@ async function boot(): Promise<void> {
       raceVisuals.update(race, alpha, frameDt);
       trafficVisuals.update(traffic, camera.position.x, camera.position.z);
       lampVisuals.update();
+      treeVisuals.update();
       // Vue du garage : on éteint la ville (inutile de la dessiner) et on allume l'atelier.
       // Vue par la caméra de l'atelier : dans les menus du garage, au choix du joueur, et quand
       // la voiture roule dans l'atelier (le plafond cacherait la vue habituelle).
@@ -844,6 +864,7 @@ async function boot(): Promise<void> {
       }
       const view = menus || boardT >= 0 || (waiting && (garageView || parkedFor > 1.2 || justParked));
       if (!waiting) justParked = false;
+      if (!view && viewShift !== 0) { viewShift = 0; camera.clearViewOffset(); }
       if (view !== garageView) {
         garageView = view;
         document.body.classList.toggle('cctv', view);
@@ -853,6 +874,7 @@ async function boot(): Promise<void> {
       // Le personnage est le joueur : dès qu'il conduit, il n'est plus à côté de la voiture.
       if (!view) garageScene.showMechanic(false);
       document.body.classList.toggle('cctv-menu', menus);
+      document.body.classList.toggle('garage-ouvert', garage.open);
       garageScene.setLights(view || garageScene.distance(car.pos.x, car.pos.z) < 90);
       // Dans les menus, inutile de dessiner la ville.
       meshes.group.visible = !menus;
@@ -906,7 +928,7 @@ async function boot(): Promise<void> {
   });
 
   // Accès console pour le débogage : window.__jeu
-  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks, traffic, lampField,
+  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks, traffic, lampField, treeField, garageScene,
     /** Éclairage de studio pour les planches de contrôle. */
     studio: (): void => {
       scene.add(new THREE.HemisphereLight(0xffffff, 0x8888aa, 3.2));

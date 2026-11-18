@@ -335,7 +335,15 @@ export class Sfx {
     this.tone(1870, 0.01, 0.25, 0.04, 'square', 1790);
   }
 
-  /** Clic de menu. */
+  /** Arbre fauché (force 0,5) ou gros tronc cassé (force 1) : craquement de bois et choc sourd. */
+  crack(strength: number): void {
+    this.tone(120, 0, 0.18, 0.22 * strength + 0.08, 'triangle', 45);
+    this.tone(420, 0, 0.05, 0.1 * strength, 'sawtooth', 160);
+    this.tone(310, 0.05, 0.07, 0.08 * strength, 'sawtooth', 120);
+    if (strength > 0.8) this.tone(70, 0.02, 0.4, 0.3, 'sine', 32);
+  }
+
+
   click(): void {
     this.tone(660, 0, 0.05, 0.07, 'triangle');
   }

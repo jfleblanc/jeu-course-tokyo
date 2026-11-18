@@ -13,3 +13,23 @@ export const LAMPS = {
   /** Un lampadaire renversé se redresse quand le joueur est à plus de cette distance (m). */
   respawnDistance: 260,
 };
+
+/** Arbres : les petits et les palmiers se fauchent ; les gros (sapins de campagne) sont durs, sauf si on arrive assez fort. */
+export const TREES = {
+  /** Petit arbre ou palmier : part de vitesse perdue, et vitesse minimale (m/s) pour le faucher. */
+  slowdown: 0.06,
+  minSpeed: 5,
+  /** Gros arbre : il casse si vitesse (m/s) × masse (kg) dépasse ce seuil. 27 000 ≈ 1 100 kg à 90 km/h, ou 1 500 kg à 65 km/h. */
+  breakMomentum: 27000,
+  /** Part de vitesse perdue en cassant un gros arbre. */
+  breakSlowdown: 0.22,
+  /** Demi-largeur de contact (m) : voiture + tronc. */
+  hitHalfWidth: 1.15,
+  hitHalfLength: 2.3,
+  popUp: 5,
+  carry: 0.6,
+  /** Un arbre à terre repousse quand le joueur est à plus de cette distance (m). */
+  respawnDistance: 260,
+  /** Nombre maximal d'arbres à terre en même temps (les plus anciens repoussent). */
+  maxDown: 40,
+};

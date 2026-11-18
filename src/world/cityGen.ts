@@ -134,6 +134,8 @@ export interface Tree {
   palm?: boolean;
   /** Hauteur du pied de l'arbre (0 = au sol ; sert sur les pentes de la colline). */
   y?: number;
+  /** Gros arbre au tronc dur : on ne le traverse pas, sauf à le casser en arrivant fort. */
+  solid?: boolean;
 }
 
 /** Mur invisible (bord de la ville). */
@@ -1105,8 +1107,7 @@ export function generateCity(seed: number = WORLD.seed): CityData {
 
   /** Arbre de campagne : avec un tronc en dur (on ne traverse pas la forêt en voiture). */
   const plantTree = (x: number, z: number, height: number, radius: number): void => {
-    trees.push({ x, z, height, radius });
-    solids.push({ x, y: 1.5, z, hx: 0.3, hy: 1.5, hz: 0.3, yaw: 0 });
+    trees.push({ x, z, height, radius, solid: true });
   };
 
   /** Pagode à trois toits (décor) posée à la hauteur y ; `k` = échelle. */
