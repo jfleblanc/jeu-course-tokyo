@@ -39,6 +39,14 @@ export const GARAGE = {
 } as const;
 
 /** Rectangles troués dans le sol (repère local) : l'atelier, puis le palier et la rampe. */
+/** Accessoires fixes de l'atelier (étagères, piles de pneus, fûts) : emprise au sol x0, z0, x1, z1 et hauteur. */
+export const GARAGE_FIXTURES: readonly (readonly [number, number, number, number, number])[] = [
+  [-11.5, -8.5, -7.7, -7.75, 3.2],
+  [10.2, 7.0, 12.3, 8.5, 1.1],
+  [-12.6, 7.0, -10.5, 8.5, 1.3],
+  [3.9, 7.2, 6.7, 8.5, 0.9],
+];
+
 export const GARAGE_HOLES = [
   { x0: -GARAGE.halfW - GARAGE.wall, x1: GARAGE.halfW + GARAGE.wall, z0: -GARAGE.halfD - GARAGE.wall, z1: GARAGE.halfD + GARAGE.wall },
   { x0: GARAGE.rampX0, x1: GARAGE.rampX1, z0: GARAGE.landingZ0, z1: GARAGE.rampZ1 },

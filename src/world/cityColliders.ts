@@ -1,6 +1,6 @@
 import { GROUP_WORLD, type PhysicsWorld, GROUP_BARRIER } from '../physics/physicsWorld';
 import { RailGuide, setRailGuide } from './railGuide';
-import { GARAGE, GARAGE_BOUNDS, garageToWorld } from './garageSite';
+import { GARAGE, GARAGE_BOUNDS, garageToWorld, GARAGE_FIXTURES } from './garageSite';
 import type { CityData, Highway, HighwaySample } from './cityGen';
 
 /**
@@ -152,10 +152,7 @@ export function buildCityColliders(city: CityData, phys: PhysicsWorld): number {
         const [wx, wz] = garageToWorld(site, (x0 + x1) / 2, (z0 + z1) / 2);
         box(wx, G.floor + h / 2, wz, (x1 - x0) / 2, h / 2, (z1 - z0) / 2, site.yaw, 0.3);
       };
-      solid(-11.5, -G.halfD, -7.7, -G.halfD + 0.75, 3.2); // étagères
-      solid(10.2, 7.0, 12.3, G.halfD, 1.1); // pneus
-      solid(-12.6, 7.0, -10.5, G.halfD, 1.3);
-      solid(3.9, 7.2, 6.7, G.halfD, 0.9); // fûts
+      for (const f of GARAGE_FIXTURES) solid(f[0], f[1], f[2], f[3], f[4]);
     }
     // Rampe : une dalle inclinée du palier jusqu'à la rue.
     {

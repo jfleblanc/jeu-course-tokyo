@@ -24,6 +24,16 @@ export class GarageMenu {
   get panelWidth(): number {
     return this.open ? this.root.getBoundingClientRect().width : 0;
   }
+  /** Photos des voitures du joueur avec leur peinture et leur néon (clé : modèle|peinture|néon), fournies par le jeu. */
+  readonly photos = new Map<string, string>();
+  /** Voitures du joueur dont la photo manque encore. */
+  missingPhotos(): { key: string; model: string; paint: number; neon: number }[] {
+    return this.player.cars.map((c) => ({ key: `${c.model}|${c.paint}|${c.neon}`, model: c.model, paint: c.paint, neon: c.neon })).filter((c) => !this.photos.has(c.key));
+  }
+  /** Redessine le menu (une photo vient d'arriver). */
+  refresh(): void {
+    if (this.open) this.render();
+  }
   /** Onglet affiché. */
   private tab: 'voitures' | 'ameliorations' | 'apparence' | 'concession' = 'voitures';
 
@@ -109,7 +119,7 @@ export class GarageMenu {
         const activeCar = i === p.active;
         const ups = c.upgrades.engine + c.upgrades.tires + c.upgrades.weight + (c.nos ? 1 : 0);
         return `<div class="g-card${activeCar ? ' active' : ''}" data-fiche="${m.id}" data-own="${i}">
-          ${thumb(m.glb)}
+          ${this.thumbOf(c, m.glb)}
           <div class="g-txt"><b>${m.name}</b><small>${ups ? `${ups} amélioration${ups > 1 ? 's' : ''}` : 'de série'} · revente ${yen(p.resaleValue(c))}</small></div>
           <div class="g-btns">
             ${activeCar ? '<span class="g-tag">au volant</span>' : `<button data-act="drive" data-arg="${i}">Conduire</button>`}
@@ -145,7 +155,7 @@ export class GarageMenu {
     const tabs: [typeof this.tab, string][] = [['voitures', `Voitures ${p.cars.length}/${MAX_CARS}`], ['ameliorations', 'Améliorations'], ['apparence', 'Peinture'], ['concession', 'Concession']];
     const body =
       this.tab === 'voitures' ? `${cars}<p class="g-note">Revente : 50 % du prix d'achat et des améliorations. ${p.races} course${p.races > 1 ? 's' : ''}, ${p.wins} victoire${p.wins > 1 ? 's' : ''}.</p><button class="danger small" data-act="reset">Recommencer à zéro</button>`
-      : this.tab === 'ameliorations' ? `<div class="g-card active" data-fiche="${model.id}" data-own="${p.active}">${thumb(model.glb)}<div class="g-txt"><b>${model.name}</b><small>au volant</small></div></div>${upgrades}${nos}`
+      : this.tab === 'ameliorations' ? `<div class="g-card active" data-fiche="${model.id}" data-own="${p.active}">${this.thumbOf(car, model.glb)}<div class="g-txt"><b>${model.name}</b><small>au volant</small></div></div>${upgrades}${nos}`
       : this.tab === 'apparence' ? `<h3>Peinture <small>${model.paintable ? `${yen(PAINT_PRICE)} le changement` : 'livrée d’origine, non modifiable'}</small></h3>${model.paintable ? `<div class="g-swatches">${paints}</div>` : ''}
           <h3>Néon sous la voiture <small>${car.neonOwned ? 'installé : couleur au choix' : yen(NEON_PRICE)}</small></h3><div class="g-swatches">${neonOff}${neons}</div>`
       : dealer;
@@ -160,6 +170,12 @@ export class GarageMenu {
         <nav class="g-tabs">${tabs.map(([id, label]) => `<button data-act="tab" data-id="${id}" class="${id === this.tab ? 'on' : ''}">${label}</button>`).join('')}</nav>
       </header>
       <div class="scroll">${body}</div>`;
+  }
+
+  /** Vignette d'une voiture du joueur : sa photo à lui si elle est prête, sinon la photo du modèle. */
+  private thumbOf(c: { model: string; paint: number; neon: number }, glb: string | null): string {
+    const own = this.photos.get(`${c.model}|${c.paint}|${c.neon}`);
+    return own ? `<img class="g-thumb" src="${own}" alt="">` : thumb(glb);
   }
 
   /** Fiche technique à droite du panneau, à la hauteur de la carte survolée. */
@@ -180,7 +196,7 @@ export class GarageMenu {
     const row = (k: string, v: string): string => `<div class="f-row"><span>${k}</span><b>${v}</b></div>`;
     const wb = Math.abs(m.traits.axleFrontZ - m.traits.axleRearZ);
     this.sheet.innerHTML = `
-      <img src="${thumbUrl(m.glb)}" alt="">
+      <img src="${(own && this.photos.get(`${own.model}|${own.paint}|${own.neon}`)) || thumbUrl(m.glb)}" alt="">
       <h4>${m.name}</h4>
       <p>${m.blurb}</p>
       ${bar('Puissance', power, max((c) => c.power), m.power)}

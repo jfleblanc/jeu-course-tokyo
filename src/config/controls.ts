@@ -29,6 +29,7 @@ export const KEY_EVENTS: Record<string, ActionEvent> = {
   Enter: 'raceStart',
   KeyT: 'circuitStart',
   KeyY: 'eventStart',
+  KeyF: 'interact',
   KeyG: 'garage',
   Tab: 'map',
   Escape: 'raceQuit',

@@ -43,6 +43,7 @@ export type ActionEvent =
   | 'raceStart'
   | 'circuitStart'
   | 'eventStart'
+  | 'interact'
   | 'garage'
   | 'map'
   | 'raceQuit';

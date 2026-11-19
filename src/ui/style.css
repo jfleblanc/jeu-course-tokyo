@@ -294,3 +294,10 @@ body.garage-ouvert #tuto { visibility: hidden; }
 #race-card .rc-medals .m1 b, .race-pos .medal.m1 { color: #cfd8e6; }
 #race-card .rc-medals .m2 b, .race-pos .medal.m2 { color: #d9905a; }
 .race-pos .medal { font-size: 0.55em; letter-spacing: 0.06em; }
+
+/* ——— À pied dans l'atelier ——— */
+#walk-hint { position: fixed; left: 50%; bottom: 74px; transform: translateX(-50%); z-index: 14; padding: 7px 14px; background: rgba(10, 8, 22, 0.78); border: 1px solid var(--line); border-radius: 999px; font-size: 13px; color: var(--txt); display: none; white-space: nowrap; }
+#walk-hint.on { display: block; }
+#walk-hint kbd { font: 12px ui-monospace, Menlo, monospace; background: rgba(255, 255, 255, 0.16); border-radius: 4px; padding: 1px 6px; margin: 0 2px; }
+body.a-pied #cctv { display: none; }
+body.a-pied #hud-speed, body.a-pied #minimap, body.a-pied #tuto, body.a-pied .race-hint { visibility: hidden; }

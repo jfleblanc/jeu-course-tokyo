@@ -4,7 +4,7 @@ import { CAR_SPEC, type CarTraits } from '../config/handling';
 import { createCarVisual, type CarVisual } from '../vehicle/carModel';
 import { applyCarAsset, loadCarAsset } from '../vehicle/glbCar';
 import { REST_HEIGHT } from '../vehicle/vehicle';
-import { GARAGE, GARAGE_BOUNDS, garageToLocal, type GarageSite } from './garageSite';
+import { GARAGE, GARAGE_BOUNDS, GARAGE_FIXTURES, garageToLocal, type GarageSite } from './garageSite';
 
 /** Une voiture à garer dans le garage. */
 export interface GarageCar {
@@ -12,6 +12,8 @@ export interface GarageCar {
   color: readonly [number, number, number];
   bigWing: boolean;
   traits: CarTraits;
+  /** Néon sous la voiture, s'il y en a un. */
+  neon?: readonly [number, number, number] | null;
 }
 
 const G = GARAGE;
@@ -238,6 +240,7 @@ export class GarageScene {
           }
           boxes.push({ x0, z0, x1, z1, h: Math.min(y1, 2.2) });
         }
+        this.furniture = boxes;
         this.onFurniture?.(boxes);
       })
       .catch((err: unknown) => console.info('Mobilier du garage indisponible.', err));
@@ -303,8 +306,8 @@ export class GarageScene {
   }
 
   /** Pose du personnage : au travail (penché, bras en avant, il serre) ou en marche. */
-  private poseCharacter(working: boolean, t: number): void {
-    const step = Math.sin(t * 9);
+  private poseCharacter(working: boolean, t: number, still = false): void {
+    const step = still ? 0 : Math.sin(t * 9);
     this.turn('Spine', working ? 0.38 + Math.sin(t * 1.3) * 0.04 : 0.03, 0, 0);
     this.mech.updateMatrixWorld(true);
     for (const [arm, fore, leg, shin, ph] of [['LeftArm', 'LeftForeArm', 'LeftUpLeg', 'LeftLeg', 1], ['RightArm', 'RightForeArm', 'RightUpLeg', 'RightLeg', -1]] as const) {
@@ -313,10 +316,90 @@ export class GarageScene {
       this.turn(arm, working ? -0.62 + work * 0.1 : step * ph * 0.45, 0, -1.3);
       this.turn(leg, working ? -0.12 : -step * ph * 0.5, 0, 0);
       this.mech.updateMatrixWorld(true);
-      this.turn(fore, working ? -0.55 + work * 0.3 : -0.25, 0, 0);
+      this.turn(fore, working ? -0.55 + work * 0.3 : still ? -0.1 : -0.25, 0, 0);
       this.turn(shin, working ? 0.22 : Math.max(0, step * ph) * 0.6, 0, 0);
     }
     this.turn('Head', working ? 0.25 : 0, 0, 0);
+  }
+
+  // ——— À pied dans l'atelier ———
+  /** Le joueur marche (repère de l'atelier) ; `null` quand le personnage n'est pas commandé. */
+  walker: { x: number; z: number; yaw: number; moving: boolean; stride: number } | null = null;
+  /** Nombre de voitures garées le long du mur (elles font obstacle et on peut y monter). */
+  parkedCount = 0;
+  private furniture: FurnitureBox[] = [];
+
+  /** Il descend de la voiture du plateau, côté conducteur. */
+  startWalk(): void {
+    this.walker = { x: G.mainBay.x + 0.3, z: G.mainBay.z - 1.7, yaw: Math.PI, moving: false, stride: 0 };
+    this.mech.visible = true;
+  }
+
+  stopWalk(): void {
+    this.walker = null;
+  }
+
+  /** Avance (`forward` : −1..1) et tourne (`turn` > 0 : à gauche), sans traverser murs, meubles et voitures. */
+  walk(dt: number, forward: number, turn: number): void {
+    const w = this.walker;
+    if (!w) return;
+    w.yaw += turn * 2.7 * dt;
+    const speed = forward * (forward > 0 ? 3.1 : 1.6);
+    w.moving = Math.abs(speed) > 0.2;
+    if (w.moving) w.stride += dt * Math.sign(speed);
+    w.x += Math.sin(w.yaw) * speed * dt;
+    w.z += Math.cos(w.yaw) * speed * dt;
+    const R = 0.36;
+    const out = (x0: number, z0: number, x1: number, z1: number): void => {
+      if (w.x < x0 - R || w.x > x1 + R || w.z < z0 - R || w.z > z1 + R) return;
+      // sortie par le côté le plus proche
+      const dl = w.x - (x0 - R), dr = x1 + R - w.x, db = w.z - (z0 - R), df = z1 + R - w.z;
+      const m = Math.min(dl, dr, db, df);
+      if (m === dl) w.x = x0 - R; else if (m === dr) w.x = x1 + R; else if (m === db) w.z = z0 - R; else w.z = z1 + R;
+    };
+    out(G.mainBay.x - 2.3, G.mainBay.z - 1.0, G.mainBay.x + 2.3, G.mainBay.z + 1.0);
+    for (let k = 0; k < Math.min(this.parkedCount, G.bays.length); k++) {
+      const b = G.bays[k] as (typeof G.bays)[number];
+      out(b.x - 1.0, b.z - 2.3, b.x + 1.0, b.z + 2.3);
+    }
+    for (const f of GARAGE_FIXTURES) out(f[0], f[1], f[2], f[3]);
+    for (const f of this.furniture) out(f.x0, f.z0, f.x1, f.z1);
+    w.x = Math.max(-G.halfW + 0.45, Math.min(G.halfW - 0.45, w.x));
+    w.z = Math.max(-G.halfD + 0.45, Math.min(G.halfD - 0.45, w.z));
+  }
+
+  /** Voiture à portée de main : −1 aucune, 0 celle du plateau, k ≥ 1 la k-ième garée le long du mur. */
+  nearCar(): number {
+    const w = this.walker;
+    if (!w) return -1;
+    let best = -1, bd = 2.2;
+    const near = (k: number, x0: number, z0: number, x1: number, z1: number): void => {
+      const d = Math.hypot(Math.max(x0 - w.x, 0, w.x - x1), Math.max(z0 - w.z, 0, w.z - z1));
+      if (d < bd - 1.3) { bd = d + 1.3; best = k; }
+    };
+    near(0, G.mainBay.x - 2.3, G.mainBay.z - 1.0, G.mainBay.x + 2.3, G.mainBay.z + 1.0);
+    for (let k = 0; k < Math.min(this.parkedCount, G.bays.length); k++) {
+      const b = G.bays[k] as (typeof G.bays)[number];
+      near(k + 1, b.x - 1.0, b.z - 2.3, b.x + 1.0, b.z + 2.3);
+    }
+    return best;
+  }
+
+  /** Caméra à la troisième personne, derrière le personnage, sans sortir de la pièce. */
+  private walkCamera(camera: THREE.PerspectiveCamera, dt: number): void {
+    const w = this.walker;
+    if (!w) return;
+    this.group.updateMatrixWorld();
+    this.camPos.set(w.x - Math.sin(w.yaw) * 3.4, 2.15, w.z - Math.cos(w.yaw) * 3.4);
+    this.camPos.x = Math.max(-G.halfW + 0.5, Math.min(G.halfW - 0.5, this.camPos.x));
+    this.camPos.z = Math.max(-G.halfD + 0.5, Math.min(G.halfD - 0.5, this.camPos.z));
+    this.room.localToWorld(this.camPos);
+    this.camAim.set(w.x + Math.sin(w.yaw) * 1.2, 1.25, w.z + Math.cos(w.yaw) * 1.2);
+    this.room.localToWorld(this.camAim);
+    // (la caméra suit en douceur : pas d'à-coup quand on tourne)
+    camera.position.lerp(this.camPos, Math.min(1, dt * 7));
+    camera.lookAt(this.camAim);
+    if (Math.abs(camera.fov - 62) > 0.01) { camera.fov = 62; camera.updateProjectionMatrix(); }
   }
 
   /** Montée en voiture : 0 = pas commencée, puis de 0 à 1 (il va à la portière et s'installe). */
@@ -380,6 +463,7 @@ export class GarageScene {
       const bay = k === 0 ? G.mainBay : (G.bays[k - 1] as (typeof G.bays)[number]);
       const v = createCarVisual(CAR_SPEC, { color: c.color, bigWing: c.bigWing, lights: false });
       v.interior.visible = false;
+      v.setUnderglow(c.neon ?? null);
       const pose = (): void => {
         v.wheels.forEach((w, i) => {
           const front = i < 2, left = i % 2 === 0;
@@ -433,6 +517,16 @@ export class GarageScene {
     const e = w * w * (3 - 2 * w);
     this.mech.position.lerpVectors(this.from, this.to, e);
     let working = phase > move;
+    if (this.walker && this.boarding === 0) {
+      // Le joueur commande le personnage.
+      const w = this.walker;
+      this.mech.scale.setScalar(1);
+      this.mech.position.set(w.x, w.moving ? Math.abs(Math.sin(w.stride * 9)) * 0.02 : 0, w.z);
+      this.mech.rotation.set(0, w.yaw, 0);
+      if (this.hasCharacter) { this.mech.updateMatrixWorld(true); this.poseCharacter(false, w.stride, !w.moving); }
+      this.walkCamera(camera, dt);
+      return;
+    }
     if (this.boarding > 0) {
       // Il lâche tout, rejoint la portière du conducteur et se glisse au volant.
       const f = Math.min(1, this.boarding);

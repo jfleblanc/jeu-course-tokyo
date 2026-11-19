@@ -31,6 +31,7 @@ import { LampField, type LampStriker } from './world/lampField';
 import { TreeField } from './world/treeField';
 import { TreeVisuals } from './render/treeVisuals';
 import { Effects } from './render/effects';
+import { CarPhotos } from './render/carPhoto';
 import { PropField, generateStreetProps, type StreetProp } from './world/streetProps';
 import { PROP_COLOR, PropVisuals } from './render/propVisuals';
 import { DistrictGates } from './world/districtGates';
@@ -283,7 +284,10 @@ async function boot(): Promise<void> {
     }
     (window as unknown as { __meubles?: unknown }).__meubles = boxes;
   };
-  const syncBayColliders = (): void => bayColliders.forEach((c, k) => c.setEnabled(k < player.cars.length - 1));
+  const syncBayColliders = (): void => {
+    bayColliders.forEach((c, k) => c.setEnabled(k < player.cars.length - 1));
+    garageScene.parkedCount = player.cars.length - 1;
+  };
   /** Pose la voiture du joueur à sa place dans l'atelier, à l'arrêt. */
   const parkInGarage = (): void => {
     const b = garageScene.bayPose();
@@ -296,16 +300,16 @@ async function boot(): Promise<void> {
   document.body.append(cctv);
   const cctvLabel = cctv.firstElementChild as HTMLElement;
   let cctvName = '';
-  const garageCarOf = (model: string, paint: number): GarageCar | null => {
+  const garageCarOf = (model: string, paint: number, neon = -1): GarageCar | null => {
     const m = CAR_MODELS.find((c) => c.id === model);
     if (!m) return null;
-    return { glb: testModel === 'aucun' ? null : m.glb, color: paint >= 0 ? (PAINTS[paint]?.color ?? m.color) : m.color, bigWing: m.bigWing, traits: m.traits };
+    return { glb: testModel === 'aucun' ? null : m.glb, color: paint >= 0 ? (PAINTS[paint]?.color ?? m.color) : m.color, bigWing: m.bigWing, traits: m.traits, neon: neon >= 0 ? (NEON_COLORS[neon]?.color ?? null) : null };
   };
   /** Gare dans l'atelier les voitures d'un joueur, la voiture active en premier. */
-  const showGarageOf = (cars: { model: string; paint: number }[], active: number, name: string, showMain = true): void => {
+  const showGarageOf = (cars: { model: string; paint: number; neon?: number }[], active: number, name: string, showMain = true): void => {
     const list = cars.length ? cars : [{ model: (CAR_MODELS[0] as (typeof CAR_MODELS)[number]).id, paint: -1 }];
     const order = [list[active] ?? list[0], ...list.filter((_, k) => k !== active)];
-    garageScene.setCars(order.map((c) => (c ? garageCarOf(c.model, c.paint) : null)).filter((c): c is GarageCar => c !== null), showMain);
+    garageScene.setCars(order.map((c) => (c ? garageCarOf(c.model, c.paint, c.neon ?? -1) : null)).filter((c): c is GarageCar => c !== null), showMain);
     cctvName = name;
   };
   const profiles = new ProfileSelect({
@@ -484,6 +488,53 @@ async function boot(): Promise<void> {
     refreshProgress();
   });
   let garageTime = 0;
+  // À pied dans l'atelier : F pour descendre de voiture, F près d'une voiture pour y monter.
+  const walkInput = emptyDriveInput();
+  walkInput.drift = true; // frein à main : la voiture ne bouge pas pendant qu'on marche
+  const walkHint = document.createElement('div');
+  walkHint.id = 'walk-hint';
+  document.body.append(walkHint);
+  /** Indice (dans `player.cars`) de la voiture garée à la place `k` (1 = première le long du mur). */
+  const carAtBay = (k: number): number => player.cars.map((_, i) => i).filter((i) => i !== player.active)[k - 1] ?? -1;
+  const interact = (): void => {
+    if (garage.open || race.active || titlePhase !== 'fini') return;
+    if (!garageScene.walker) {
+      if (garageView && parkedNear()) garageScene.startWalk();
+      return;
+    }
+    const k = garageScene.nearCar();
+    if (k < 0 || boardT >= 0) return;
+    if (k > 0) {
+      const idx = carAtBay(k);
+      if (idx < 0) return;
+      // Il prend une autre voiture : elle vient sur le plateau, l'ancienne va se garer.
+      player.select(idx);
+      rebuildPlayerCar();
+      garageDirty = true;
+      nosCharge = NOS.seconds;
+      refreshProgress();
+      parkInGarage();
+      garageScene.startWalk();
+      hud.toast(player.modelOf(player.car).name);
+    }
+    boardT = 0;
+  };
+  // Photos des voitures du joueur (sa peinture, son néon) pour le menu : une à la fois, menu ouvert.
+  const photos = new CarPhotos(renderer, scene.environment);
+  let photoBusy = false;
+  const developPhotos = (): void => {
+    if (photoBusy || !garage.open) return;
+    const want = garage.missingPhotos()[0];
+    if (!want) return;
+    const gc = garageCarOf(want.model, want.paint, want.neon);
+    if (!gc) { garage.photos.set(want.key, ''); return; }
+    photoBusy = true;
+    void photos.take(want.key, gc).then((url) => {
+      garage.photos.set(want.key, url ?? '');
+      photoBusy = false;
+      if (url) garage.refresh();
+    });
+  };
 
   // Course proposée (fiche affichée) en attente de confirmation.
   let offered: { track: Track; kind: 'course' | 'circuit' | 'palier'; difficulty: number; drivers: AiLevel[]; power: number; grip: number; mode: RaceMode } | null = null;
@@ -554,6 +605,7 @@ async function boot(): Promise<void> {
   /** Entrée ou T : lance la course proposée, sinon en propose une au hasard dans la banque. */
   const startRace = (kind: 'course' | 'circuit' | 'epreuve'): void => {
     if (garage.open || !(race.phase === 'idle' || race.phase === 'finished')) return;
+    garageScene.stopWalk();
     if (kind === 'epreuve') {
       // Y : propose une épreuve ; Y encore : l'épreuve suivante sur le même tracé.
       const same = card.shown && offered && offered.mode !== 'course' ? offered.track : null;
@@ -644,11 +696,15 @@ async function boot(): Promise<void> {
       case 'eventStart':
         startRace('epreuve');
         break;
+      case 'interact':
+        interact();
+        break;
       case 'garage':
         // Pas de garage en pleine course.
         if (garage.open || race.phase === 'idle' || race.phase === 'finished') {
           // Le garage est un lieu : si on n'y est pas, G y ramène la voiture.
           if (!garage.open && city.garage && !garageScene.contains(car.pos.x, car.pos.y, car.pos.z)) parkInGarage();
+          garageScene.stopWalk();
           garage.toggle();
           garageTime = 0;
         }
@@ -730,7 +786,7 @@ async function boot(): Promise<void> {
       if (boosting) nosCharge = Math.max(0, nosCharge - dt);
       else if (hasNos && !race.active) nosCharge = Math.min(NOS.seconds, nosCharge + NOS.refill * dt);
       player.applyTo(store.current, tuned);
-      car.update(dt, race.playerInput(input.drive), tuned);
+      car.update(dt, garageScene.walker ? walkInput : race.playerInput(input.drive), tuned);
       race.beforeStep(dt, store.current);
       // Circulation : partout en balade ; sur le tracé pendant une course (obstacles).
       const trafficRoute = race.active ? race.route : null;
@@ -803,13 +859,14 @@ async function boot(): Promise<void> {
         if (!menu && garageDirty) {
           garageDirty = false;
           // (la voiture active est la vraie, sur le plateau : on n'affiche que les autres)
-          showGarageOf(player.cars.map((c) => ({ model: c.model, paint: c.paint })), player.active, 'ATELIER', false);
+          showGarageOf(player.cars.map((c) => ({ model: c.model, paint: c.paint, neon: c.neon })), player.active, 'ATELIER', false);
         }
         const bay = garageScene.bayPose();
-        garageScene.showMechanic(menu || Math.hypot(car.pos.x - bay.x, car.pos.z - bay.z) < 2.5);
+        garageScene.showMechanic(menu || garageScene.walker !== null || Math.hypot(car.pos.x - bay.x, car.pos.z - bay.z) < 2.5);
         syncBayColliders();
         garageScene.update(frameDt, camera, null);
         // Menu ouvert : l'image de la caméra est décalée pour tenir dans la partie droite de l'écran.
+        developPhotos();
         const shift = Math.round(garage.panelWidth / 2);
         if (shift !== viewShift) {
           viewShift = shift;
@@ -916,13 +973,19 @@ async function boot(): Promise<void> {
       const waiting = titlePhase === 'fini' && garageScene.contains(car.pos.x, car.pos.y, car.pos.z) && Math.hypot(car.pos.x - bayNow.x, car.pos.z - bayNow.z) < 2.2 && car.speed < 0.6 && input.drive.throttle < 0.05 && input.drive.brake < 0.05;
       parkedFor = waiting ? parkedFor + frameDt : 0;
       // Il met les gaz : le personnage rejoint la portière et monte (voiture tenue une demi-seconde).
-      if (garageView && !menus && boardT < 0 && garageScene.boarding === 0 && input.drive.throttle > 0.05 && parkedNear()) boardT = 0;
+      const walking = garageScene.walker !== null;
+      if (walking && !garageScene.contains(car.pos.x, car.pos.y, car.pos.z)) garageScene.stopWalk();
+      if (walking && boardT < 0) garageScene.walk(frameDt, input.drive.throttle - input.drive.brake, input.drive.steer);
+      if (garageView && !menus && !walking && boardT < 0 && garageScene.boarding === 0 && input.drive.throttle > 0.05 && parkedNear()) boardT = 0;
       if (boardT >= 0) {
         boardT += frameDt / BOARD_SECONDS;
         garageScene.boarding = Math.min(1, boardT);
-        if (boardT >= 1) { boardT = -1; garageScene.boarding = 0; justParked = false; }
+        if (boardT >= 1) { boardT = -1; garageScene.boarding = 0; justParked = walking; garageScene.stopWalk(); }
       }
-      const view = menus || boardT >= 0 || (waiting && (garageView || parkedFor > 1.2 || justParked));
+      const view = menus || boardT >= 0 || walking || (waiting && (garageView || parkedFor > 1.2 || justParked));
+      const near = walking ? garageScene.nearCar() : -1;
+      const hint = walking ? `<kbd>W</kbd><kbd>S</kbd> marcher · <kbd>A</kbd><kbd>D</kbd> tourner${near === 0 ? ' · <kbd>F</kbd> reprendre le volant' : near > 0 ? ` · <kbd>F</kbd> prendre la ${player.modelOf(player.cars[carAtBay(near)] ?? player.car).name}` : ' · approchez-vous d’une voiture'}` : view && !menus && boardT < 0 && waiting ? '<kbd>F</kbd> descendre de voiture · <kbd>G</kbd> garage' : '';
+      if (walkHint.innerHTML !== hint) { walkHint.innerHTML = hint; walkHint.classList.toggle('on', hint !== ''); }
       if (!waiting) justParked = false;
       if (!view && viewShift !== 0) { viewShift = 0; camera.clearViewOffset(); }
       if (view !== garageView) {
@@ -935,6 +998,7 @@ async function boot(): Promise<void> {
       if (!view) garageScene.showMechanic(false);
       document.body.classList.toggle('cctv-menu', menus);
       document.body.classList.toggle('garage-ouvert', garage.open);
+      document.body.classList.toggle('a-pied', garageScene.walker !== null);
       garageScene.setLights(view || garageScene.distance(car.pos.x, car.pos.z) < 90);
       // Dans les menus, inutile de dessiner la ville.
       meshes.group.visible = !menus;
