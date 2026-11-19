@@ -2,7 +2,7 @@ import type { Race } from '../race/race';
 import type { RouteTurn } from '../race/route';
 import type { RaceSummary } from '../progression/playerState';
 
-const IDLE_HINT = '<kbd>Entrée</kbd> course · <kbd>T</kbd> circuit · <kbd>G</kbd> garage · <kbd>Tab</kbd> carte · <kbd>Échap</kbd> paramètres';
+const IDLE_HINT = '<kbd>Entrée</kbd> course · <kbd>T</kbd> circuit · <kbd>Y</kbd> épreuve · <kbd>G</kbd> garage · <kbd>Tab</kbd> carte · <kbd>Échap</kbd> paramètres';
 
 const fmtTime = (t: number): string => {
   const m = Math.floor(t / 60);
@@ -89,7 +89,7 @@ export class RaceHud {
       this.goTimer -= dt;
       this.setBig(this.goTimer > 0 ? 'GO !' : '');
     }
-    this.hint.innerHTML = race.phase === 'finished' ? '<kbd>Entrée</kbd> course · <kbd>T</kbd> circuit · <kbd>Échap</kbd> balade libre' : '<kbd>Échap</kbd> abandonner';
+    this.hint.innerHTML = race.phase === 'finished' ? '<kbd>Entrée</kbd> course · <kbd>T</kbd> circuit · <kbd>Y</kbd> épreuve · <kbd>Échap</kbd> balade libre' : '<kbd>Échap</kbd> abandonner';
 
     // — Prochain virage : flèche + distance —
     let next: RouteTurn | null = null;
@@ -116,12 +116,24 @@ export class RaceHud {
     if (this.timer > 0) return;
     this.timer = 0.15;
     const ranking = race.ranking();
-    const place = ranking.indexOf(player) + 1;
-    this.pos.innerHTML = `<b>${place}</b><span>/${ranking.length}</span>`;
+    const place = race.place();
+    const event = race.mode !== 'course';
+    const MEDAL = ['OR', 'ARGENT', 'BRONZE', '—'];
+    if (!event) this.pos.innerHTML = `<b>${place}</b><span>/${ranking.length}</span>`;
+    else if (race.mode === 'drift') this.pos.innerHTML = `<b>${Math.round(race.score).toLocaleString('fr-CA')}</b><span> pts${race.combo > 1.05 ? ` ×${race.combo.toFixed(1)}` : ''}</span>`;
+    else if (race.mode === 'chrono') this.pos.innerHTML = `<b class="medal m${place - 1}">${MEDAL[place - 1]}</b>`;
+    else this.pos.innerHTML = `<b>${Math.round(race.catchMeter * 100)}</b><span> % capturé</span>`;
     this.lap.textContent = route.laps > 1 ? `TOUR ${race.lapOf(player)}/${route.laps}` : '';
     const remaining = Math.max(0, route.length - player.progress);
     this.info.innerHTML = `${fmtTime(race.time)}<small>point ${Math.min(player.nextCheckpoint + (player.finished ? 0 : 1), route.checkpoints.length)}/${route.checkpoints.length} · ${(remaining / 1000).toFixed(2)} km</small>`;
-    this.board.innerHTML = ranking
+    if (event && race.medals) {
+      const fmt = (v: number): string => (race.mode === 'chrono' ? fmtTime(v) : `${v.toLocaleString('fr-CA')} pts`);
+      this.board.innerHTML = race.medals.map((v, k) => `<div class="${place - 1 === k ? 'me' : ''}"><i>${k + 1}</i><span>${['Or', 'Argent', 'Bronze'][k]}</span><em>${fmt(v)}</em></div>`).join('');
+    } else if (race.mode === 'poursuite') {
+      const prey = race.racers.find((r) => !r.isPlayer);
+      const gap = prey ? Math.round(prey.progress - player.progress) : 0;
+      this.board.innerHTML = `<div class="me"><i>!</i><span>${prey?.name ?? 'Fuyard'}</span><em>${gap >= 0 ? `à ${gap} m` : 'dépassé'}</em></div>`;
+    } else this.board.innerHTML = ranking
       .map((r, k) => {
         const gap = r === player ? '' : r.finished ? fmtTime(r.finishTime) : `${r.progress - player.progress >= 0 ? '+' : '−'}${Math.abs(Math.round(r.progress - player.progress))} m`;
         return `<div class="${r.isPlayer ? 'me' : ''}"><i>${k + 1}</i><span>${r.name}</span><em>${gap}</em></div>`;
@@ -130,7 +142,10 @@ export class RaceHud {
 
     if (race.phase === 'finished' && !this.resultsShown) {
       this.resultsShown = true;
-      const medal = ['1re place !', '2e place', '3e place', '4e place'][place - 1] ?? `${place}e place`;
+      const medal = race.mode === 'poursuite' ? (race.caught ? 'Fuyard rattrapé !' : place === 3 ? 'Échappé de peu…' : 'Il s’est échappé')
+        : event ? (['Médaille d’or !', 'Médaille d’argent', 'Médaille de bronze', 'Pas de médaille'][place - 1] as string)
+        : (['1re place !', '2e place', '3e place', '4e place'][place - 1] ?? `${place}e place`);
+      const figure = race.mode === 'drift' ? `${Math.round(race.score).toLocaleString('fr-CA')} points` : fmtTime(player.finishTime);
       const sm = this.summary;
       let reward = '';
       if (sm) {
@@ -139,13 +154,13 @@ export class RaceHud {
         else if (sm.trial) reward += `<div class="levelup">Épreuve manquée : il faut finir dans les deux premiers.</div>`;
         else if (sm.leveledUp) reward += `<div class="levelup">Niveau ${sm.level} !</div>`;
       }
-      this.results.innerHTML = `<h2>${this.title ? this.title + ' — ' : ''}${medal}</h2><div class="time">${fmtTime(player.finishTime)}</div>${reward}<div class="list" data-r="list"></div><p><kbd>Entrée</kbd> course &nbsp; <kbd>T</kbd> circuit &nbsp; <kbd>Échap</kbd> balade libre</p>`;
+      this.results.innerHTML = `<h2>${this.title ? this.title + ' — ' : ''}${medal}</h2><div class="time">${figure}</div>${reward}<div class="list" data-r="list"></div><p><kbd>Entrée</kbd> course &nbsp; <kbd>T</kbd> circuit &nbsp; <kbd>Échap</kbd> balade libre</p>`;
       this.results.classList.add('on');
     }
     if (this.resultsShown) {
       const list = this.results.querySelector('[data-r="list"]');
       if (list) {
-        list.innerHTML = ranking.map((r, k) => `<div class="${r.isPlayer ? 'me' : ''}"><i>${k + 1}</i><span>${r.name}</span><em>${r.finished ? fmtTime(r.finishTime) : 'en course…'}</em></div>`).join('');
+        list.innerHTML = event ? '' : ranking.map((r, k) => `<div class="${r.isPlayer ? 'me' : ''}"><i>${k + 1}</i><span>${r.name}</span><em>${r.finished ? fmtTime(r.finishTime) : 'en course…'}</em></div>`).join('');
       }
     }
   }

@@ -22,12 +22,14 @@ export interface Track {
 type LinkRoad = { name: string; nodeA: number; nodeB: number; road: { samples: { x: number; y: number; z: number }[] } };
 
 /** Enchaîne des liaisons : rues d'approche, liaison, traversée du quartier commun, liaison suivante, rues d'arrivée. */
-function regionRoute(graph: StreetGraph, via: (LinkRoad | undefined)[], seed: number): { route: Route; districts: number[] } | null {
+function regionRoute(graph: StreetGraph, via: (LinkRoad | undefined)[], seed: number, flipped: boolean[] = []): { route: Route; districts: number[] } | null {
   if (via.length === 0 || via.some((l) => !l)) return null;
   const list = via as LinkRoad[];
   const districtOf = (n: number): number => (graph.nodes[n] as { district: number }).district;
   // Sens de chaque liaison : on en sort par le bout qui touche le quartier de la suivante.
   const rev: boolean[] = list.map((l, k) => {
+    // (route qui part et revient dans le même quartier, comme le col : le sens est donné par la définition)
+    if (districtOf(l.nodeA) === districtOf(l.nodeB)) return flipped[k] === true;
     const next = list[k + 1], before = list[k - 1];
     if (next) return [districtOf(next.nodeA), districtOf(next.nodeB)].includes(districtOf(l.nodeA));
     if (before) return ![districtOf(before.nodeA), districtOf(before.nodeB)].includes(districtOf(l.nodeA));
@@ -38,7 +40,9 @@ function regionRoute(graph: StreetGraph, via: (LinkRoad | undefined)[], seed: nu
   const legs: RouteLeg[] = [];
   const districts: number[] = [districtOf(enter(0))];
   // Approche : quelques rues du quartier de départ, jusqu'au pied de la première liaison.
-  const lead = graphPath(graph, enter(0), (_n, d) => d > 260, districtOf(enter(0)));
+  // (plus la course est grande, plus on part loin : deux lignes de départ ne se chevauchent pas)
+  const far = 260 + (list.length - 2) * 170;
+  const lead = graphPath(graph, enter(0), (_n, d) => d > far, districtOf(enter(0)));
   if (!lead) return null;
   legs.push({ edges: [...lead.edges].reverse(), forward: [...lead.forward].reverse().map((f) => !f) });
   for (let k = 0; k < list.length; k++) {
@@ -66,7 +70,7 @@ export function buildTrackBank(graph: StreetGraph, colRoad?: { samples: { x: num
     let route: Route | null;
     let also: number[] | undefined;
     if (def.via) {
-      const built = regionRoute(graph, def.via.map((n) => links.find((l) => l.name === n)), def.seed);
+      const built = regionRoute(graph, def.via.map((n) => links.find((l) => l.name === n.replace(/^</, ''))), def.seed, def.via.map((n) => n.startsWith('<')));
       if (!built) continue;
       route = built.route;
       also = built.districts;

@@ -17,7 +17,8 @@ export class RaceCard {
     document.body.append(this.root);
   }
 
-  show(track: Track, drivers: AiLevel[], reward: { xp: number; money: number }, difficulty: number, title: string, manual: boolean): void {
+  /** `event` : épreuve en solo ou poursuite, avec sa règle et ses médailles à la place des pilotes. */
+  show(track: Track, drivers: AiLevel[], reward: { xp: number; money: number }, difficulty: number, title: string, manual: boolean, event?: { rule: string; medals: string[] }): void {
     this.shown = track;
     this.manual = manual;
     const r = track.route;
@@ -34,9 +35,10 @@ export class RaceCard {
       <div class="rc-kind">${title}</div>
       <h2>${track.name}</h2>
       <div class="rc-facts"><span>${km} km</span>${r.laps > 1 ? `<span>${r.laps} tours</span>` : '<span>d’un point à un autre</span>'}<span>${r.turns.filter((t) => t.index < r.lapPoints).length} virages</span></div>
-      <div class="rc-reward">À gagner pour la 1re place : <b>${reward.xp ? `${reward.xp} XP · ` : ''}¥ ${reward.money.toLocaleString('fr-CA')}</b><small>+ mallettes d’argent sur le parcours</small></div>
+      ${event ? `<div class="rc-rule">${event.rule}</div>${event.medals.length ? `<div class="rc-medals">${event.medals.map((m, k) => `<span class="m${k}">${['Or', 'Argent', 'Bronze'][k]} <b>${m}</b></span>`).join('')}</div>` : ''}` : ''}
+      <div class="rc-reward">À gagner pour ${event ? 'l’or' : 'la 1re place'} : <b>${reward.xp ? `${reward.xp} XP · ` : ''}¥ ${reward.money.toLocaleString('fr-CA')}</b><small>+ mallettes d’argent sur le parcours</small></div>
       <div class="rc-pilots">${pilots}</div>
-      <div class="rc-keys"><kbd>Entrée</kbd> lancer la course &nbsp; <kbd>Échap</kbd> fermer</div>`;
+      <div class="rc-keys"><kbd>Entrée</kbd> lancer ${event ? '&nbsp; <kbd>Y</kbd> autre épreuve ' : 'la course '}&nbsp; <kbd>Échap</kbd> fermer</div>`;
     this.root.classList.add('on');
   }
 

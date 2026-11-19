@@ -55,7 +55,7 @@ export class Hud {
       <kbd>Espace</kbd> drift · <kbd>C</kbd> caméra · <kbd>R</kbd> replacer la voiture<br>
       <kbd>M</kbd> boîte auto / manuelle · <kbd>↑</kbd> <kbd>↓</kbd> rapports (manuelle)<br>
       <kbd>F1</kbd> panneau de réglage · <kbd>B</kbd> basculer conduite A / B<br>
-      <kbd>Entrée</kbd> course · <kbd>T</kbd> circuit à 3 tours · <kbd>Échap</kbd> abandonner<br>
+      <kbd>Entrée</kbd> course · <kbd>T</kbd> circuit à 3 tours · <kbd>Y</kbd> épreuve · <kbd>Échap</kbd> abandonner<br>
       <kbd>G</kbd> garage · <kbd>E</kbd> NOS (si installé) · <kbd>Maj</kbd> vue arrière<br>
       <kbd>N</kbd> musique suivante · <kbd>P</kbd> musique oui / non<br>
       <kbd>H</kbd> masquer cette aide

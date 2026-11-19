@@ -8,7 +8,34 @@ import type { Vehicle } from '../vehicle/vehicle';
  * Pilote automatique : suit la ligne de course par « poursuite pure » (il vise un point
  * devant lui) et choisit sa vitesse d'après la courbure à venir. Aucune dépendance au rendu.
  */
-export function driveAlongRoute(car: Vehicle, route: Route, index: number, level: AiLevel, speedFactor: number, lateralOffset: number, out: DriveInput): void {
+/**
+ * Temps estimé d'un pilote sur un tracé (s) : vitesses de passage en virage, puis une passe
+ * avant (accélération) et une passe arrière (freinage). Sert de référence au contre-la-montre.
+ */
+export function estimateTime(route: Route, level: AiLevel, speedFactor: number, accel: number): number {
+  const pts = route.points, n = pts.length;
+  const top = (level.topSpeed / 3.6) * speedFactor;
+  const v = new Float32Array(n);
+  for (let k = 0; k < n; k++) {
+    const c = (pts[k] as RoutePoint).curvature;
+    v[k] = c > 0.0015 ? Math.min(top, Math.sqrt((level.cornerGrip * speedFactor) / c)) : top;
+  }
+  v[0] = Math.min(v[0] as number, 2);
+  for (let k = 1; k < n; k++) {
+    const d = (pts[k] as RoutePoint).s - (pts[k - 1] as RoutePoint).s;
+    v[k] = Math.min(v[k] as number, Math.sqrt((v[k - 1] as number) ** 2 + 2 * accel * d));
+  }
+  for (let k = n - 2; k >= 0; k--) {
+    const d = (pts[k + 1] as RoutePoint).s - (pts[k] as RoutePoint).s;
+    v[k] = Math.min(v[k] as number, Math.sqrt((v[k + 1] as number) ** 2 + 2 * level.braking * d));
+  }
+  let t = 0;
+  for (let k = 1; k < n; k++) t += ((pts[k] as RoutePoint).s - (pts[k - 1] as RoutePoint).s) / Math.max(1, ((v[k] as number) + (v[k - 1] as number)) / 2);
+  return t;
+}
+
+/** `cornerFactor` : adhérence en plus dans les virages (1 = celle du pilote), pour un adversaire qui remonte. */
+export function driveAlongRoute(car: Vehicle, route: Route, index: number, level: AiLevel, speedFactor: number, lateralOffset: number, out: DriveInput, cornerFactor = 1): void {
   const pts = route.points;
   const n = pts.length;
   const speed = Math.max(0, car.forwardSpeed);
@@ -35,8 +62,8 @@ export function driveAlongRoute(car: Vehicle, route: Route, index: number, level
     const q = pts[k] as RoutePoint;
     const d = q.s - here;
     if (d > 150) break;
-    const corner = q.curvature > 0.0015 ? Math.sqrt((level.cornerGrip * speedFactor) / q.curvature) : top;
-    const reachable = Math.sqrt(corner * corner + 2 * level.braking * Math.max(0, d - 4));
+    const corner = q.curvature > 0.0015 ? Math.sqrt((level.cornerGrip * speedFactor * cornerFactor) / q.curvature) : top;
+    const reachable = Math.sqrt(corner * corner + 2 * level.braking * cornerFactor * Math.max(0, d - 4));
     if (reachable < allowed) allowed = reachable;
   }
   const error = allowed - speed;

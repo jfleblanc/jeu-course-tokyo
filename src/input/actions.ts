@@ -42,6 +42,7 @@ export type ActionEvent =
   | 'musicToggle'
   | 'raceStart'
   | 'circuitStart'
+  | 'eventStart'
   | 'garage'
   | 'map'
   | 'raceQuit';

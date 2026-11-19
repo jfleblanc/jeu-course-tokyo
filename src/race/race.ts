@@ -1,7 +1,7 @@
-import { driveAlongRoute } from '../ai/driver';
+import { driveAlongRoute, estimateTime } from '../ai/driver';
 import { CAR_MODELS } from '../config/cars';
 import type { CarSpec, HandlingConfig } from '../config/handling';
-import { AI_DRIVERS, PICKUPS, RACE, RUBBER_BAND, type AiLevel, AGGRESSIVE } from '../config/race';
+import { AI_DRIVERS, EVENTS, PICKUPS, RACE, RUBBER_BAND, type AiLevel, AGGRESSIVE } from '../config/race';
 import { Rng } from '../core/rng';
 import { clamp } from '../core/math';
 import { emptyDriveInput, type DriveInput } from '../input/actions';
@@ -14,6 +14,22 @@ import type { Route, RoutePoint } from './route';
  * voiture, points de passage, classement, arrivée. Aucune dépendance au rendu.
  */
 export type RacePhase = 'idle' | 'countdown' | 'running' | 'finished';
+/** Course contre trois pilotes, ou épreuve en solo (contre-la-montre, drift noté) ou face à un fuyard (poursuite). */
+export type RaceMode = 'course' | 'chrono' | 'drift' | 'poursuite';
+
+/** Seuils des médailles d'une épreuve sur un tracé : or, argent, bronze (secondes ou points). */
+export function medalsFor(mode: RaceMode, route: Route, difficulty: number): [number, number, number] | null {
+  if (mode === 'chrono') {
+    const ref = estimateTime(route, AI_DRIVERS[0] as AiLevel, difficulty, EVENTS.chrono.accel) * EVENTS.chrono.fudge;
+    return [ref * EVENTS.chrono.gold, ref * EVENTS.chrono.silver, ref * EVENTS.chrono.bronze];
+  }
+  if (mode === 'drift') {
+    const km = route.length / 1000;
+    const round = (v: number): number => Math.round((v * km) / 50) * 50;
+    return [round(EVENTS.drift.gold), round(EVENTS.drift.silver), round(EVENTS.drift.bronze)];
+  }
+  return null;
+}
 
 export interface Racer {
   name: string;
@@ -61,6 +77,8 @@ export interface RaceOptions {
   drivers?: AiLevel[];
   /** Valeur d'une mallette d'argent (¥). */
   cashValue?: number;
+  /** Genre d'épreuve (par défaut : course). */
+  mode?: RaceMode;
 }
 
 /** Trois pilotes tirés au sort, toujours les mêmes pour un tracé donné. */
@@ -91,6 +109,8 @@ export class Race {
   /** Adhérence et freins des adversaires par rapport à une voiture de série. */
   gripMatch = 1;
   private aiCfg: HandlingConfig | null = null;
+  /** Réglage d'un adversaire en chasse (adhérence en plus), recalculé pour chacun. */
+  private chaseCfg: HandlingConfig | null = null;
   /** Objets à ramasser (mallettes, téléporteur). */
   pickups: Pickup[] = [];
   /** Argent ramassé pendant la course (ajouté à la récompense). */
@@ -98,6 +118,19 @@ export class Race {
   /** Événements à afficher (vidés par l'interface). */
   events: RaceEvent[] = [];
   private cashValue = 0;
+  mode: RaceMode = 'course';
+  /** Épreuves : seuils des médailles (or, argent, bronze). */
+  medals: [number, number, number] | null = null;
+  /** Drift noté : points marqués, combo en cours (×1 à ×3), points de la glisse en cours. */
+  score = 0;
+  combo = 1;
+  private driftTime = 0;
+  private driftGap = 0;
+  private lastSpeed = 0;
+  /** Poursuite : jauge de capture (0..1), fuyard rattrapé, écart à l'arrivée s'il s'est échappé (m). */
+  catchMeter = 0;
+  caught = false;
+  escapedBy = 0;
   private readonly hold: DriveInput = emptyDriveInput();
   private readonly idle: DriveInput = emptyDriveInput();
 
@@ -124,7 +157,13 @@ export class Race {
     this.powerMatch = options.power ?? 1;
     this.gripMatch = options.grip ?? 1;
     this.cashValue = options.cashValue ?? PICKUPS.cashBase;
-    const drivers = options.drivers ?? pickDrivers(route.seed);
+    this.mode = options.mode ?? 'course';
+    this.medals = medalsFor(this.mode, route, this.difficulty);
+    this.score = 0; this.combo = 1; this.driftTime = 0; this.driftGap = 0; this.lastSpeed = 0;
+    this.catchMeter = 0; this.caught = false; this.escapedBy = 0;
+    // Épreuves en solo : personne d'autre. Poursuite : un seul pilote, parti devant.
+    const all = options.drivers ?? pickDrivers(route.seed);
+    const drivers = this.mode === 'course' ? all : this.mode === 'poursuite' ? all.slice(0, 1) : [];
     this.route = route;
     const pts = route.points;
     const at = (s: number): RoutePoint => pts[Math.min(pts.length - 1, Math.max(0, Math.round(s / 3)))] as RoutePoint;
@@ -141,14 +180,14 @@ export class Race {
     };
     this.racers = [];
     drivers.slice(0, 3).forEach((level, k) => {
-      const slot = slots[k] as (typeof slots)[number];
+      const slot = this.mode === 'poursuite' ? { s: RACE.startLine - 8 + EVENTS.pursuit.headStart, lane: 0 } : (slots[k] as (typeof slots)[number]);
       const g = place(slot);
       const car = new Vehicle(this.phys, this.spec, { x: g.x, y: g.y + REST_HEIGHT + 0.15, z: g.z, yaw: g.yaw });
       // Chaque pilote a la physique de sa voiture (masse, roues motrices, empattement).
       const model = CAR_MODELS.find((m) => m.glb === level.glb);
       // Adversaires allégés : le joueur les pousse plus facilement qu'ils ne le poussent.
       if (model) car.setTraits({ ...model.traits, mass: model.traits.mass * RACE.aiMassFactor });
-      this.racers.push(this.makeRacer(level.name, false, car, level, g.index, slot.lane * 0.35));
+      this.racers.push(this.makeRacer(this.mode === 'poursuite' ? `${level.name} (fuyard)` : level.name, false, car, level, g.index, slot.lane * 0.35));
     });
     const pg = place(slots[3] as (typeof slots)[number]);
     this.playerCar.teleport(pg.x, pg.y + REST_HEIGHT + 0.15, pg.z, pg.yaw);
@@ -226,6 +265,7 @@ export class Race {
         // Effet élastique par rapport au joueur.
         let factor = 1;
         let blockAt: number | null = null;
+        let hunt = 0;
         if (player) {
           const gap = r.progress - player.progress;
           const t = clamp(gap / RUBBER_BAND.distance, -1, 1);
@@ -236,6 +276,7 @@ export class Race {
             // ne lèvent presque plus le pied quand ils mènent.
             // (dès qu'ils sont doublés ils reviennent : à 45 m derrière, ils sont déjà à fond)
             const back = clamp(-gap / AGGRESSIVE.chaseDistance, 0, 1);
+            hunt = back * ag;
             factor = (t > 0 ? 1 - RUBBER_BAND.maxSlow * 0.35 * t : 1 + AGGRESSIVE.chase * ag * back) * (1 + AGGRESSIVE.pace * ag);
             r.car.powerBoost = this.powerMatch * (1 + ag * (AGGRESSIVE.power + AGGRESSIVE.chasePower * back));
             // Le joueur arrive derrière : on se met sur sa trajectoire.
@@ -246,6 +287,11 @@ export class Race {
               const room = (route.halfWidth ?? 7) - 2.3;
               blockAt = clamp(lat, -room, room) - r.lane;
             }
+          } else if (this.mode === 'poursuite') {
+            // Le fuyard panique quand on le serre : il prend plus de risques et tire plus fort.
+            const flee = clamp(1 - gap / EVENTS.pursuit.fleeRange, 0, 1);
+            hunt = flee * EVENTS.pursuit.flee;
+            r.car.powerBoost = this.powerMatch * (1 + flee * EVENTS.pursuit.fleePower);
           } else r.car.powerBoost = this.powerMatch;
         }
         // Circulation : on contourne la voiture ordinaire la plus proche devant soi.
@@ -262,7 +308,16 @@ export class Race {
         }
         if (blockAt !== null && want === 0) r.avoid += clamp(blockAt - r.avoid, -AGGRESSIVE.blockRate * dt, AGGRESSIVE.blockRate * dt);
         else r.avoid += clamp(want - r.avoid, -7 * dt, 7 * dt);
-        driveAlongRoute(r.car, route, r.index, r.level, factor * this.difficulty, r.lane + r.avoid, r.input);
+        driveAlongRoute(r.car, route, r.index, r.level, factor * this.difficulty * (this.mode === 'poursuite' ? EVENTS.pursuit.difficulty : 1), r.lane + r.avoid, r.input, 1 + AGGRESSIVE.chaseGrip * hunt);
+        if (hunt > 0.01) {
+          // En chasse : pneus et freins au-dessus de sa catégorie, le temps de revenir.
+          const c = (this.chaseCfg ??= { ...ai });
+          Object.assign(c, ai);
+          const k = 1 + AGGRESSIVE.chaseGrip * hunt;
+          c.gripFront *= k; c.gripRear *= k; c.gripLong *= k; c.brakeForce *= k;
+          r.car.update(dt, r.input, c);
+          continue;
+        }
       }
       r.car.update(dt, r.input, ai);
     }
@@ -325,6 +380,7 @@ export class Race {
       }
     }
     const player = this.player;
+    if (player && !player.finished) this.judge(player, dt);
     // — Objets à ramasser (le joueur seulement) —
     if (player && !player.finished) {
       const r2 = PICKUPS.radius * PICKUPS.radius;
@@ -369,6 +425,53 @@ export class Race {
     player.index = idx;
     player.progress = q.s;
     return gained;
+  }
+
+  /** Épreuves : points de drift, capture du fuyard. */
+  private judge(player: Racer, dt: number): void {
+    const car = player.car;
+    if (this.mode === 'drift') {
+      const D = EVENTS.drift;
+      const slip = Math.abs(car.bodySlip), speed = car.speed;
+      if (this.lastSpeed - speed > D.crash) { this.combo = 1; this.driftTime = 0; } // choc : combo perdu
+      if (slip > D.minSlip && speed > D.minSpeed) {
+        this.driftTime += dt;
+        this.driftGap = 0;
+        this.combo = Math.min(D.comboMax, 1 + this.driftTime * D.comboRate);
+        this.score += Math.min(D.maxAngle, slip * 57.3) * speed * D.rate * this.combo * dt;
+      } else {
+        this.driftGap += dt;
+        if (this.driftGap > D.grace) { this.combo = 1; this.driftTime = 0; }
+      }
+      this.lastSpeed = speed;
+    } else if (this.mode === 'poursuite') {
+      const P = EVENTS.pursuit;
+      const prey = this.racers.find((r) => !r.isPlayer);
+      if (!prey) return;
+      const d = Math.hypot(prey.car.pos.x - car.pos.x, prey.car.pos.z - car.pos.z);
+      this.catchMeter = clamp(this.catchMeter + (d < P.distance ? dt / P.hold : -dt / (P.hold * 2)), 0, 1);
+      if (this.catchMeter >= 1 || player.progress > prey.progress + 12) {
+        this.caught = true;
+        player.finished = true;
+        player.finishTime = this.time;
+      } else if (prey.finished) {
+        this.escapedBy = Math.max(0, prey.progress - player.progress);
+        player.finished = true;
+        player.finishTime = this.time;
+      }
+    }
+  }
+
+  /** Résultat du joueur : sa place en course, ou sa médaille en épreuve (1 = or … 4 = rien). */
+  place(): number {
+    const player = this.player;
+    if (!player) return 4;
+    if (this.mode === 'course') return this.ranking().indexOf(player) + 1;
+    if (this.mode === 'poursuite') return this.caught ? 1 : this.escapedBy < EVENTS.pursuit.close ? 3 : 4;
+    const m = this.medals;
+    if (!m) return 4;
+    if (this.mode === 'chrono') { const t = player.finished ? player.finishTime : this.time; return t <= m[0] ? 1 : t <= m[1] ? 2 : t <= m[2] ? 3 : 4; }
+    return this.score >= m[0] ? 1 : this.score >= m[1] ? 2 : this.score >= m[2] ? 3 : 4;
   }
 
   /** Tour en cours d'un pilote (1 = premier tour). */

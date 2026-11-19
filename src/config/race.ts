@@ -62,6 +62,9 @@ export const AI_DRIVERS: AiLevel[] = [
 export const TRACK_BANK: { name: string; seed: number; circuit: boolean; district?: number; col?: 1 | -1; via?: string[] }[] = [
   { name: 'Tour de la région : des Docks à la Baie', seed: 9101, circuit: false, via: ['Pont du port', 'Tunnel de la baie'] },
   { name: 'Tour de la région : de la Baie aux Docks', seed: 9203, circuit: false, via: ['Tunnel de la baie', 'Pont du port'] },
+  // (« < » devant un nom : la route est prise à l'envers)
+  { name: 'Grand tour de Hakone : pont, col, tunnel', seed: 9311, circuit: false, via: ['Pont du port', 'Col de Hakone', 'Tunnel de la baie'] },
+  { name: 'Grand tour de Hakone : tunnel, col, pont', seed: 9413, circuit: false, via: ['Tunnel de la baie', '<Col de Hakone', 'Pont du port'] },
   { name: 'Sprint de Shibuya', seed: 1101, circuit: false },
   { name: 'Traversée de Shinjuku', seed: 2203, circuit: false },
   { name: 'Les néons d’Akihabara', seed: 3307, circuit: false },
@@ -142,10 +145,51 @@ export const AGGRESSIVE = {
   /** Puissance moteur en plus : de base, et en plus quand ils sont derrière. */
   power: 0.25,
   chasePower: 0.9,
+  /** Adhérence et freinage en plus quand ils sont derrière (0,4 = 40 %) : ils passent les virages plus fort que le joueur ne les voit faire devant lui. */
+  chaseGrip: 0.55,
   /** Distance derrière le joueur (m) à laquelle ils donnent tout pour revenir. */
-  chaseDistance: 45,
+  chaseDistance: 28,
   /** Ils barrent la route au joueur quand il est à moins de cette distance derrière eux (m). */
   blockRange: 32,
   /** Vitesse à laquelle ils se décalent pour barrer (m/s). */
   blockRate: 4.5,
+} as const;
+
+/**
+ * Épreuves (touche Y) : contre-la-montre, drift noté, poursuite. Seul sur le tracé, sauf la
+ * poursuite où il faut rattraper un fuyard. Le résultat est une médaille (or = 1re place).
+ */
+export const EVENTS = {
+  chrono: {
+    /** Temps des médailles, par rapport au temps estimé d'un bon pilote adverse sur ce tracé. */
+    gold: 1.0, silver: 1.08, bronze: 1.18,
+    /** Accélération moyenne prise pour estimer ce temps (m/s²). */
+    accel: 4.2,
+    /** Correction de l'estimation (mesurée contre de vraies courses simulées). */
+    fudge: 0.96,
+  },
+  drift: {
+    /** Points par kilomètre de tracé pour chaque médaille. */
+    gold: 1500, silver: 950, bronze: 500,
+    /** Glisse minimale (rad) et vitesse minimale (m/s) pour marquer. */
+    minSlip: 0.2, minSpeed: 9,
+    /** Points par seconde = angle (°, plafonné) × vitesse (m/s) × `rate` × combo. */
+    maxAngle: 50, rate: 0.1,
+    /** Le combo monte de `comboRate` par seconde de glisse continue, jusqu'à `comboMax`. */
+    comboRate: 0.25, comboMax: 3,
+    /** Glisse interrompue plus longtemps que ça (s) : le combo retombe à 1. */
+    grace: 0.9,
+    /** Choc (vitesse perdue d'un coup, m/s) : le combo retombe à 1. */
+    crash: 4.5,
+  },
+  pursuit: {
+    /** Avance du fuyard au départ (m) et son niveau par rapport aux adversaires habituels. */
+headStart: 60, difficulty: 1.04,
+    /** Quand le joueur est à moins de `fleeRange` m derrière, le fuyard gagne de l'adhérence (`flee`, part de AGGRESSIVE.chaseGrip) et de la puissance. */
+    fleeRange: 50, flee: 0.65, fleePower: 0.45,
+    /** Rattrapé : rester à moins de `distance` m pendant `hold` secondes. */
+    distance: 9, hold: 2,
+    /** Échappé de peu (écart à l'arrivée en m) : médaille de bronze. */
+    close: 40,
+  },
 } as const;
