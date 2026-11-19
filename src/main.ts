@@ -30,6 +30,9 @@ import { testSpots } from './debug/spots';
 import { LampField, type LampStriker } from './world/lampField';
 import { TreeField } from './world/treeField';
 import { TreeVisuals } from './render/treeVisuals';
+import { Effects } from './render/effects';
+import { PropField, generateStreetProps, type StreetProp } from './world/streetProps';
+import { PROP_COLOR, PropVisuals } from './render/propVisuals';
 import { DistrictGates } from './world/districtGates';
 import { FullMap } from './ui/fullMap';
 import { emptyDriveInput } from './input/actions';
@@ -222,6 +225,11 @@ async function boot(): Promise<void> {
   treeField.setSolid = (id, on): void => treeTrunks.get(id)?.setEnabled(on);
   const treeVisuals = new TreeVisuals(scene, treeField, meshes.treeSlots, mats.solid);
   let treesHeard = 0, trunksHeard = 0;
+  const propField = new PropField(generateStreetProps(city));
+  const propVisuals = new PropVisuals(scene, propField, mats.solid);
+  const effects = new Effects(scene);
+  const effectCars: Vehicle[] = [];
+  let blowHeard = 0;
   const strikers: LampStriker[] = [];
   const strikerOf = new Map<Vehicle, LampStriker>();
   const strikerFor = (v: Vehicle): LampStriker => {
@@ -726,11 +734,30 @@ async function boot(): Promise<void> {
       traffic.beforeStep(dt, actors);
       phys.world.step();
       car.afterStep();
+      effects.sampleContacts(phys, car);
       strikers.length = 0;
       strikers.push(strikerFor(car));
       if (race.active) for (const r of race.racers) if (!r.isPlayer) strikers.push(strikerFor(r.car));
       lampField.update(dt, strikers, car.pos.x, car.pos.z);
-      if (lampField.knocked !== lampsHeard) { lampsHeard = lampField.knocked; sfx.clang(); }
+      if (lampField.knocked !== lampsHeard) {
+        lampsHeard = lampField.knocked;
+        sfx.clang();
+        const lv2 = car.body.linvel();
+        effects.burst(car.pos.x + Math.sin(car.yaw) * 2, car.pos.y + 0.2, car.pos.z + Math.cos(car.yaw) * 2, lv2.x, lv2.z, 10);
+      }
+      propField.update(dt, strikers, car.pos.x, car.pos.z);
+      for (let k = 0; k < propField.events.length; k += 3) {
+        const q = propField.props[propField.events[k] as number] as StreetProp;
+        const col = PROP_COLOR[q.kind];
+        effects.debris(q.x, q.y, q.z, propField.events[k + 1] as number, propField.events[k + 2] as number, col[0], col[1], col[2], q.kind === 'carton' ? 5 : 3);
+        if (Math.hypot(q.x - car.pos.x, q.z - car.pos.z) < 60) sfx.knock(q.kind === 'cone' ? 'plastique' : q.kind === 'carton' ? 'carton' : q.kind === 'barriere' ? 'bois' : 'metal');
+      }
+      propField.events.length = 0;
+      for (let k = 0; k < treeField.events.length; k += 6) {
+        const ev = treeField.events;
+        effects.wood(ev[k] as number, ev[k + 1] as number, ev[k + 2] as number, ev[k + 3] as number, ev[k + 4] as number, ev[k + 5] === 2, ev[k + 5] === 1);
+      }
+      treeField.events.length = 0;
       treeField.update(dt, strikers, car.pos.x, car.pos.z);
       if (treeField.knocked !== treesHeard) { treesHeard = treeField.knocked; sfx.crack(0.5); }
       if (treeField.broken !== trunksHeard) { trunksHeard = treeField.broken; sfx.crack(1); }
@@ -795,8 +822,19 @@ async function boot(): Promise<void> {
         }
       }
       if (settings.open) settings.update();
+      // Particules : étincelles, fumée, poussière.
+      effectCars.length = 0;
+      effectCars.push(car);
+      if (race.active) for (const r of race.racers) if (!r.isPlayer) effectCars.push(r.car);
+      const inGarage = garageScene.contains(car.pos.x, car.pos.y, car.pos.z);
+      const dusty = !inGarage && city.graph.districts[sectorHere()]?.theme === 'collines';
+      if (sound.blowOffs !== blowHeard) { blowHeard = sound.blowOffs; effects.backfire(car, sound.lastBlowLevel); }
+      effects.update(frameDt, { cars: effectCars, dusty, nos: car.powerBoost > 1 && input.drive.nos, camera: camera.position });
       // Bruitages
       sound.update(frameDt, {
+        squeal: effects.squeal,
+        scrape: effects.scrape,
+        garage: inGarage || garageView ? 1 : 0,
         rpm: car.drivetrain.rpm,
         gear: car.drivetrain.gear,
         redline: CAR_SPEC.redlineRpm,
@@ -846,6 +884,7 @@ async function boot(): Promise<void> {
       trafficVisuals.update(traffic, camera.position.x, camera.position.z);
       lampVisuals.update();
       treeVisuals.update();
+      propVisuals.update();
       // Vue du garage : on éteint la ville (inutile de la dessiner) et on allume l'atelier.
       // Vue par la caméra de l'atelier : dans les menus du garage, au choix du joueur, et quand
       // la voiture roule dans l'atelier (le plafond cacherait la vue habituelle).
@@ -928,7 +967,7 @@ async function boot(): Promise<void> {
   });
 
   // Accès console pour le débogage : window.__jeu
-  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks, traffic, lampField, treeField, garageScene,
+  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks, traffic, lampField, treeField, garageScene, effects, propField,
     /** Éclairage de studio pour les planches de contrôle. */
     studio: (): void => {
       scene.add(new THREE.HemisphereLight(0xffffff, 0x8888aa, 3.2));

@@ -16,7 +16,8 @@ Point de départ, avant tout essai par les joueurs. Chiffres mesurés au banc d'
 
 Tout le reste est identique. Questions posées aux joueurs : voir le README.
 
-_Choix retenu : à remplir après les essais._
+**Choix retenu (2026-11-18, version ae806a1) : B.** Ses trois valeurs deviennent la base A
+(adhérence avant 2.12, arrière 2.00, appui aéro 4.6). B redevient une copie de A en attendant le prochain essai.
 
 **Choix retenu (2026-11-16, version 7359035) : B.** Les joueurs préfèrent l'arrière plus
 joueur. Remarque : le braquage pourrait tourner un peu plus et être plus nerveux.
@@ -99,4 +100,5 @@ Base A relevée : adhérence avant 1.64 → 1.90, arrière 1.52 → 1.78, motric
 
 Mesures : virage à 100 km/h, 41 m de rayon (A) et 35 m (B) ; freinage 257 → 0 km/h en 157 m.
 
-_Choix retenu : à remplir après les essais._
+**Choix retenu (2026-11-18, version ae806a1) : B.** Ses trois valeurs deviennent la base A
+(adhérence avant 2.12, arrière 2.00, appui aéro 4.6). B redevient une copie de A en attendant le prochain essai.

@@ -9,7 +9,7 @@ export interface RailCar {
 }
 
 /** Réponse : variation de vitesse à appliquer au centre de la voiture, et variation de lacet (rad/s). */
-export interface RailPush { dvx: number; dvz: number; dyaw: number; touching: boolean; /** Vitesse perdue par frottement pendant ce pas (m/s). */ slow: number }
+export interface RailPush { dvx: number; dvz: number; dyaw: number; touching: boolean; /** Vitesse perdue par frottement pendant ce pas (m/s). */ slow: number; /** Direction de la glissière vers la route. */ nx: number; nz: number }
 
 const CELL = 14;
 export const RAIL = {
@@ -102,6 +102,7 @@ export class RailGuide {
       if (depth <= 0 || depth > RAIL.maxDepth) continue;
       out.touching = true;
       const nx = -lx * side, nz = -lz * side; // vers la route
+      out.nx = nx; out.nz = nz;
       const vOut = -(c.vx * nx + c.vz * nz); // vitesse vers le mur
       const dv = Math.max(0, vOut) * RAIL.absorb + RAIL.stiffness * depth * dt;
       out.dvx += nx * dv; out.dvz += nz * dv;

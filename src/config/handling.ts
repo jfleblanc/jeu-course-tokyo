@@ -98,8 +98,8 @@ export const PRESET_A: HandlingConfig = {
   enginePower: 1.0,
   engineBrake: 0.35,
 
-  gripFront: 1.9,
-  gripRear: 1.78,
+  gripFront: 2.12,
+  gripRear: 2.0,
   gripLong: 1.75,
   peakSlipDeg: 7,
   slideGrip: 0.82,
@@ -109,7 +109,7 @@ export const PRESET_A: HandlingConfig = {
   suspStiffness: 34000,
   suspDamping: 3600,
   antiRoll: 8000,
-  downforce: 3.2,
+  downforce: 4.6,
 
   steerMaxDeg: 32,
   steerMinDeg: 7,
@@ -137,17 +137,12 @@ export const PRESET_A: HandlingConfig = {
 };
 
 /**
- * Préréglage B — « Encore plus de grip ».
- * Identique à A sauf TROIS réglages :
- *   - gripFront  1.90 → 2.12
- *   - gripRear   1.78 → 2.00
- *   - downforce  3.2  → 4.6   (la voiture colle davantage à haute vitesse)
+ * Préréglage B — pour l'instant identique à A.
+ * (Le « Encore plus de grip » du cinquième essai a été retenu le 2026-11-18 et versé dans A.)
+ * Prochain essai : changer ici deux ou trois valeurs seulement, et dire aux joueurs quoi ressentir.
  */
 export const PRESET_B: HandlingConfig = {
   ...PRESET_A,
-  gripFront: 2.12,
-  gripRear: 2.0,
-  downforce: 4.6,
 };
 
 export interface SliderDef {

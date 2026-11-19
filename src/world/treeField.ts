@@ -21,6 +21,8 @@ export class TreeField {
   /** Compteurs pour le son : petits arbres fauchés, gros arbres cassés. */
   knocked = 0;
   broken = 0;
+  /** Chocs de ce pas, pour les éclats : x, y, z, vx, vz, genre (0 petit arbre, 1 palmier, 2 gros tronc). */
+  readonly events: number[] = [];
   /** Appelé quand le tronc d'un gros arbre doit devenir traversable (cassé) ou redevenir dur. */
   setSolid: ((id: number, on: boolean) => void) | null = null;
   private readonly vel: Float32Array;
@@ -162,6 +164,7 @@ export class TreeField {
     this.spin[s] = dirz; this.spin[s + 1] = 0; this.spin[s + 2] = -dirx;
     this.spin[s + 3] = -(2 + this.rand() * 2.5 + speed * 0.05);
     this.knocked++;
+    this.events.push(t.x, t.y ?? 0, t.z, c.vx, c.vz, t.palm ? 1 : 0);
   }
 
   private snap(id: number, c: LampStriker, speed: number): void {
@@ -177,6 +180,8 @@ export class TreeField {
     this.spin[s + 3] = 0.9 + speed * 0.04;
     this.setSolid?.(id, false);
     this.broken++;
+    const t = this.trees[id] as Tree;
+    this.events.push(t.x, t.y ?? 0, t.z, c.vx, c.vz, 2);
   }
 
   private restore(id: number): void {

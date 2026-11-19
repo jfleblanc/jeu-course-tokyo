@@ -128,7 +128,7 @@ export class Vehicle {
 
   constructor(
     private readonly phys: PhysicsWorld,
-    private readonly spec: CarSpec,
+    readonly spec: CarSpec,
     spawn: { x: number; y: number; z: number; yaw: number },
   ) {
     const R = phys.rapier;
@@ -619,6 +619,7 @@ export class Vehicle {
       const push = guide.push(rc, dt, this.railPush);
       if (push.touching) {
         this.scraping = true;
+        this.scrapeNx = push.nx; this.scrapeNz = push.nz;
         // Frottement : on perd de la vitesse d'avance, d'autant plus qu'on s'appuie fort.
         const pl = Math.hypot(lv.x, lv.z);
         const slow = pl > 0.5 ? Math.min(push.slow, pl * 0.5) / pl : 0;
@@ -683,7 +684,10 @@ export class Vehicle {
   /** Vrai quand la voiture frotte une glissière (pour le son, les étincelles). */
   scraping = false;
   private readonly railCar: RailCar = { x: 0, y: 0, z: 0, fx: 0, fz: 1, halfWidth: 0.88, halfLength: 2.12, vx: 0, vz: 0 };
-  private readonly railPush: RailPush = { dvx: 0, dvz: 0, dyaw: 0, touching: false, slow: 0 };
+  private readonly railPush: RailPush = { dvx: 0, dvz: 0, dyaw: 0, touching: false, slow: 0, nx: 0, nz: 0 };
+  /** Quand `scraping` : direction de la glissière vers la route (les étincelles partent de l'autre côté). */
+  scrapeNx = 0;
+  scrapeNz = 0;
   private hbLatch = 0;
   private hbWasDown = false;
 

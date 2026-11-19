@@ -21,6 +21,12 @@ export interface SfxState {
   nos: boolean;
   /** Rapport engagé (pour le bruit du turbo aux changements de rapport). */
   gear?: number;
+  /** Patinage ou blocage des roues (0..1) : crissement même en ligne droite. */
+  squeal?: number;
+  /** Tôle qui frotte contre un mur ou une glissière (0..1). */
+  scrape?: number;
+  /** Dans l'atelier (0..1) : ambiance de garage, entendue même menu ouvert. */
+  garage?: number;
   /** Faux : tout est coupé (menus, pause). */
   active: boolean;
   /** Caractère du moteur de la voiture conduite. */
@@ -34,6 +40,12 @@ export class Sfx {
   private tire: { filter: BiquadFilterNode; gain: GainNode } | null = null;
   private wind: { filter: BiquadFilterNode; gain: GainNode } | null = null;
   private nos: { gain: GainNode } | null = null;
+  private scrapeNode: { filter: BiquadFilterNode; gain: GainNode; grit: GainNode } | null = null;
+  private garageNode: { hum: GainNode; buzz: GainNode } | null = null;
+  private toolTimer = 3;
+  /** Nombre de décharges de turbo jouées (la boucle de jeu y accroche les flammes d'échappement). */
+  blowOffs = 0;
+  lastBlowLevel = 0;
   private volume = 0.7;
   private lastSpeed = 0;
   private noiseBuffer: AudioBuffer | null = null;
@@ -170,6 +182,46 @@ export class Sfx {
       ng.gain.value = 0;
       noiseSrc().connect(nf).connect(ng).connect(this.master);
       this.nos = { gain: ng };
+
+      // — Tôle qui frotte : bruit resserré dans l'aigu + grain métallique —
+      const sf = ctx.createBiquadFilter();
+      sf.type = 'bandpass';
+      sf.frequency.value = 2600;
+      sf.Q.value = 1.6;
+      const sg = ctx.createGain();
+      sg.gain.value = 0;
+      noiseSrc().connect(sf).connect(sg).connect(this.master);
+      const gritOsc = ctx.createOscillator();
+      gritOsc.type = 'sawtooth';
+      gritOsc.frequency.value = 137;
+      const gritFilter = ctx.createBiquadFilter();
+      gritFilter.type = 'highpass';
+      gritFilter.frequency.value = 900;
+      const grit = ctx.createGain();
+      grit.gain.value = 0;
+      gritOsc.connect(gritFilter).connect(grit).connect(this.master);
+      gritOsc.start();
+      this.scrapeNode = { filter: sf, gain: sg, grit };
+
+      // — Ambiance de l'atelier : ventilation grave et néons qui grésillent —
+      const hf = ctx.createBiquadFilter();
+      hf.type = 'lowpass';
+      hf.frequency.value = 140;
+      const hum = ctx.createGain();
+      hum.gain.value = 0;
+      noiseSrc().connect(hf).connect(hum).connect(this.master);
+      const buzzOsc = ctx.createOscillator();
+      buzzOsc.type = 'sawtooth';
+      buzzOsc.frequency.value = 120;
+      const bf = ctx.createBiquadFilter();
+      bf.type = 'bandpass';
+      bf.frequency.value = 2400;
+      bf.Q.value = 3;
+      const buzz = ctx.createGain();
+      buzz.gain.value = 0;
+      buzzOsc.connect(bf).connect(buzz).connect(this.master);
+      buzzOsc.start();
+      this.garageNode = { hum, buzz };
     } catch (err) {
       console.info('Bruitages indisponibles :', err);
       this.enabled = false;
@@ -216,6 +268,8 @@ export class Sfx {
       const shifted = s.gear !== undefined && s.gear !== this.lastGear && s.gear > 1 && this.lastGear >= 1;
       if (on && (lifted || shifted) && this.boostLevel > 0.45 && this.blowCooldown === 0) {
         this.blowOff(en.turbo * this.boostLevel, shifted && !lifted);
+        this.blowOffs++;
+        this.lastBlowLevel = this.boostLevel;
         this.blowCooldown = 0.5;
         this.boostLevel *= 0.25;
       }
@@ -226,9 +280,35 @@ export class Sfx {
 
     const kmh = s.speed * 3.6;
     // Crissement : dès que la voiture glisse de travers à bonne vitesse.
-    const slide = Math.min(1, Math.max(0, (Math.abs(s.slip) - 0.1) / 0.35)) * Math.min(1, kmh / 45);
+    // S'y ajoute le patinage (départ, roues bloquées) : plus aigu, même en ligne droite.
+    const side = Math.min(1, Math.max(0, (Math.abs(s.slip) - 0.1) / 0.35)) * Math.min(1, kmh / 45);
+    const spin = s.squeal ?? 0;
+    const slide = Math.max(side, spin * 0.9);
     this.tire.gain.gain.setTargetAtTime(on * slide * (s.drifting ? 0.16 : 0.11), t, 0.07);
-    this.tire.filter.frequency.setTargetAtTime(900 + slide * 500 + Math.min(400, kmh * 2), t, 0.1);
+    this.tire.filter.frequency.setTargetAtTime(900 + slide * 500 + Math.min(400, kmh * 2) + spin * 350, t, 0.1);
+
+    // Tôle contre mur ou glissière.
+    if (this.scrapeNode) {
+      const sc = s.scrape ?? 0;
+      this.scrapeNode.gain.gain.setTargetAtTime(on * sc * 0.13, t, 0.04);
+      this.scrapeNode.grit.gain.setTargetAtTime(on * sc * 0.03, t, 0.04);
+      this.scrapeNode.filter.frequency.setTargetAtTime(1900 + sc * 1500 + Math.min(600, kmh * 3), t, 0.08);
+    }
+    // Atelier : entendu même quand le menu coupe le reste.
+    if (this.garageNode) {
+      const g = this.enabled ? (s.garage ?? 0) : 0;
+      this.garageNode.hum.gain.setTargetAtTime(g * 0.16, t, 0.4);
+      this.garageNode.buzz.gain.setTargetAtTime(g * 0.006, t, 0.4);
+      if (g > 0.5) {
+        this.toolTimer -= dt;
+        if (this.toolTimer <= 0) {
+          // un outil : cliquet (rafale de petits clics) ou clé posée sur l'établi
+          const n = Math.random() < 0.6 ? 4 + Math.floor(Math.random() * 5) : 1;
+          for (let k = 0; k < n; k++) this.tone(n > 1 ? 2100 + Math.random() * 300 : 900, k * 0.055, 0.025, n > 1 ? 0.018 : 0.035, 'square', n > 1 ? 1500 : 500);
+          this.toolTimer = 2.5 + Math.random() * 6;
+        }
+      }
+    }
 
     const air = Math.min(1, kmh / 200);
     this.wind.gain.gain.setTargetAtTime(on * air * air * 0.22, t, 0.2);
@@ -348,8 +428,39 @@ export class Sfx {
     this.tone(660, 0, 0.05, 0.07, 'triangle');
   }
 
+  /** Objet de rue renversé : plastique (cône), métal (poubelle, panneau), carton, bois (barrière). */
+  knock(kind: 'plastique' | 'metal' | 'carton' | 'bois'): void {
+    if (kind === 'plastique') { this.tone(520, 0, 0.07, 0.11, 'triangle', 240); this.tone(260, 0.02, 0.08, 0.06, 'sine', 140); }
+    else if (kind === 'metal') { this.tone(310, 0, 0.3, 0.1, 'square', 250); this.tone(1240, 0, 0.18, 0.05, 'triangle', 900); this.burst(0.09, 1800, 0.12); }
+    else if (kind === 'carton') { this.tone(140, 0, 0.1, 0.14, 'sine', 70); this.burst(0.08, 700, 0.1); }
+    else { this.tone(210, 0, 0.09, 0.12, 'triangle', 110); this.burst(0.08, 1200, 0.08); }
+  }
+
+  /** Souffle de bruit court, filtré autour de `freq` (tôle froissée, carton, verre). */
+  private burst(dur: number, freq: number, level: number): void {
+    const ctx = this.ctx;
+    if (!ctx || !this.master || !this.noiseBuffer || !this.enabled) return;
+    const t = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noiseBuffer;
+    src.loopStart = Math.random();
+    const f = ctx.createBiquadFilter();
+    f.type = 'bandpass';
+    f.frequency.value = freq;
+    f.Q.value = 0.9;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(level, t);
+    g.gain.exponentialRampToValueAtTime(0.0005, t + dur);
+    src.connect(f).connect(g).connect(this.master);
+    src.start(t, Math.random() * 1.5);
+    src.stop(t + dur + 0.02);
+  }
+
   private thud(strength: number): void {
     this.tone(95, 0, 0.22, 0.3 * strength + 0.1, 'sine', 40);
     this.tone(180, 0, 0.06, 0.12 * strength, 'square', 70);
+    // tôle et plastique qui encaissent : plus le choc est fort, plus c'est long et aigu
+    this.burst(0.12 + strength * 0.25, 900 + strength * 1400, 0.1 + strength * 0.22);
+    if (strength > 0.6) this.burst(0.5, 3200, 0.05);
   }
 }
