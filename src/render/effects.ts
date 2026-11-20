@@ -30,6 +30,11 @@ export class Effects {
   /** Patinage ou glisse des pneus du joueur (0..1), pour le son. */
   squeal = 0;
   private carry: number[] = [];
+  /** Part des fumées et poussières réellement émises (1 = tout). Baisse toute seule si l'image ralentit ; 0 = coupées. */
+  density = 1;
+  /** Faux : aucune particule (réglage « ?particules=non », pour comparer). */
+  enabled = true;
+  private frameMs = 16;
 
   constructor(scene: THREE.Object3D) {
     this.glow = new Particles(scene, EFFECTS.maxGlow, true);
@@ -66,6 +71,7 @@ export class Effects {
   }
 
   private sparks(x: number, y: number, z: number, vx: number, vz: number, count: number, hot = 1): void {
+    if (!this.enabled) return;
     for (let i = 0; i < count; i++) {
       const s = 0.25 + this.r() * 0.5;
       this.glow.emit(
@@ -84,7 +90,8 @@ export class Effects {
 
   /** Éclats de bois et feuilles quand un arbre casse ou est fauché. */
   wood(x: number, y: number, z: number, vx: number, vz: number, big: boolean, palm: boolean): void {
-    const chips = big ? 16 : 7, leaves = big ? 26 : 12;
+    if (!this.enabled) return;
+    const chips = big ? 10 : 5, leaves = big ? 14 : 7;
     for (let i = 0; i < chips; i++) {
       this.soft.emit(x + (this.r() - 0.5) * 0.6, y + 0.3 + this.r() * 1.2, z + (this.r() - 0.5) * 0.6,
         vx * (0.2 + this.r() * 0.5) + (this.r() - 0.5) * 6, 2 + this.r() * 5, vz * (0.2 + this.r() * 0.5) + (this.r() - 0.5) * 6,
@@ -114,6 +121,7 @@ export class Effects {
 
   /** Objet de rue renversé : quelques éclats de sa couleur. */
   debris(x: number, y: number, z: number, vx: number, vz: number, r: number, g: number, b: number, count: number): void {
+    if (!this.enabled) return;
     for (let i = 0; i < count; i++) {
       this.soft.emit(x + (this.r() - 0.5) * 0.4, y + this.r() * 0.6, z + (this.r() - 0.5) * 0.4,
         vx * (0.3 + this.r() * 0.5) + (this.r() - 0.5) * 5, 2 + this.r() * 4, vz * (0.3 + this.r() * 0.5) + (this.r() - 0.5) * 5,
@@ -121,8 +129,16 @@ export class Effects {
     }
   }
 
+  /** À appeler à chaque image avec sa durée réelle (ms) : règle le garde-fou. */
+  measure(ms: number): void {
+    this.frameMs += (Math.min(ms, 100) - this.frameMs) * 0.05;
+    if (this.frameMs > EFFECTS.slowMs) this.density = Math.max(EFFECTS.minDensity, this.density - 0.02);
+    else if (this.frameMs < EFFECTS.fastMs) this.density = Math.min(1, this.density + 0.004);
+  }
+
   update(dt: number, f: EffectsFrame): void {
     let scrape = 0, squeal = 0;
+    const dens = this.enabled ? this.density : 0;
     // Frottements relevés par la physique (murs, voitures).
     const rubs = this.rubs;
     for (let i = 0; i < rubs.length; i += 4) {
@@ -160,15 +176,15 @@ export class Effects {
         const held = car.launchHold && !w.front ? Math.max(0, car.throttle - 0.55) * 1.6 : 0; // moteur rincé sur la grille
         const amount = Math.min(1, Math.max(spin, lock, slide, held));
         if (me) squeal = Math.max(squeal, Math.min(1, Math.max(spin, lock, held * 0.6)));
-        if (amount > 0.05 && this.r() < amount * EFFECTS.smokeRate * dt) {
+        if (amount > 0.05 && this.r() < amount * EFFECTS.smokeRate * dt * dens * (me ? 1 : EFFECTS.othersShare)) {
           const g = 0.72 + this.r() * 0.2;
           this.soft.emit(wx + (this.r() - 0.5) * 0.3, ground + 0.1, wz + (this.r() - 0.5) * 0.3,
             lv.x * 0.25 + (this.r() - 0.5) * 1.2 - sn * spin * 2, 0.5 + this.r() * 0.9, lv.z * 0.25 + (this.r() - 0.5) * 1.2 - cs * spin * 2,
-            0.9 + this.r() * 0.9, 0.45, 2.1 + this.r() * 1.2, g, g, g * 1.04, EFFECTS.smokeAlpha * (0.5 + amount * 0.5), -0.5, 1.1);
+            0.6 + this.r() * 0.5, 0.3, EFFECTS.smokeSize * (0.8 + this.r() * 0.4), g, g, g * 1.04, EFFECTS.smokeAlpha * (0.5 + amount * 0.5), -0.5, 1.1);
         }
-        if (me && f.dusty && !w.front && speed > EFFECTS.dustMinSpeed && this.r() < (speed / 27.8) * EFFECTS.dustRate * dt) {
+        if (me && f.dusty && !w.front && speed > EFFECTS.dustMinSpeed && this.r() < Math.min(1.5, speed / 27.8) * EFFECTS.dustRate * dt * dens) {
           this.soft.emit(wx, ground + 0.08, wz, lv.x * 0.18 + (this.r() - 0.5), 0.4 + this.r() * 0.7, lv.z * 0.18 + (this.r() - 0.5),
-            1.1 + this.r() * 0.9, 0.5, 2.6 + this.r(), 0.55, 0.47, 0.36, EFFECTS.dustAlpha, -0.3, 0.9);
+            0.7 + this.r() * 0.5, 0.35, EFFECTS.smokeSize * (0.9 + this.r() * 0.4), 0.55, 0.47, 0.36, EFFECTS.dustAlpha, -0.3, 0.9);
         }
       }
     });
@@ -182,6 +198,6 @@ export class Effects {
     this.scrape += (scrape - this.scrape) * Math.min(1, dt * (scrape > this.scrape ? 18 : 7));
     this.squeal += (squeal - this.squeal) * Math.min(1, dt * 9);
     this.glow.update(dt);
-    this.soft.update(dt);
+    this.soft.update(dt, f.camera, EFFECTS.maxScreen);
   }
 }

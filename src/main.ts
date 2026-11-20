@@ -226,9 +226,11 @@ async function boot(): Promise<void> {
   treeField.setSolid = (id, on): void => treeTrunks.get(id)?.setEnabled(on);
   const treeVisuals = new TreeVisuals(scene, treeField, meshes.treeSlots, mats.solid);
   let treesHeard = 0, trunksHeard = 0;
-  const propField = new PropField(generateStreetProps(city));
+  // « ?objets=non » et « ?particules=non » : pour comparer les images/s avec et sans.
+  const propField = new PropField(params.get('objets') === 'non' ? [] : generateStreetProps(city));
   const propVisuals = new PropVisuals(scene, propField, mats.solid);
   const effects = new Effects(scene);
+  effects.enabled = params.get('particules') !== 'non';
   const effectCars: Vehicle[] = [];
   let blowHeard = 0;
   const strikers: LampStriker[] = [];
@@ -749,6 +751,8 @@ async function boot(): Promise<void> {
 
   // ——— Boucle : physique à pas fixe (60 Hz), rendu interpolé ———
   let frames = 0;
+  // Où part le temps (ms cumulées sur la demi-seconde) : physique, logique du jeu, envoi du dessin ; et la pire image.
+  let drawMs = 0, worstMs = 0, lastFrameMs = performance.now();
   let perfTimer = 0;
   let perfStart = performance.now();
   const loop = new FixedLoop({
@@ -1034,7 +1038,12 @@ async function boot(): Promise<void> {
       hud.update(frameDt, car, CAR_SPEC.redlineRpm);
 
       panel.update(frameDt, car, input, perfText);
+      const drawStart = performance.now();
       ctx.render();
+      drawMs += performance.now() - drawStart;
+      worstMs = Math.max(worstMs, drawStart - lastFrameMs);
+      effects.measure(drawStart - lastFrameMs);
+      lastFrameMs = drawStart;
 
       // Mesure en temps réel (frameDt est plafonné, il fausserait les i/s sur une machine lente).
       frames++;
@@ -1042,7 +1051,10 @@ async function boot(): Promise<void> {
       perfTimer = (nowMs - perfStart) / 1000;
       if (perfTimer >= 0.5) {
         const info = renderer.info.render;
-        perfText = `${Math.round(frames / perfTimer)} i/s · ${info.drawCalls} appels · ${Math.round(info.triangles / 1000)}k tri`;
+        // Temps moyens par image : physique (tous les pas), logique du jeu, envoi du dessin ; puis la pire image de la demi-seconde.
+        const per = (v: number): string => (v / frames).toFixed(1);
+        perfText = `${Math.round(frames / perfTimer)} i/s · ${info.drawCalls} appels · ${Math.round(info.triangles / 1000)}k tri<br>physique ${per(loop.stepMs)} · jeu ${per(loop.renderMs - drawMs)} · dessin ${per(drawMs)} ms · pire image ${Math.round(worstMs)} ms<br>${effects.count} particules${effects.density < 0.99 ? ` (réduites à ${Math.round(effects.density * 100)} %)` : ''}`;
+        loop.stepMs = 0; loop.renderMs = 0; loop.steps = 0; drawMs = 0; worstMs = 0;
         hud.setPerf(perfText);
         hud.setPad(input.gamepad.connected ? `🎮 Manette : ZR gaz · ZL frein · B/A drift · R/L rapports · X caméra · Y boîte · + A/B · − panneau · croix → musique` : '');
         frames = 0;

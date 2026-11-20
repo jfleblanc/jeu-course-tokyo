@@ -61,8 +61,12 @@ export class Particles {
     this.rgb[v] = r; this.rgb[v + 1] = g; this.rgb[v + 2] = b;
   }
 
-  /** `floorAt` : hauteur du sol sous une particule (elles ne passent pas dessous). */
-  update(dt: number, floor = -1e9): void {
+  /**
+   * `cam` : position de la caméra. `maxScreen` > 0 : une particule ne dépasse pas cette part de sa
+   * distance à la caméra, et s'efface en s'approchant — sinon un voile collé à l'objectif couvre
+   * tout l'écran, et quelques dizaines de voiles plein écran suffisent à faire chuter les images/s.
+   */
+  update(dt: number, cam: { x: number; y: number; z: number } | null = null, maxScreen = 0, floor = -1e9): void {
     const { pos, col, vel, par, phy, rgb } = this;
     let alive = 0;
     for (let i = 0; i < this.n; i++) {
@@ -84,11 +88,18 @@ export class Particles {
       pos[p + 2] = (pos[p + 2] as number) + (vel[v + 2] as number) * dt;
       if ((pos[p + 1] as number) < floor) { pos[p + 1] = floor; vel[v + 1] = -(vel[v + 1] as number) * 0.3; }
       const u = age / life;
-      pos[p + 3] = (par[p + 2] as number) + ((par[p + 3] as number) - (par[p + 2] as number)) * u;
+      let size = (par[p + 2] as number) + ((par[p + 3] as number) - (par[p + 2] as number)) * u;
+      let near = 1;
+      if (cam && maxScreen > 0) {
+        const d = Math.hypot((pos[p] as number) - cam.x, (pos[p + 1] as number) - cam.y, (pos[p + 2] as number) - cam.z);
+        size = Math.min(size, d * maxScreen);
+        near = Math.min(1, Math.max(0, (d - 1.5) / 3));
+      }
+      pos[p + 3] = near > 0.02 ? size : 0;
       // l'opacité monte vite puis s'éteint
       const fade = Math.min(1, u * 8) * (1 - u) * (1 - u * 0.3);
       col[p] = rgb[v] as number; col[p + 1] = rgb[v + 1] as number; col[p + 2] = rgb[v + 2] as number;
-      col[p + 3] = (phy[v + 2] as number) * fade;
+      col[p + 3] = (phy[v + 2] as number) * fade * near;
     }
     this.alive = alive;
     this.posAttr.needsUpdate = true;

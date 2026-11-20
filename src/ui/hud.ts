@@ -100,7 +100,7 @@ export class Hud {
 
   setPerf(text: string): void {
     const fps = document.getElementById('hud-fps');
-    if (fps) fps.textContent = text;
+    if (fps) fps.innerHTML = text;
   }
 
   update(dt: number, car: Vehicle, redline: number): void {
