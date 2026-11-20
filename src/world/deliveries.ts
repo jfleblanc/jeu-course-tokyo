@@ -155,30 +155,44 @@ export class Deliveries {
     this.guideTimer -= dt;
     if (this.guideTimer <= 0) {
       this.guideTimer = 1.2;
-      let best = -1, bd = Infinity;
-      for (const n of this.graph.nodes) {
-        const d = (n.x - x) ** 2 + (n.z - z) ** 2;
-        if (d < bd) { bd = d; best = n.id; }
-      }
-      const p = best >= 0 ? graphPath(this.graph, best, m.to.node) : null;
-      this.guide.length = 0;
-      if (p) {
-        this.guide.push(x, z);
-        let node = best;
-        const first = this.graph.nodes[best] as GraphNode;
-        this.guide.push(first.x, first.z);
-        for (const eid of p.edges) {
-          const e = this.graph.edges[eid] as GraphEdge;
-          const fwd = e.a === node;
-          // on suit le tracé de la rue (elle peut tourner)
-          const n = e.pts.length / 2;
-          for (let k = 1; k < n; k++) {
-            const q = fwd ? k : n - 1 - k;
-            this.guide.push(e.pts[q * 2] as number, e.pts[q * 2 + 1] as number);
-          }
-          node = fwd ? e.b : e.a;
-        }
-      }
+      guidePath(this.graph, x, z, m.to.node, this.guide);
     }
   }
+}
+
+/** Chemin par les rues depuis (x, z) jusqu'à un carrefour : rempli dans `out` (x, z, x, z…), vide s'il n'y en a pas. */
+export function guidePath(graph: StreetGraph, x: number, z: number, toNode: number, out: number[]): void {
+  out.length = 0;
+  let best = -1, bd = Infinity;
+  for (const n of graph.nodes) {
+    const d = (n.x - x) ** 2 + (n.z - z) ** 2;
+    if (d < bd) { bd = d; best = n.id; }
+  }
+  const p = best >= 0 ? graphPath(graph, best, toNode) : null;
+  if (!p) return;
+  out.push(x, z);
+  let node = best;
+  const first = graph.nodes[best] as GraphNode;
+  out.push(first.x, first.z);
+  for (const eid of p.edges) {
+    const e = graph.edges[eid] as GraphEdge;
+    const fwd = e.a === node;
+    // on suit le tracé de la rue (elle peut tourner)
+    const n = e.pts.length / 2;
+    for (let k = 1; k < n; k++) {
+      const q = fwd ? k : n - 1 - k;
+      out.push(e.pts[q * 2] as number, e.pts[q * 2 + 1] as number);
+    }
+    node = fwd ? e.b : e.a;
+  }
+}
+
+/** Carrefour le plus proche d'un point. */
+export function nearestNode(graph: StreetGraph, x: number, z: number): number {
+  let best = -1, bd = Infinity;
+  for (const n of graph.nodes) {
+    const d = (n.x - x) ** 2 + (n.z - z) ** 2;
+    if (d < bd) { bd = d; best = n.id; }
+  }
+  return best;
 }

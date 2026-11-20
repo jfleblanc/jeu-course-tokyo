@@ -212,7 +212,7 @@ body.titre .hud, body.titre #minimap, body.titre #race-hud { visibility: hidden;
 #tuto.done { border-color: var(--amber); }
 
 /* ——— Carte complète ——— */
-#fullmap { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 24; display: none; pointer-events: none; }
+#fullmap { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 24; display: none; cursor: grab; touch-action: none; }
 #fullmap.open { display: block; }
 
 /* ——— Choix du joueur : petites cartes en bas, le garage reste visible derrière ——— */

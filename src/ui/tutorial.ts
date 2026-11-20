@@ -10,6 +10,7 @@ export interface TutorialState {
   drifting: boolean;
   cameraChanged: boolean;
   garageOpen: boolean;
+  mapOpen: boolean;
   cardShown: boolean;
   racing: boolean;
   pad: boolean;
@@ -41,10 +42,10 @@ const STEPS: Step[] = [
     done: (s, a, dt) => ((a.t += s.drifting && s.kmh > 35 ? dt : 0), a.t > 0.8),
   },
   { text: (p) => `Changez de caméra avec ${p ? '<kbd>X</kbd>' : k('camera')}.`, hint: 'Vue de poursuite ou vue du capot.', done: (s) => s.cameraChanged },
-  { text: () => `Ouvrez le garage avec ${k('garage')} : voitures, améliorations, peinture.`, hint: 'Refermez-le avec la même touche.', done: (s) => s.garageOpen },
+  { text: () => `Ouvrez la carte avec ${k('map')} : pastilles de course, colis, et votre garage (la maison).`, hint: 'Un clic sur un lieu trace l’itinéraire. Le menu du garage s’ouvre une fois rentré dedans.', done: (s) => s.mapOpen },
   {
-    text: (p) => `Lancez une course : ${p ? '<kbd>croix ↑</kbd>' : k('raceStart')}, ou arrêtez-vous sur une borne lumineuse.`,
-    hint: 'Les bornes sont aussi sur la mini-carte : cyan = course, magenta = circuit.',
+    text: (p) => `Lancez une course : arrêtez-vous sur une pastille lumineuse, puis ${p ? '<kbd>croix ↑</kbd>' : k('raceStart')}.`,
+    hint: 'Sur la mini-carte : cyan = course, magenta = circuit ; creuse = pas encore faite.',
     done: (s) => s.cardShown || s.racing,
   },
 ];

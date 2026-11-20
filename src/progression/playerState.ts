@@ -29,6 +29,8 @@ interface SaveData {
   active: number;
   races: number;
   wins: number;
+  /** Courses et épreuves déjà faites : « genre|tracé » → meilleure place (1 = victoire ou or). */
+  done?: Record<string, number>;
 }
 
 export interface RaceSummary {
@@ -66,6 +68,15 @@ export class PlayerState {
   active = 0;
   races = 0;
   wins = 0;
+  /** Courses et épreuves déjà faites : « genre|tracé » → meilleure place obtenue. */
+  done: Record<string, number> = {};
+
+  /** Note qu'une course ou une épreuve a été faite, et garde la meilleure place. */
+  markDone(key: string, place: number): void {
+    const best = this.done[key];
+    if (best === undefined || place < best) this.done[key] = place;
+    this.save();
+  }
 
   /** Clé de sauvegarde du joueur en cours (une par carte de joueur). */
   private key = 'jeu-course-tokyo.joueur.invite';
@@ -89,6 +100,7 @@ export class PlayerState {
     this.cars = [newCar(CAR_MODELS[0] as CarModel)];
     this.active = 0;
     this.races = 0;
+    this.done = {};
     this.wins = 0;
     this.load();
     this.save();
@@ -109,6 +121,7 @@ export class PlayerState {
       this.active = Math.max(0, Math.min(this.cars.length - 1, d.active ?? 0));
       this.races = d.races ?? 0;
       this.wins = d.wins ?? 0;
+      this.done = d.done && typeof d.done === 'object' ? d.done : {};
     } catch {
       // Sauvegarde illisible : on repart de zéro plutôt que de planter.
     }
@@ -116,7 +129,7 @@ export class PlayerState {
 
   save(): void {
     try {
-      const d: SaveData = { version: VERSION, level: this.level, xp: this.xp, money: this.money, cars: this.cars, active: this.active, races: this.races, wins: this.wins };
+      const d: SaveData = { version: VERSION, level: this.level, xp: this.xp, money: this.money, cars: this.cars, active: this.active, races: this.races, wins: this.wins, done: this.done };
       localStorage.setItem(this.key, JSON.stringify(d));
     } catch {
       // Navigation privée, quota… tant pis.
@@ -131,6 +144,7 @@ export class PlayerState {
     this.cars = [newCar(CAR_MODELS[0] as CarModel)];
     this.active = 0;
     this.races = 0;
+    this.done = {};
     this.wins = 0;
     this.save();
   }

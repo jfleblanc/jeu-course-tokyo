@@ -26,7 +26,6 @@ export const BIND_LABELS: { action: BindAction; label: string }[] = [
   { action: 'camera', label: 'Changer de caméra' },
   { action: 'reset', label: 'Replacer la voiture' },
   { action: 'raceStart', label: 'Course' },
-  { action: 'circuitStart', label: 'Circuit' },
   { action: 'eventStart', label: 'Épreuve (chrono, drift, poursuite)' },
   { action: 'interact', label: 'Descendre / monter en voiture (garage)' },
   { action: 'multi', label: 'Jouer à plusieurs' },

@@ -2,7 +2,7 @@ import type { Race } from '../race/race';
 import type { RouteTurn } from '../race/route';
 import type { RaceSummary } from '../progression/playerState';
 
-const IDLE_HINT = '<kbd>Entrée</kbd> course · <kbd>T</kbd> circuit · <kbd>Y</kbd> épreuve · <kbd>G</kbd> garage · <kbd>Tab</kbd> carte · <kbd>Échap</kbd> paramètres';
+const IDLE_HINT = '<kbd>Tab</kbd> carte : pastilles de course, colis, garage · <kbd>J</kbd> jouer à plusieurs · <kbd>Échap</kbd> paramètres';
 
 const fmtTime = (t: number): string => {
   const m = Math.floor(t / 60);
@@ -93,7 +93,7 @@ export class RaceHud {
       this.goTimer -= dt;
       this.setBig(this.goTimer > 0 ? 'GO !' : '');
     }
-    this.hint.innerHTML = race.phase === 'finished' ? '<kbd>Entrée</kbd> course · <kbd>T</kbd> circuit · <kbd>Y</kbd> épreuve · <kbd>Échap</kbd> balade libre' : '<kbd>Échap</kbd> abandonner';
+    this.hint.innerHTML = race.phase === 'finished' ? '<kbd>Entrée</kbd> ou <kbd>Échap</kbd> retour à la balade' : '<kbd>Échap</kbd> abandonner';
 
     // — Prochain virage : flèche + distance —
     let next: RouteTurn | null = null;
@@ -164,7 +164,7 @@ export class RaceHud {
         else if (sm.trial) reward += `<div class="levelup">Épreuve manquée : il faut finir dans les deux premiers.</div>`;
         else if (sm.leveledUp) reward += `<div class="levelup">Niveau ${sm.level} !</div>`;
       }
-      this.results.innerHTML = `<h2>${this.title ? this.title + ' — ' : ''}${medal}</h2><div class="time">${figure}</div>${reward}<div class="list" data-r="list"></div><div class="rec-box" data-r="records"></div><p><kbd>Entrée</kbd> course &nbsp; <kbd>T</kbd> circuit &nbsp; <kbd>Échap</kbd> balade libre</p>`;
+      this.results.innerHTML = `<h2>${this.title ? this.title + ' — ' : ''}${medal}</h2><div class="time">${figure}</div>${reward}<div class="list" data-r="list"></div><div class="rec-box" data-r="records"></div><p><kbd>Entrée</kbd> retour à la balade</p>`;
       this.results.classList.add('on');
     }
     if (this.resultsShown) {

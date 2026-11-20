@@ -38,7 +38,7 @@ import { Salon } from './net/salon';
 import { RemoteCars } from './net/remoteCars';
 import { SalonPanel } from './ui/salonPanel';
 import { NET } from './config/net';
-import { Deliveries, buildDeliveries, type Delivery } from './world/deliveries';
+import { Deliveries, buildDeliveries, guidePath, nearestNode, type Delivery } from './world/deliveries';
 import { DeliveryVisuals } from './render/deliveryVisuals';
 import { DELIVERIES } from './config/missions';
 import { PropField, generateStreetProps, type StreetProp } from './world/streetProps';
@@ -434,9 +434,27 @@ async function boot(): Promise<void> {
   const tracks = buildTrackBank(city.graph, city.mountain?.road, city.mountain ? [...city.links, { name: 'Col de Hakone', nodeA: city.mountain.nodeA, nodeB: city.mountain.nodeB, road: city.mountain.road }] : city.links);
   // ?barrieres : aperçu des rues transversales barrées (désactivé par défaut).
   const raceVisuals = new RaceVisuals(scene, mats, city.graph, params.has('barrieres'), tracks, testModel);
-  const minimap = new Minimap(city, tracks.map((t) => ({ x: t.start.x, z: t.start.z, circuit: t.circuit })));
+  const minimap = new Minimap(city, tracks.map((t) => ({ x: t.start.x, z: t.start.z, circuit: t.circuit, name: t.name, districts: [t.district, ...(t.also ?? [])] })));
   const card = new RaceCard();
-  const fullMap = new FullMap(minimap.layers, city.graph.districts, tracks.map((t) => ({ x: t.start.x, z: t.start.z, circuit: t.circuit, name: t.name })), city.garage);
+  const fullMap = new FullMap(city, tracks.map((t) => ({ x: t.start.x, z: t.start.z, circuit: t.circuit, name: t.name, districts: [t.district, ...(t.also ?? [])] })), city.garage);
+  // Itinéraire : un clic sur un lieu de la grande carte trace le chemin sur la mini-carte.
+  let gps: { x: number; z: number; name: string; node: number } | null = null;
+  const gpsGuide: number[] = [];
+  let gpsTimer = 0;
+  fullMap.onPick = (place): void => {
+    if (!place) { if (gps) hud.toast('Itinéraire effacé'); gps = null; gpsGuide.length = 0; return; }
+    gps = { x: place.x, z: place.z, name: place.name, node: nearestNode(city.graph, place.x, place.z) };
+    gpsTimer = 0;
+    hud.toast(`Itinéraire vers ${place.name}`);
+  };
+  /** Meilleure place du joueur sur la course classique de chaque tracé (pour les pastilles faites ou non). */
+  const doneByTrack = (): Record<string, number> => {
+    const out: Record<string, number> = {};
+    for (const [key, place] of Object.entries(player.done)) if (key.startsWith('course|')) out[key.slice(7)] = place;
+    return out;
+  };
+  /** « ?raccourcis » : garde les anciens raccourcis (course et garage de n'importe où), pour les essais. */
+  const shortcuts = params.has('raccourcis');
   const raceHud = new RaceHud();
 
   let raceKind: 'course' | 'circuit' | 'palier' = 'course';
@@ -565,7 +583,7 @@ async function boot(): Promise<void> {
   // Course proposée (fiche affichée) en attente de confirmation.
   let offered: { track: Track; kind: 'course' | 'circuit' | 'palier'; difficulty: number; drivers: AiLevel[]; power: number; grip: number; mode: RaceMode } | null = null;
   const EVENT_MODES: RaceMode[] = ['chrono', 'drift', 'poursuite'];
-  let eventTurn = Math.floor(Math.random() * 3);
+
 
   /** Affiche la fiche d'un tracé : type, gains, pilotes adverses. */
   /** Qui joue, et avec quoi : pour les classements. */
@@ -724,31 +742,35 @@ async function boot(): Promise<void> {
   };
 
   /** Entrée ou T : lance la course proposée, sinon en propose une au hasard dans la banque. */
+  /**
+   * Les courses se lancent sur leur pastille : on s'y arrête, la fiche s'affiche, Entrée lance.
+   * Y change de genre sur la même pastille (course, contre-la-montre, drift, poursuite).
+   */
   const startRace = (kind: 'course' | 'circuit' | 'epreuve'): void => {
     if (garage.open || !(race.phase === 'idle' || race.phase === 'finished')) return;
-    garageScene.stopWalk();
-    deliveries.cancel();
-    if (kind === 'epreuve') {
-      // Y : propose une épreuve ; Y encore : l'épreuve suivante sur le même tracé.
-      const same = card.shown && offered && offered.mode !== 'course' ? offered.track : null;
-      const track = same ?? pickTrack(false);
-      if (!track) return;
-      if (race.phase === 'finished') race.stop();
-      eventTurn = (eventTurn + 1) % EVENT_MODES.length;
-      offer(track, true, EVENT_MODES[eventTurn] as RaceMode);
+    if (race.phase === 'finished') {
+      // Écran de résultats : la touche le referme, on repart en balade.
+      race.stop();
+      raceHud.title = '';
       return;
     }
     if (card.shown && offered) {
+      garageScene.stopWalk();
+      deliveries.cancel();
+      if (kind === 'epreuve') {
+        const modes: RaceMode[] = ['course', ...EVENT_MODES];
+        offer(offered.track, card.manual, modes[(modes.indexOf(offered.mode) + 1) % modes.length] as RaceMode);
+        return;
+      }
       launch();
       return;
     }
-    const track = pickTrack(kind === 'circuit' || player.trialPending);
-    if (!track) {
-      hud.toast('Aucun tracé disponible');
+    if (shortcuts) {
+      const track = pickTrack(kind === 'circuit' || player.trialPending);
+      if (track) offer(track, true, kind === 'epreuve' ? 'chrono' : 'course');
       return;
     }
-    if (race.phase === 'finished') race.stop();
-    offer(track, true);
+    hud.toast(player.trialPending ? 'Épreuve de palier : rendez-vous sur une pastille magenta (Tab : la carte)' : 'Les courses se lancent sur les pastilles de la carte (Tab)');
   };
 
   const respawn = (): void => {
@@ -828,8 +850,14 @@ async function boot(): Promise<void> {
       case 'garage':
         // Pas de garage en pleine course.
         if (garage.open || race.phase === 'idle' || race.phase === 'finished') {
-          // Le garage est un lieu : si on n'y est pas, G y ramène la voiture.
-          if (!garage.open && city.garage && !garageScene.contains(car.pos.x, car.pos.y, car.pos.z)) parkInGarage();
+          // Le garage est un lieu : il faut y rentrer avec sa voiture (la maison sur la carte).
+          if (!garage.open && city.garage && !garageScene.contains(car.pos.x, car.pos.y, car.pos.z)) {
+            if (!shortcuts) {
+              hud.toast('Le menu du garage s’ouvre dans votre garage : la maison sur la carte (Tab)');
+              break;
+            }
+            parkInGarage();
+          }
           garageScene.stopWalk();
           garage.toggle();
           garageTime = 0;
@@ -1070,7 +1098,7 @@ async function boot(): Promise<void> {
         brake: input.drive.brake,
         drifting: input.drive.drift && Math.abs(car.bodySlip) > 0.12,
         cameraChanged,
-        garageOpen: garage.open,
+        garageOpen: garage.open, mapOpen: fullMap.open,
         cardShown: card.shown !== null,
         racing: race.active,
         pad: input.activeSource === 'manette',
@@ -1081,6 +1109,7 @@ async function boot(): Promise<void> {
           const place = race.place();
           raceHud.summary = player.finishRace(place, raceKind !== 'course', raceKind === 'palier', race.bonusMoney);
           // Classement : le temps du joueur (ou ses points de drift) avec sa voiture.
+          if (running) player.markDone(recordKey(running.track, race.mode), place);
           raceHud.records = ''; raceHud.recordNote = '';
           const done = race.player;
           if (running && done && (race.mode !== 'poursuite' || race.caught)) {
@@ -1152,7 +1181,19 @@ async function boot(): Promise<void> {
       // Dans les menus, inutile de dessiner la ville.
       meshes.group.visible = !menus;
       if (!menus) updateCityZones(meshes, camera.position.x, camera.position.z);
-      fullMap.update({ x: car.pos.x, z: car.pos.z, yaw: car.yaw, level: player.level, racing: race.active, allOpen: allDistrictsOpen, parcels: deliveries.current ? [] : deliveries.offered.map((id) => { const m = deliveries.bank[id] as Delivery; return { x: m.from.x, z: m.from.z, name: m.name }; }), goal: deliveries.current ? { x: deliveries.current.to.x, z: deliveries.current.to.z, name: deliveries.current.name } : null });
+      if (fullMap.open) {
+        const cur = deliveries.current;
+        fullMap.update({
+          x: car.pos.x, z: car.pos.z, yaw: car.yaw, level: player.level, racing: race.active, allOpen: allDistrictsOpen,
+          route: race.active ? race.route : null,
+          done: doneByTrack(),
+          parcels: cur ? [] : deliveries.offered.map((id) => { const mm = deliveries.bank[id] as Delivery; return { x: mm.from.x, z: mm.from.z, name: mm.name }; }),
+          goal: cur ? { x: cur.to.x, z: cur.to.z, name: cur.name } : null,
+          guide: cur ? deliveries.guide : gps ? gpsGuide : [],
+          target: cur ? null : gps,
+          players: remoteCars.dots,
+        });
+      }
       const blocked = gates.blockedNear(frameDt, car.pos.x, car.pos.z);
       if (blocked) hud.toast(`${blocked.name} : ouverture au niveau ${blocked.unlockLevel}`);
       // Mallettes et téléporteur ramassés
@@ -1255,7 +1296,14 @@ async function boot(): Promise<void> {
         if (missionHud.innerHTML !== hudText) { missionHud.innerHTML = hudText; missionHud.classList.toggle('on', cur !== null); }
         minimap.parcels = free && !cur ? deliveries.offered.map((id) => (deliveries.bank[id] as Delivery).from) : [];
         minimap.goal = free && cur ? cur.to : null;
-        minimap.guide = free && cur ? deliveries.guide : [];
+        // Itinéraire choisi sur la grande carte (une livraison en cours passe devant).
+        if (gps && free && !cur) {
+          if (Math.hypot(gps.x - car.pos.x, gps.z - car.pos.z) < 28) { hud.toast(`Arrivé : ${gps.name}`); gps = null; gpsGuide.length = 0; }
+          else if ((gpsTimer -= frameDt) <= 0) { gpsTimer = 1.2; guidePath(city.graph, car.pos.x, car.pos.z, gps.node, gpsGuide); }
+        }
+        minimap.guide = free && cur ? deliveries.guide : free && gps ? gpsGuide : [];
+        minimap.guideColor = cur ? 'rgba(80, 255, 130, 0.85)' : 'rgba(46, 230, 255, 0.9)';
+        minimap.done = doneByTrack();
       }
       raceHud.update(frameDt, race);
       minimap.update(frameDt, car, race);
@@ -1288,7 +1336,7 @@ async function boot(): Promise<void> {
   });
 
   // Accès console pour le débogage : window.__jeu
-  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks, traffic, lampField, treeField, garageScene, effects, propField, deliveries, salon, remoteCars,
+  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks, fullMap, minimap, traffic, lampField, treeField, garageScene, effects, propField, deliveries, salon, remoteCars,
     /** Éclairage de studio pour les planches de contrôle. */
     studio: (): void => {
       scene.add(new THREE.HemisphereLight(0xffffff, 0x8888aa, 3.2));

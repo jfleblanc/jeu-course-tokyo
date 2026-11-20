@@ -27,7 +27,7 @@ export class Minimap {
   constructor(
     private readonly city: CityData,
     /** Bornes de départ des courses, affichées en balade libre. */
-    private readonly markers: { x: number; z: number; circuit: boolean }[] = [],
+    private readonly markers: { x: number; z: number; circuit: boolean; name: string }[] = [],
   ) {
     const dpr = Math.min(2, window.devicePixelRatio || 1);
     this.canvas = document.createElement('canvas');
@@ -68,81 +68,7 @@ export class Minimap {
   }
 
   private drawBase(): void {
-    const c = this.base.getContext('2d') as CanvasRenderingContext2D;
-    c.lineCap = 'round';
-    c.lineJoin = 'round';
-    // Autoroute de ceinture (plus claire quand elle est surélevée)
-    const rs = this.city.ringway.samples;
-    for (let i = 0; i < rs.length; i += 2) {
-      const a = rs[i], b = rs[(i + 2) % rs.length];
-      if (!a || !b) continue;
-      c.strokeStyle = a.y > 4 ? '#3f8fb8' : '#2a6687';
-      c.lineWidth = this.city.ringway.halfWidth * 2 * PX;
-      c.beginPath();
-      c.moveTo(this.mx(a.x), this.mz(a.z));
-      c.lineTo(this.mx(b.x), this.mz(b.z));
-      c.stroke();
-    }
-    c.strokeStyle = '#2a6687';
-    for (const con of this.city.connectors) {
-      c.lineWidth = con.width * PX;
-      c.beginPath();
-      for (let k = 0; k < con.pts.length; k += 2) {
-        const x = this.mx(con.pts[k] as number), z = this.mz(con.pts[k + 1] as number);
-        if (k === 0) c.moveTo(x, z);
-        else c.lineTo(x, z);
-      }
-      c.stroke();
-    }
-    // Ponts d'accès
-    c.strokeStyle = '#3f8fb8';
-    for (const br of this.city.bridges) {
-      c.lineWidth = Math.max(2, br.halfWidth * 2 * PX);
-      c.beginPath();
-      br.samples.forEach((p, k) => {
-        if (k === 0) c.moveTo(this.mx(p.x), this.mz(p.z));
-        else c.lineTo(this.mx(p.x), this.mz(p.z));
-      });
-      c.stroke();
-    }
-    // Route de montagne
-    if (this.city.mountain) {
-      c.strokeStyle = '#7a8f6a';
-      c.lineWidth = Math.max(2, this.city.mountain.road.halfWidth * 2 * PX);
-      c.beginPath();
-      this.city.mountain.road.samples.forEach((p, k) => {
-        if (k === 0) c.moveTo(this.mx(p.x), this.mz(p.z));
-        else c.lineTo(this.mx(p.x), this.mz(p.z));
-      });
-      c.stroke();
-    }
-    // Rues, des plus petites aux plus grandes
-    const order = ['alley', 'street', 'avenue', 'boulevard'] as const;
-    for (const kind of order) {
-      c.strokeStyle = ROAD_COLOR[kind];
-      for (const e of this.city.graph.edges) {
-        if (e.kind !== kind) continue;
-        c.lineWidth = Math.max(2, e.width * PX);
-        c.beginPath();
-        for (let k = 0; k < e.pts.length; k += 2) {
-          const x = this.mx(e.pts[k] as number), z = this.mz(e.pts[k + 1] as number);
-          if (k === 0) c.moveTo(x, z);
-          else c.lineTo(x, z);
-        }
-        c.stroke();
-      }
-    }
-    // Autoroute centrale, en pointillé
-    c.strokeStyle = '#4fb3de';
-    c.lineWidth = 3;
-    c.setLineDash([6, 5]);
-    c.beginPath();
-    this.city.highway.samples.forEach((p, k) => {
-      if (k === 0) c.moveTo(this.mx(p.x), this.mz(p.z));
-      else c.lineTo(this.mx(p.x), this.mz(p.z));
-    });
-    c.stroke();
-    c.setLineDash([]);
+    drawPlan(this.base.getContext('2d') as CanvasRenderingContext2D, this.city, PX, this.ox, this.oz);
   }
 
   private drawRoute(race: Race): void {
@@ -178,6 +104,10 @@ export class Minimap {
   /** Livraisons : colis proposés, arrivée en cours et chemin conseillé (x, z, x, z…). */
   /** Autres joueurs du salon. */
   players: { x: number; z: number }[] = [];
+  /** Courses déjà faites : nom du tracé → meilleure place (les pastilles pleines sont faites, les creuses restent à faire). */
+  done: Record<string, number> = {};
+  /** Itinéraire choisi sur la grande carte : couleur du trait (livraison : vert ; destination libre : cyan). */
+  guideColor = 'rgba(80, 255, 130, 0.85)';
   parcels: { x: number; z: number }[] = [];
   goal: { x: number; z: number } | null = null;
   guide: number[] = [];
@@ -219,19 +149,22 @@ export class Minimap {
     }
     if (!race.active) {
       for (const m of this.markers) {
-        c.fillStyle = m.circuit ? '#ff2d95' : '#2ee6ff';
-        c.strokeStyle = '#0b0b16';
-        c.lineWidth = 1.5 / zoom;
+        const col = m.circuit ? '#ff2d95' : '#2ee6ff';
+        const made = this.done[m.name] !== undefined;
         c.beginPath();
         c.arc(this.mx(m.x), this.mz(m.z), 6 / zoom, 0, Math.PI * 2);
+        // faite : pastille pleine ; à faire : anneau
+        c.fillStyle = made ? col : '#0b0b16';
         c.fill();
+        c.strokeStyle = made ? '#0b0b16' : col;
+        c.lineWidth = (made ? 1.5 : 2.5) / zoom;
         c.stroke();
       }
     }
     if (!race.active) {
       // Livraison : chemin conseillé, colis à prendre (carrés ambre), arrivée (rond vert).
       if (this.guide.length >= 4) {
-        c.strokeStyle = 'rgba(80, 255, 130, 0.85)';
+        c.strokeStyle = this.guideColor;
         c.lineWidth = 4 / zoom;
         c.lineJoin = 'round';
         c.beginPath();
@@ -348,3 +281,97 @@ export function drawHouse(c: CanvasRenderingContext2D, size: number): void {
   c.fillStyle = '#0b0b16';
   c.fillRect(-s * 0.2, s * 0.2, s * 0.4, s * 0.6);
 }
+
+/**
+ * Dessine le plan de la ville (rues, autoroutes, ponts, col). `px` : pixels par mètre ; (ox, oz) : coin du plan.
+ * Sert au plan pré-dessiné de la mini-carte, et à la grande carte qui le redessine net à chaque zoom.
+ */
+export function drawPlan(c: CanvasRenderingContext2D, city: CityData, px: number, ox: number, oz: number): void {
+  const PX = px;
+  const mx = (x: number): number => (x - ox) * PX, mz = (z: number): number => (z - oz) * PX;
+    c.lineCap = 'round';
+    c.lineJoin = 'round';
+    // Autoroute de ceinture (plus claire quand elle est surélevée)
+    const rs = city.ringway.samples;
+    for (let i = 0; i < rs.length; i += 2) {
+      const a = rs[i], b = rs[(i + 2) % rs.length];
+      if (!a || !b) continue;
+      c.strokeStyle = a.y > 4 ? '#3f8fb8' : '#2a6687';
+      c.lineWidth = city.ringway.halfWidth * 2 * PX;
+      c.beginPath();
+      c.moveTo(mx(a.x), mz(a.z));
+      c.lineTo(mx(b.x), mz(b.z));
+      c.stroke();
+    }
+    c.strokeStyle = '#2a6687';
+    for (const con of city.connectors) {
+      c.lineWidth = con.width * PX;
+      c.beginPath();
+      for (let k = 0; k < con.pts.length; k += 2) {
+        const x = mx(con.pts[k] as number), z = mz(con.pts[k + 1] as number);
+        if (k === 0) c.moveTo(x, z);
+        else c.lineTo(x, z);
+      }
+      c.stroke();
+    }
+    // Ponts d'accès
+    c.strokeStyle = '#3f8fb8';
+    for (const br of city.bridges) {
+      c.lineWidth = Math.max(2, br.halfWidth * 2 * PX);
+      c.beginPath();
+      br.samples.forEach((p, k) => {
+        if (k === 0) c.moveTo(mx(p.x), mz(p.z));
+        else c.lineTo(mx(p.x), mz(p.z));
+      });
+      c.stroke();
+    }
+    // Route de montagne
+    if (city.mountain) {
+      c.strokeStyle = '#7a8f6a';
+      c.lineWidth = Math.max(2, city.mountain.road.halfWidth * 2 * PX);
+      c.beginPath();
+      city.mountain.road.samples.forEach((p, k) => {
+        if (k === 0) c.moveTo(mx(p.x), mz(p.z));
+        else c.lineTo(mx(p.x), mz(p.z));
+      });
+      c.stroke();
+    }
+    // Rues, des plus petites aux plus grandes
+    const order = ['alley', 'street', 'avenue', 'boulevard'] as const;
+    for (const kind of order) {
+      c.strokeStyle = ROAD_COLOR[kind];
+      for (const e of city.graph.edges) {
+        if (e.kind !== kind) continue;
+        c.lineWidth = Math.max(2, e.width * PX);
+        c.beginPath();
+        for (let k = 0; k < e.pts.length; k += 2) {
+          const x = mx(e.pts[k] as number), z = mz(e.pts[k + 1] as number);
+          if (k === 0) c.moveTo(x, z);
+          else c.lineTo(x, z);
+        }
+        c.stroke();
+      }
+    }
+    // Liaisons entre quartiers : tunnel et pont
+    c.strokeStyle = '#3f8fb8';
+    for (const l of city.links) {
+      c.lineWidth = Math.max(2, l.road.halfWidth * 2 * PX);
+      c.beginPath();
+      l.road.samples.forEach((p, k) => {
+        if (k === 0) c.moveTo(mx(p.x), mz(p.z));
+        else c.lineTo(mx(p.x), mz(p.z));
+      });
+      c.stroke();
+    }
+    // Autoroute centrale, en pointillé
+    c.strokeStyle = '#4fb3de';
+    c.lineWidth = 3;
+    c.setLineDash([6, 5]);
+    c.beginPath();
+    city.highway.samples.forEach((p, k) => {
+      if (k === 0) c.moveTo(mx(p.x), mz(p.z));
+      else c.lineTo(mx(p.x), mz(p.z));
+    });
+    c.stroke();
+    c.setLineDash([]);
+  }

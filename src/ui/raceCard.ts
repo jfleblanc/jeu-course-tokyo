@@ -39,7 +39,7 @@ export class RaceCard {
       ${records ? `<div class="rc-records"><h4>Meilleurs temps</h4>${records}</div>` : ''}
       <div class="rc-reward">À gagner pour ${event ? 'l’or' : 'la 1re place'} : <b>${reward.xp ? `${reward.xp} XP · ` : ''}¥ ${reward.money.toLocaleString('fr-CA')}</b><small>+ mallettes d’argent sur le parcours</small></div>
       <div class="rc-pilots">${pilots}</div>
-      <div class="rc-keys"><kbd>Entrée</kbd> lancer ${event ? '&nbsp; <kbd>Y</kbd> autre épreuve ' : 'la course '}&nbsp; <kbd>Échap</kbd> fermer</div>`;
+      <div class="rc-keys"><kbd>Entrée</kbd> lancer &nbsp; <kbd>Y</kbd> ${event ? 'épreuve suivante' : 'épreuves : chrono, drift, poursuite'} &nbsp; <kbd>Échap</kbd> fermer</div>`;
     this.root.classList.add('on');
   }
 
