@@ -4,6 +4,12 @@ compatibility_date = "2026-11-01"
 
 routes = [{ pattern = "course.jfleblanc.com", custom_domain = true }]
 
+# Les fichiers du jeu (construits par « BASE=/ npx vite build --outDir dist-cf »), servis directement par Cloudflare.
+# Une adresse qui ne correspond à aucun fichier (/salon/…, /api/…) arrive au programme worker.js.
+[assets]
+directory = "../dist-cf"
+binding = "ASSETS"
+
 [[durable_objects.bindings]]
 name = "SALONS"
 class_name = "Salon"

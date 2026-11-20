@@ -1,7 +1,8 @@
 // Serveur du jeu de course, sur Cloudflare Workers : https://course.jfleblanc.com
 //  - /salon/CODE   : salon multijoueur (WebSocket), un objet durable par code de 4 lettres ;
 //  - /api/records  : classement des meilleurs temps, partagé entre tous les ordinateurs ;
-//  - tout le reste : le jeu lui-même, servi depuis GitHub Pages (en attendant de l'héberger ici).
+//  - tout le reste : le jeu lui-même. Publié par la CI (wrangler), ses fichiers sont chez Cloudflare (env.ASSETS)
+//    et n'arrivent même pas ici ; sans eux (ancienne publication), relais vers GitHub Pages.
 // Déploiement : voir server/README.md.
 import { DurableObject } from 'cloudflare:workers';
 import { CODE_VALIDE, MAX_JOUEURS, ficheJoueur, inscrire, ligneValide, numeroLibre, traiter } from './protocole.js';
@@ -24,7 +25,14 @@ export default {
     if (request.method !== 'GET' && request.method !== 'HEAD') return new Response('Méthode non permise', { status: 405 });
     // Le jeu : relais vers GitHub Pages, gardé deux minutes en cache à la périphérie.
     let chemin = url.pathname;
-    if (chemin.startsWith('/jeu-course-tokyo')) chemin = chemin.slice('/jeu-course-tokyo'.length) || '/';
+    const ancien = chemin.startsWith('/jeu-course-tokyo');
+    if (ancien) chemin = chemin.slice('/jeu-course-tokyo'.length) || '/';
+    if (env.ASSETS) {
+      // Les fichiers sont ici : seule une ancienne adresse (/jeu-course-tokyo/…) mérite un second essai.
+      if (!ancien) return new Response('Introuvable', { status: 404 });
+      url.pathname = chemin;
+      return env.ASSETS.fetch(new Request(url, request));
+    }
     const amont = await fetch(ORIGINE_DU_JEU + chemin + url.search, { method: request.method, cf: { cacheTtlByStatus: { '200-299': 120, '404': 5, '500-599': 0 } } });
     const reponse = new Response(amont.body, amont);
     reponse.headers.set('cache-control', chemin === '/' || chemin.endsWith('.html') ? 'no-cache' : 'public, max-age=300');

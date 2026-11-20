@@ -5,3 +5,4 @@ dist
 .vite
 /.verif
 smoke-test.png
+dist-cf
