@@ -13,6 +13,8 @@ export interface RecordEntry {
   date: string;
 }
 
+import { NET } from '../config/net';
+
 const KEY = 'jeu-course-tokyo.records';
 const KEEP = 5;
 
@@ -61,6 +63,13 @@ export function submitRecord(key: string, entry: RecordEntry, higherIsBetter: bo
   list.length = Math.min(list.length, KEEP);
   t[key] = list;
   write(t);
+  // Classement partagé entre ordinateurs : on prévient le serveur (sans attendre, et sans s'en faire s'il est injoignable).
+  if (improved) {
+    void fetch(`${NET.server}/api/records`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cle: key, points: higherIsBetter, ligne: entry }) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { liste?: RecordEntry[] } | null) => { if (d?.liste) { const tt = read(); tt[key] = d.liste; write(tt); } })
+      .catch(() => undefined);
+  }
   const rank = list.findIndex((e) => e.player === entry.player && e.car === entry.car && e.value === entry.value) + 1;
   return { rank, improved };
 }
@@ -75,4 +84,40 @@ export function recordsHtml(key: string, points: boolean, highlight?: { player: 
   return list
     .map((e, k) => `<div class="rec${highlight && e.player === highlight.player && e.car === highlight.car ? ' me' : ''}"><i>${k + 1}</i><span class="who"><b>${esc(e.symbol)}</b> ${esc(e.player)}</span><span class="car">${esc(e.car)}</span><em>${points ? `${Math.round(e.value).toLocaleString('fr-CA')} pts` : fmtRecordTime(e.value)}</em></div>`)
     .join('');
+}
+
+/** Les classements dont la valeur est un nombre de points (le plus grand gagne). */
+const isPoints = (key: string): boolean => key.startsWith('drift|');
+
+/**
+ * Récupère le classement partagé et le fusionne avec celui de ce navigateur ; les temps faits
+ * hors ligne sont envoyés au passage. Sans réseau, on garde simplement le classement local.
+ */
+export async function syncRecords(): Promise<void> {
+  try {
+    const res = await fetch(`${NET.server}/api/records`);
+    if (!res.ok) return;
+    const remote = ((await res.json()) as { table?: Table }).table ?? {};
+    const local = read();
+    for (const key of new Set([...Object.keys(remote), ...Object.keys(local)])) {
+      const points = isPoints(key);
+      const theirs = remote[key] ?? [];
+      const all = [...theirs];
+      for (const e of local[key] ?? []) {
+        const k = all.findIndex((x) => x.player === e.player && x.car === e.car);
+        const known = k >= 0 && (points ? (all[k] as RecordEntry).value >= e.value : (all[k] as RecordEntry).value <= e.value);
+        if (known) continue;
+        if (k >= 0) all.splice(k, 1);
+        all.push(e);
+        // un temps que le serveur n'a pas : on le lui envoie
+        void fetch(`${NET.server}/api/records`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ cle: key, points, ligne: e }) }).catch(() => undefined);
+      }
+      all.sort((a, b) => (points ? b.value - a.value : a.value - b.value));
+      all.length = Math.min(all.length, KEEP);
+      local[key] = all;
+    }
+    write(local);
+  } catch {
+    /* hors ligne : classement local seulement */
+  }
 }

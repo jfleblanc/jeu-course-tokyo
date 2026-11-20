@@ -176,6 +176,8 @@ export class Minimap {
   }
 
   /** Livraisons : colis proposés, arrivée en cours et chemin conseillé (x, z, x, z…). */
+  /** Autres joueurs du salon. */
+  players: { x: number; z: number }[] = [];
   parcels: { x: number; z: number }[] = [];
   goal: { x: number; z: number } | null = null;
   guide: number[] = [];
@@ -290,6 +292,15 @@ export class Minimap {
         c.fill();
         c.stroke();
       }
+    }
+    for (const p of this.players) {
+      c.fillStyle = '#ffffff';
+      c.strokeStyle = '#2ee6ff';
+      c.lineWidth = 2.5 / zoom;
+      c.beginPath();
+      c.arc(this.mx(p.x), this.mz(p.z), 5.5 / zoom, 0, Math.PI * 2);
+      c.fill();
+      c.stroke();
     }
     c.restore();
     // Voiture du joueur : flèche fixe, pointe vers le haut

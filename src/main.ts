@@ -1,3 +1,4 @@
+import { onOldHome, transferNote, transferUrl } from './net/transfert'; // (en premier : il peut écrire les sauvegardes avant que le jeu ne les lise)
 import * as THREE from 'three/webgpu';
 import { NEON_COLORS, NOS, PAINTS } from './config/cars';
 import { CAR_SPEC, PRESET_A, type HandlingConfig } from './config/handling';
@@ -32,7 +33,11 @@ import { TreeField } from './world/treeField';
 import { TreeVisuals } from './render/treeVisuals';
 import { Effects } from './render/effects';
 import { CarPhotos } from './render/carPhoto';
-import { fmtRecordTime, recordsHtml, submitRecord } from './progression/records';
+import { fmtRecordTime, recordsHtml, submitRecord, syncRecords } from './progression/records';
+import { Salon } from './net/salon';
+import { RemoteCars } from './net/remoteCars';
+import { SalonPanel } from './ui/salonPanel';
+import { NET } from './config/net';
 import { Deliveries, buildDeliveries, type Delivery } from './world/deliveries';
 import { DeliveryVisuals } from './render/deliveryVisuals';
 import { DELIVERIES } from './config/missions';
@@ -215,6 +220,17 @@ async function boot(): Promise<void> {
   const titleEl = document.createElement('div');
   titleEl.id = 'title';
   titleEl.innerHTML = `<div class="t-name">COURSE DE NUIT<span>東京</span></div><div class="t-go">APPUYEZ SUR <kbd>ENTRÉE</kbd></div><div class="t-sub">ou sur un bouton de la manette</div>`;
+  if (onOldHome) {
+    // Le jeu déménage : on propose d'emporter ses joueurs et ses parties à la nouvelle adresse.
+    const move = document.createElement('a');
+    move.className = 't-move';
+    move.href = 'https://course.jfleblanc.com/';
+    move.innerHTML = 'Le jeu a une nouvelle adresse : <b>course.jfleblanc.com</b> — cliquez ici pour y emporter vos joueurs et vos parties';
+    move.addEventListener('click', () => { move.href = transferUrl(); });
+    titleEl.append(move);
+  }
+  void syncRecords();
+  if (transferNote) setTimeout(() => hud.toast(transferNote), 2500);
   if (titlePhase === 'attente') {
     document.body.append(titleEl);
     document.body.classList.add('titre');
@@ -494,6 +510,8 @@ async function boot(): Promise<void> {
     refreshProgress();
   });
   let garageTime = 0;
+  /** La caméra de surveillance suit la voiture (elle roule dans l'atelier ou sur la rampe) ; caméra extérieure sur la rampe. */
+  let garageFollow = false, garageOutside = false;
   // À pied dans l'atelier : F pour descendre de voiture, F près d'une voiture pour y monter.
   const walkInput = emptyDriveInput();
   walkInput.drift = true; // frein à main : la voiture ne bouge pas pendant qu'on marche
@@ -554,6 +572,62 @@ async function boot(): Promise<void> {
     return { player: prof?.name ?? 'Joueur', symbol: prof?.symbol ?? '?', car: player.modelOf(player.car).name };
   };
   const recordKey = (track: Track, mode: RaceMode): string => `${mode}|${track.name}`;
+  // ——— Multijoueur : un salon (code de 4 lettres), les voitures des autres en fantômes ———
+  const salon = new Salon();
+  const remoteCars = new RemoteCars(scene, salon);
+  const salonPanel = new SalonPanel(salon, {
+    me: () => ({ name: whoAmI().player, symbol: whoAmI().symbol }),
+    create: () => joinSalon(Salon.randomCode()),
+    join: (code) => joinSalon(code),
+    leave: () => { salon.leave(); salonPanel.message = ''; hud.toast('Salon quitté'); },
+  });
+  const joinSalon = (code: string): void => {
+    const me = whoAmI();
+    salonPanel.busy = true;
+    salonPanel.message = 'Connexion…';
+    salon.connect(code, me.player, me.symbol)
+      .then(() => { salonPanel.message = ''; carSent = ''; hud.toast(`Salon ${code} : ${salon.peers.size + 1} joueur${salon.peers.size ? 's' : ''}`); })
+      .catch((err: unknown) => { salonPanel.message = err instanceof Error ? err.message : 'Connexion impossible.'; })
+      .finally(() => { salonPanel.busy = false; });
+  };
+  let carSent = '';
+  let netTimer = 0, progressTimer = 0;
+  const netState: number[] = new Array<number>(12).fill(0);
+  /** Course en cours : son tracé et son genre (pour le classement à l'arrivée). */
+  let running: { track: Track; mode: RaceMode } | null = null;
+  /** Lance la course pour tous les joueurs garés sur la même borne. Faux s'il n'y a personne d'autre. */
+  const launchTogether = (track: Track): boolean => {
+    if (!salon.connected) return false;
+    const ids = [salon.id];
+    for (const p of salon.peers.values()) {
+      const w = remoteCars.where(p.id);
+      if (w && Math.hypot(w.x - track.start.x, w.z - track.start.z) < NET.joinRadius) ids.push(p.id);
+    }
+    if (ids.length < 2 || Math.hypot(car.pos.x - track.start.x, car.pos.z - track.start.z) > NET.joinRadius) return false;
+    ids.sort((a, b) => a - b);
+    salon.send({ t: 'course', piste: track.name, joueurs: ids, delai: NET.countdown });
+    return true;
+  };
+  /** Un joueur du salon a lancé une course et on est dans la liste : départ synchronisé. */
+  const startTogether = (trackName: string, players: number[], startAt: number): void => {
+    const track = tracks.find((t) => t.name === trackName);
+    const slot = players.indexOf(salon.id);
+    if (!track || slot < 0 || slot > 3 || garage.open || (race.active && race.phase !== 'finished')) return;
+    if (race.phase === 'finished') race.stop();
+    garageScene.stopWalk();
+    deliveries.cancel();
+    raceKind = track.circuit ? 'circuit' : 'course';
+    raceHud.title = 'Course à plusieurs';
+    raceHud.summary = null;
+    nosCharge = NOS.seconds;
+    running = { track, mode: 'course' };
+    const ok = race.start(track.route, { mode: 'course', gridSlot: slot, countdown: Math.max(1.5, (startAt - salon.serverNow()) / 1000), cashValue: PICKUPS.cashBase + PICKUPS.cashPerLevel * player.level });
+    race.ghosts = players.filter((id) => id !== salon.id).map((id) => ({ id, name: salon.peers.get(id)?.name ?? `Joueur ${id}`, progress: 0, finished: false, finishTime: 0 }));
+    card.hide();
+    offered = null;
+    hud.toast(ok ? `${track.name} — à ${players.length} joueurs` : 'Impossible de lancer la course');
+  };
+
   // ——— Livraisons : des colis à prendre sur la carte et à déposer ailleurs, contre la montre ———
   const deliveries = new Deliveries(buildDeliveries(city.graph, city.seed), city.graph, (d) => sectorOpen(d));
   const deliveryVisuals = new DeliveryVisuals(scene, deliveries, DELIVERIES.active, mats.glow);
@@ -629,6 +703,14 @@ async function boot(): Promise<void> {
   const launch = (): void => {
     if (!offered) return;
     const o = offered;
+    // À plusieurs sur la même borne : c'est le serveur qui donne le départ, à tout le monde en même temps.
+    if (o.mode === 'course' && o.kind !== 'palier' && launchTogether(o.track)) {
+      card.hide();
+      offered = null;
+      hud.toast('Départ à plusieurs…');
+      return;
+    }
+    running = { track: o.track, mode: o.mode };
     raceKind = o.kind;
     raceHud.title = o.kind === 'palier' ? 'Épreuve de palier' : o.mode === 'chrono' ? 'Contre-la-montre' : o.mode === 'drift' ? 'Drift noté' : o.mode === 'poursuite' ? 'Poursuite' : '';
     raceHud.summary = null;
@@ -737,6 +819,9 @@ async function boot(): Promise<void> {
         break;
       case 'interact':
         interact();
+        break;
+      case 'multi':
+        if (!garage.open && titlePhase === 'fini') salonPanel.toggle();
         break;
       case 'garage':
         // Pas de garage en pleine course.
@@ -907,7 +992,7 @@ async function boot(): Promise<void> {
         const bay = garageScene.bayPose();
         garageScene.showMechanic(menu || garageScene.walker !== null || Math.hypot(car.pos.x - bay.x, car.pos.z - bay.z) < 2.5);
         syncBayColliders();
-        garageScene.update(frameDt, camera, null);
+        garageScene.update(frameDt, camera, garageFollow ? car.pos : null, garageOutside);
         // Menu ouvert : l'image de la caméra est décalée pour tenir dans la partie droite de l'écran.
         developPhotos();
         const shift = Math.round(garage.panelWidth / 2);
@@ -996,9 +1081,9 @@ async function boot(): Promise<void> {
           // Classement : le temps du joueur (ou ses points de drift) avec sa voiture.
           raceHud.records = ''; raceHud.recordNote = '';
           const done = race.player;
-          if (offered && done && (race.mode !== 'poursuite' || race.caught)) {
+          if (running && done && (race.mode !== 'poursuite' || race.caught)) {
             const me = whoAmI();
-            const key = recordKey(offered.track, race.mode);
+            const key = recordKey(running.track, race.mode);
             const drift = race.mode === 'drift';
             const r = submitRecord(key, { ...me, value: drift ? Math.round(race.score) : done.finishTime, date: new Date().toISOString().slice(0, 10) }, drift);
             raceHud.recordNote = r.rank === 1 && r.improved ? 'Nouveau record !' : r.improved && r.rank > 0 ? `${r.rank}e au classement` : '';
@@ -1036,7 +1121,14 @@ async function boot(): Promise<void> {
         garageScene.boarding = Math.min(1, boardT);
         if (boardT >= 1) { boardT = -1; garageScene.boarding = 0; justParked = walking; garageScene.stopWalk(); }
       }
-      const view = menus || boardT >= 0 || walking || (waiting && (garageView || parkedFor > 1.2 || justParked));
+      // Caméras de surveillance fixes tant que la voiture est dans l'atelier (caméra 1, qui la suit) ou sur la rampe (caméra 2, dehors).
+      const inRoom = titlePhase === 'fini' && garageScene.contains(car.pos.x, car.pos.y, car.pos.z);
+      const onRamp = titlePhase === 'fini' && !inRoom && garageScene.onRamp(car.pos.x, car.pos.y, car.pos.z);
+      const view = menus || boardT >= 0 || walking || inRoom || onRamp;
+      garageFollow = !menus && !walking && (inRoom || onRamp) && !waiting;
+      garageOutside = onRamp && !menus;
+      if (titlePhase === 'fini' && !menus) cctvName = onRamp ? 'SORTIE' : 'ATELIER';
+      if (justParked && !inRoom) justParked = false;
       const near = walking ? garageScene.nearCar() : -1;
       const hint = walking ? `<kbd>W</kbd><kbd>S</kbd> marcher · <kbd>A</kbd><kbd>D</kbd> tourner${near === 0 ? ' · <kbd>F</kbd> reprendre le volant' : near > 0 ? ` · <kbd>F</kbd> prendre la ${player.modelOf(player.cars[carAtBay(near)] ?? player.car).name}` : ' · approchez-vous d’une voiture'}` : view && !menus && boardT < 0 && waiting ? '<kbd>F</kbd> descendre de voiture · <kbd>G</kbd> garage' : '';
       if (walkHint.innerHTML !== hint) { walkHint.innerHTML = hint; walkHint.classList.toggle('on', hint !== ''); }
@@ -1082,6 +1174,49 @@ async function boot(): Promise<void> {
           card.hide();
           offered = null;
         }
+      }
+      // Multijoueur : on envoie son état, on affiche celui des autres, on suit les annonces du salon.
+      {
+        const hiddenNow = garageScene.contains(car.pos.x, car.pos.y, car.pos.z) || (car.pos.y < -0.4 && garageScene.distance(car.pos.x, car.pos.z) < 60);
+        if (salon.connected) {
+          netTimer -= frameDt;
+          if (netTimer <= 0) {
+            netTimer = 1 / NET.sendHz;
+            const q = car.body.rotation(), lv = car.body.linvel();
+            const r2 = (v: number): number => Math.round(v * 100) / 100, r4 = (v: number): number => Math.round(v * 10000) / 10000;
+            netState[0] = r2(car.pos.x); netState[1] = r2(car.pos.y); netState[2] = r2(car.pos.z);
+            netState[3] = r4(q.x); netState[4] = r4(q.y); netState[5] = r4(q.z); netState[6] = r4(q.w);
+            netState[7] = r2(lv.x); netState[8] = r2(lv.y); netState[9] = r2(lv.z);
+            netState[10] = r2(car.steerAngle);
+            netState[11] = hiddenNow || titlePhase !== 'fini' ? 1 : 0;
+            salon.send({ t: 'e', d: netState });
+            const mine = `${player.car.model}|${player.car.paint}|${player.car.neon}`;
+            if (mine !== carSent) { carSent = mine; salon.send({ t: 'voiture', modele: player.car.model, peinture: player.car.paint, neon: player.car.neon }); }
+          }
+          if (race.multi && race.player) {
+            progressTimer -= frameDt;
+            if (progressTimer <= 0) {
+              progressTimer = 1 / NET.progressHz;
+              salon.send({ t: 'progres', p: Math.round(race.player.progress), f: race.player.finished, tm: Math.round(race.player.finishTime * 1000) / 1000 });
+            }
+          }
+        }
+        while (salon.events.length) {
+          const ev = salon.events.shift();
+          if (!ev) break;
+          if (ev.type === 'arrive') { hud.toast(`${ev.peer.symbol} ${ev.peer.name} rejoint le salon`); carSent = ''; }
+          else if (ev.type === 'part') hud.toast(`${ev.peer.name} quitte le salon`);
+          else if (ev.type === 'ferme') hud.toast(ev.reason);
+          else if (ev.type === 'course') startTogether(ev.track, ev.players, ev.startAt);
+          else if (ev.type === 'progres') {
+            const g = race.ghosts.find((x) => x.id === ev.from);
+            if (g) { g.progress = ev.progress; g.finished = ev.finished; g.finishTime = ev.time; }
+          }
+        }
+        // (chacun a son garage : dans le sien, on ne voit pas les autres)
+        remoteCars.update(camera, titlePhase === 'fini' && !hiddenNow && !garageView);
+        minimap.players = remoteCars.dots;
+        salonPanel.render();
       }
       // Livraisons : colis sur la carte, fiche quand on s'arrête dessus, chrono et arrivée.
       {
@@ -1150,7 +1285,7 @@ async function boot(): Promise<void> {
   });
 
   // Accès console pour le débogage : window.__jeu
-  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks, traffic, lampField, treeField, garageScene, effects, propField, deliveries,
+  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks, traffic, lampField, treeField, garageScene, effects, propField, deliveries, salon, remoteCars,
     /** Éclairage de studio pour les planches de contrôle. */
     studio: (): void => {
       scene.add(new THREE.HemisphereLight(0xffffff, 0x8888aa, 3.2));

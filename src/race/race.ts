@@ -79,7 +79,13 @@ export interface RaceOptions {
   cashValue?: number;
   /** Genre d'épreuve (par défaut : course). */
   mode?: RaceMode;
+  /** Course à plusieurs joueurs : place sur la grille (0 à 3), pas de pilotes de l'ordinateur, et compte à rebours imposé (s) pour partir tous ensemble. */
+  gridSlot?: number;
+  countdown?: number;
 }
+
+/** Un autre joueur dans une course à plusieurs : on n'en connaît que l'avancée, envoyée par son ordinateur. */
+export interface GhostRacer { id: number; name: string; progress: number; finished: boolean; finishTime: number }
 
 /** Trois pilotes tirés au sort, toujours les mêmes pour un tracé donné. */
 export function pickDrivers(seed: number): AiLevel[] {
@@ -119,6 +125,9 @@ export class Race {
   events: RaceEvent[] = [];
   private cashValue = 0;
   mode: RaceMode = 'course';
+  /** Les autres joueurs de la course (course à plusieurs) ; vide en solo. */
+  ghosts: GhostRacer[] = [];
+  multi = false;
   /** Épreuves : seuils des médailles (or, argent, bronze). */
   medals: [number, number, number] | null = null;
   /** Drift noté : points marqués, combo en cours (×1 à ×3), points de la glisse en cours. */
@@ -163,7 +172,9 @@ export class Race {
     this.catchMeter = 0; this.caught = false; this.escapedBy = 0;
     // Épreuves en solo : personne d'autre. Poursuite : un seul pilote, parti devant.
     const all = options.drivers ?? pickDrivers(route.seed);
-    const drivers = this.mode === 'course' ? all : this.mode === 'poursuite' ? all.slice(0, 1) : [];
+    this.multi = options.gridSlot !== undefined;
+    this.ghosts = [];
+    const drivers = this.multi ? [] : this.mode === 'course' ? all : this.mode === 'poursuite' ? all.slice(0, 1) : [];
     this.route = route;
     const pts = route.points;
     const at = (s: number): RoutePoint => pts[Math.min(pts.length - 1, Math.max(0, Math.round(s / 3)))] as RoutePoint;
@@ -189,7 +200,7 @@ export class Race {
       if (model) car.setTraits({ ...model.traits, mass: model.traits.mass * RACE.aiMassFactor });
       this.racers.push(this.makeRacer(this.mode === 'poursuite' ? `${level.name} (fuyard)` : level.name, false, car, level, g.index, slot.lane * 0.35));
     });
-    const pg = place(slots[3] as (typeof slots)[number]);
+    const pg = place(slots[options.gridSlot ?? 3] as (typeof slots)[number]);
     this.playerCar.teleport(pg.x, pg.y + REST_HEIGHT + 0.15, pg.z, pg.yaw);
     this.racers.push(this.makeRacer('Vous', true, this.playerCar, null, pg.index, 0));
     // — Objets à ramasser : mallettes régulières, téléporteur rare (toujours les mêmes pour un tracé) —
@@ -203,13 +214,13 @@ export class Race {
       const side = rng.range(-3, 3);
       this.pickups.push({ kind: 'cash', x: p.x + p.tz * side, y: p.y ?? 0, z: p.z - p.tx * side, index: Math.round(p.s / 3), taken: false });
     }
-    if (rng.chance(PICKUPS.teleporterChance)) {
+    if (!this.multi && rng.chance(PICKUPS.teleporterChance)) {
       const p = at(lapLen * rng.range(0.35, 0.6));
       const side = rng.range(-2.5, 2.5);
       this.pickups.push({ kind: 'teleport', x: p.x + p.tz * side, y: p.y ?? 0, z: p.z - p.tx * side, index: Math.round(p.s / 3), taken: false });
     }
     this.phase = 'countdown';
-    this.countdown = RACE.countdownSeconds + 0.8; // petit temps mort pour regarder la grille
+    this.countdown = options.countdown ?? RACE.countdownSeconds + 0.8; // petit temps mort pour regarder la grille
     this.time = 0;
     this.generation++;
     return true;
@@ -466,6 +477,11 @@ export class Race {
   place(): number {
     const player = this.player;
     if (!player) return 4;
+    if (this.multi) {
+      // Parmi les joueurs : ceux qui ont fini avant moi, ou qui sont devant.
+      const mine = player.finished ? player.finishTime : Infinity;
+      return 1 + this.ghosts.filter((g) => (g.finished ? g.finishTime < mine : !player.finished && g.progress > player.progress)).length;
+    }
     if (this.mode === 'course') return this.ranking().indexOf(player) + 1;
     if (this.mode === 'poursuite') return this.caught ? 1 : this.escapedBy < EVENTS.pursuit.close ? 3 : 4;
     const m = this.medals;

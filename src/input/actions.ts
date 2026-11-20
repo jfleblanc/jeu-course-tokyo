@@ -44,6 +44,7 @@ export type ActionEvent =
   | 'circuitStart'
   | 'eventStart'
   | 'interact'
+  | 'multi'
   | 'garage'
   | 'map'
   | 'raceQuit';

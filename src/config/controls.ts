@@ -10,16 +10,16 @@ export const KEYBOARD = {
   steerLeft: ['KeyA'],
   steerRight: ['KeyD'],
   drift: ['Space'],
-  nos: ['KeyE', 'ControlLeft'],
-  /** Vue arrière : tant que la touche est tenue. */
-  lookBack: ['ShiftLeft', 'ShiftRight'],
+  nos: ['ShiftLeft', 'ShiftRight'],
+  /** Rétroviseur (vue arrière) : tant que la touche est tenue. */
+  lookBack: ['KeyM'],
 } as const;
 
 export const KEY_EVENTS: Record<string, ActionEvent> = {
   ArrowUp: 'shiftUp',
   ArrowDown: 'shiftDown',
   KeyC: 'camera',
-  KeyM: 'toggleGearbox',
+  KeyB: 'toggleGearbox',
   F1: 'togglePanel',
   KeyR: 'reset',
   KeyH: 'toggleHelp',
@@ -29,6 +29,7 @@ export const KEY_EVENTS: Record<string, ActionEvent> = {
   KeyT: 'circuitStart',
   KeyY: 'eventStart',
   KeyF: 'interact',
+  KeyJ: 'multi',
   KeyG: 'garage',
   Tab: 'map',
   Escape: 'raceQuit',

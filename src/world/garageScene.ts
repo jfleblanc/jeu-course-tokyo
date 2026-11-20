@@ -492,6 +492,13 @@ export class GarageScene {
     return Math.abs(lx) < G.halfW + 0.3 && Math.abs(lz) < G.halfD + 0.3;
   }
 
+  /** Vrai si ce point du monde est sur la rampe, encore sous le niveau de la rue. */
+  onRamp(x: number, y: number, z: number): boolean {
+    if (y > this.group.position.y + 0.36) return false; // (au niveau de la rue, le centre de la voiture est vers 0,58 m)
+    const [lx, lz] = garageToLocal(this.site, x, z);
+    return lx > G.halfW - 0.3 && lx < G.rampX1 + 0.6 && lz > G.landingZ0 - 0.5 && lz < G.rampZ1 + 3;
+  }
+
   /** Ramène un point (la caméra) à l'intérieur de l'atelier : sous le plafond, entre les murs. */
   keepInside(p: THREE.Vector3): void {
     this.room.updateMatrixWorld();
@@ -567,7 +574,8 @@ export class GarageScene {
    * Fait vivre la scène et place la caméra de surveillance. `follow` : point du monde que la
    * caméra accompagne (la voiture du joueur quand il roule dans l'atelier).
    */
-  update(dt: number, camera: THREE.PerspectiveCamera, follow: { x: number; y: number; z: number } | null = null): void {
+  update(dt: number, camera: THREE.PerspectiveCamera, follow: { x: number; y: number; z: number } | null = null, outside = false): void {
+    this.outside = outside;
     this.time += dt;
     const t = this.time;
     // Le mécano tourne autour de la voiture principale : il s'arrête, bricole, repart.
@@ -631,8 +639,21 @@ export class GarageScene {
     this.placeCamera(camera, follow);
   }
 
+  /** Vrai : la voiture est sur la rampe, c'est la caméra extérieure qui filme. */
+  private outside = false;
+
   private placeCamera(camera: THREE.PerspectiveCamera, follow: { x: number; y: number; z: number } | null): void {
     const t = this.time;
+    if (this.outside && follow) {
+      // Caméra 2 : dehors, au coin supérieur droit de la sortie du garage ; elle suit la voiture sur la rampe.
+      this.group.updateMatrixWorld();
+      this.camPos.set(G.rampX1 - 1.3, -G.floor + 3.9, G.rampZ1 + 3.5);
+      this.room.localToWorld(this.camPos);
+      camera.position.copy(this.camPos);
+      camera.lookAt(follow.x, follow.y + 0.4, follow.z);
+      if (Math.abs(camera.fov - 50) > 0.01) { camera.fov = 50; camera.updateProjectionMatrix(); }
+      return;
+    }
     // Caméra de surveillance : en hauteur dans le coin près de la porte ; elle balaie lentement,
     // ou accompagne la voiture qui roule.
     this.group.updateMatrixWorld();

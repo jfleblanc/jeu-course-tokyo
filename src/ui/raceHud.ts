@@ -123,7 +123,7 @@ export class RaceHud {
     const place = race.place();
     const event = race.mode !== 'course';
     const MEDAL = ['OR', 'ARGENT', 'BRONZE', '—'];
-    if (!event) this.pos.innerHTML = `<b>${place}</b><span>/${ranking.length}</span>`;
+    if (!event) this.pos.innerHTML = `<b>${place}</b><span>/${race.multi ? race.ghosts.length + 1 : ranking.length}</span>`;
     else if (race.mode === 'drift') this.pos.innerHTML = `<b>${Math.round(race.score).toLocaleString('fr-CA')}</b><span> pts${race.combo > 1.05 ? ` ×${race.combo.toFixed(1)}` : ''}</span>`;
     else if (race.mode === 'chrono') this.pos.innerHTML = `<b class="medal m${place - 1}">${MEDAL[place - 1]}</b>`;
     else this.pos.innerHTML = `<b>${Math.round(race.catchMeter * 100)}</b><span> % capturé</span>`;
@@ -137,6 +137,11 @@ export class RaceHud {
       const prey = race.racers.find((r) => !r.isPlayer);
       const gap = prey ? Math.round(prey.progress - player.progress) : 0;
       this.board.innerHTML = `<div class="me"><i>!</i><span>${prey?.name ?? 'Fuyard'}</span><em>${gap >= 0 ? `à ${gap} m` : 'dépassé'}</em></div>`;
+    } else if (race.multi) {
+      // Course à plusieurs : les vrais joueurs, d'après l'avancée que chacun envoie.
+      const rows = [{ name: 'Vous', me: true, progress: player.progress, finished: player.finished, time: player.finishTime }, ...race.ghosts.map((g) => ({ name: g.name, me: false, progress: g.progress, finished: g.finished, time: g.finishTime }))];
+      rows.sort((a, b) => (a.finished && b.finished ? a.time - b.time : a.finished ? -1 : b.finished ? 1 : b.progress - a.progress));
+      this.board.innerHTML = rows.map((r, k) => `<div class="${r.me ? 'me' : ''}"><i>${k + 1}</i><span>${r.name}</span><em>${r.me ? '' : r.finished ? fmtTime(r.time) : `${r.progress - player.progress >= 0 ? '+' : '−'}${Math.abs(Math.round(r.progress - player.progress))} m`}</em></div>`).join('');
     } else this.board.innerHTML = ranking
       .map((r, k) => {
         const gap = r === player ? '' : r.finished ? fmtTime(r.finishTime) : `${r.progress - player.progress >= 0 ? '+' : '−'}${Math.abs(Math.round(r.progress - player.progress))} m`;
@@ -168,7 +173,7 @@ export class RaceHud {
       if (rec && html !== this.recordsDrawn) { rec.innerHTML = html; this.recordsDrawn = html; }
       const list = this.results.querySelector('[data-r="list"]');
       if (list) {
-        list.innerHTML = event ? '' : ranking.map((r, k) => `<div class="${r.isPlayer ? 'me' : ''}"><i>${k + 1}</i><span>${r.name}</span><em>${r.finished ? fmtTime(r.finishTime) : 'en course…'}</em></div>`).join('');
+        list.innerHTML = event ? '' : race.multi ? [{ name: 'Vous', me: true, finished: player.finished, time: player.finishTime }, ...race.ghosts.map((g) => ({ name: g.name, me: false, finished: g.finished, time: g.finishTime }))].sort((a, b) => (a.finished ? a.time : 1e9) - (b.finished ? b.time : 1e9)).map((r, k) => `<div class="${r.me ? 'me' : ''}"><i>${k + 1}</i><span>${r.name}</span><em>${r.finished ? fmtTime(r.time) : 'en course…'}</em></div>`).join('') : ranking.map((r, k) => `<div class="${r.isPlayer ? 'me' : ''}"><i>${k + 1}</i><span>${r.name}</span><em>${r.finished ? fmtTime(r.finishTime) : 'en course…'}</em></div>`).join('');
       }
     }
   }

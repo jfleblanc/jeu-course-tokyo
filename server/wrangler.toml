@@ -1,0 +1,17 @@
+name = "course"
+main = "worker.js"
+compatibility_date = "2026-11-01"
+
+routes = [{ pattern = "course.jfleblanc.com", custom_domain = true }]
+
+[[durable_objects.bindings]]
+name = "SALONS"
+class_name = "Salon"
+
+[[durable_objects.bindings]]
+name = "CLASSEMENT"
+class_name = "Classement"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Salon", "Classement"]

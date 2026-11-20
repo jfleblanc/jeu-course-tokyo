@@ -54,10 +54,10 @@ export class Hud {
       <h4>COMMANDES</h4>
       <kbd>W</kbd> accélérer · <kbd>S</kbd> freiner / reculer · <kbd>A</kbd> <kbd>D</kbd> tourner<br>
       <kbd>Espace</kbd> drift · <kbd>C</kbd> caméra · <kbd>R</kbd> replacer la voiture<br>
-      <kbd>M</kbd> boîte auto / manuelle · <kbd>↑</kbd> <kbd>↓</kbd> rapports (manuelle)<br>
+      <kbd>B</kbd> boîte auto / manuelle · <kbd>↑</kbd> <kbd>↓</kbd> rapports (manuelle)<br>
       <kbd>F1</kbd> panneau de réglage de la conduite<br>
       <kbd>Entrée</kbd> course · <kbd>T</kbd> circuit à 3 tours · <kbd>Y</kbd> épreuve · <kbd>F</kbd> descendre de voiture (garage) · <kbd>Échap</kbd> abandonner<br>
-      <kbd>G</kbd> garage · <kbd>E</kbd> NOS (si installé) · <kbd>Maj</kbd> vue arrière<br>
+      <kbd>J</kbd> jouer à plusieurs · <kbd>G</kbd> garage · <kbd>Maj</kbd> NOS (si installé) · <kbd>M</kbd> rétroviseur<br>
       <kbd>N</kbd> musique suivante · <kbd>P</kbd> musique oui / non<br>
       <kbd>H</kbd> masquer cette aide
       <div class="pad" id="hud-pad"></div>`;

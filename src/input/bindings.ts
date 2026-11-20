@@ -8,7 +8,8 @@ import type { ActionEvent } from './actions';
 export type DriveKey = keyof typeof KEYBOARD;
 export type BindAction = DriveKey | ActionEvent;
 
-const KEY = 'jeu-course-tokyo.touches';
+// (« .v3 » : disposition du 2026-11-20 — NOS sur Maj, rétroviseur sur M, boîte sur B ; les anciennes touches enregistrées sont oubliées)
+const KEY = 'jeu-course-tokyo.touches.v3';
 
 /** Actions proposées dans le menu, dans l'ordre d'affichage. */
 export const BIND_LABELS: { action: BindAction; label: string }[] = [
@@ -28,6 +29,7 @@ export const BIND_LABELS: { action: BindAction; label: string }[] = [
   { action: 'circuitStart', label: 'Circuit' },
   { action: 'eventStart', label: 'Épreuve (chrono, drift, poursuite)' },
   { action: 'interact', label: 'Descendre / monter en voiture (garage)' },
+  { action: 'multi', label: 'Jouer à plusieurs' },
   { action: 'garage', label: 'Garage' },
   { action: 'map', label: 'Carte complète' },
   { action: 'musicNext', label: 'Musique suivante' },

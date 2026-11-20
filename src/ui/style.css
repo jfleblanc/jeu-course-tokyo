@@ -337,3 +337,29 @@ body.a-pied #hud-speed, body.a-pied #minimap, body.a-pied #tuto, body.a-pied .ra
 #mission-hud.on { display: flex; }
 #mission-hud span { font-size: 16px; font-weight: 700; }
 #mission-hud em { font-style: normal; font-size: 11.5px; color: var(--dim); }
+
+/* ——— Multijoueur ——— */
+#salon { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 30; width: min(430px, 92vw); padding: 20px 24px; background: rgba(12, 10, 26, 0.94); border: 1px solid var(--cyan); border-radius: 14px; color: var(--txt); display: none; backdrop-filter: blur(8px); }
+#salon.on { display: block; }
+#salon h2 { margin: 0 0 10px; font-size: 20px; }
+#salon p { margin: 8px 0; font-size: 13.5px; color: var(--dim); line-height: 1.4; }
+#salon .s-code { font: 800 44px ui-monospace, Menlo, monospace; letter-spacing: 0.3em; text-align: center; color: var(--cyan); margin: 4px 0 10px; padding-left: 0.3em; }
+#salon .s-list { margin: 8px 0; }
+#salon .sj { padding: 5px 8px; border-radius: 6px; background: rgba(255, 255, 255, 0.06); margin-bottom: 4px; font-size: 14px; }
+#salon .sj b { color: var(--cyan); margin-right: 4px; }
+#salon .sj small { color: var(--dim); margin-left: 6px; }
+#salon .sj.me { background: rgba(46, 230, 255, 0.14); }
+#salon .s-join { display: flex; gap: 8px; }
+#salon input { flex: 1; font: 700 22px ui-monospace, Menlo, monospace; letter-spacing: 0.25em; text-transform: uppercase; text-align: center; padding: 6px; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--line); border-radius: 8px; color: var(--txt); min-width: 0; }
+#salon .s-btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+#salon .s-msg { color: var(--amber); }
+#salon kbd, #salon-chip kbd { font: 12px ui-monospace, Menlo, monospace; background: rgba(255, 255, 255, 0.16); border-radius: 4px; padding: 1px 6px; }
+#salon-chip { position: fixed; left: 16px; top: 84px; z-index: 12; padding: 5px 11px; background: rgba(10, 8, 22, 0.78); border: 1px solid rgba(46, 230, 255, 0.5); border-radius: 999px; font-size: 12.5px; color: var(--txt); display: none; }
+#salon-chip.on { display: block; }
+#salon-chip b { color: var(--cyan); letter-spacing: 0.12em; }
+#noms-joueurs { position: fixed; inset: 0; pointer-events: none; z-index: 9; overflow: hidden; }
+.nom-joueur { position: absolute; left: 0; top: 0; padding: 2px 8px; border-radius: 999px; background: rgba(10, 8, 22, 0.7); border: 1px solid rgba(46, 230, 255, 0.6); color: #fff; font-size: 12px; white-space: nowrap; display: none; }
+body.cctv #noms-joueurs, body.titre #noms-joueurs { display: none; }
+
+#title .t-move { display: block; margin-top: 26px; padding: 9px 16px; border: 1px solid var(--amber); border-radius: 10px; color: var(--amber); font-size: 14px; text-decoration: none; background: rgba(10, 8, 22, 0.7); pointer-events: auto; }
+#title .t-move b { color: #fff; }
