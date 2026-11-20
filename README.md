@@ -6,6 +6,9 @@ Three.js (WebGPU, repli WebGL2 automatique) + TSL, physique Rapier, TypeScript, 
 **Jouer :** https://course.jfleblanc.com (mis à jour à chaque push sur `main`).
 Le numéro de version (hash du commit) est affiché en haut à droite.
 
+**Qui a fait quoi :** le projet est mené par deux humains et codé par une IA. Les décisions humaines et les
+réalisations de l'IA sont racontées dans le [journal des changements](CHANGELOG.md).
+
 ## Commandes
 
 | Action | Clavier | Manette Switch Pro / Switch 2 Pro |
