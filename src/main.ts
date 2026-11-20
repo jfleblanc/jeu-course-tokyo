@@ -283,6 +283,8 @@ async function boot(): Promise<void> {
   let parkedFor = 0;
   /** Montée en voiture en cours (0..1), ou −1. */
   let boardT = -1;
+  /** Le personnage est au volant (il vient de monter). Il redescend quand la voiture attend de nouveau sur son plateau. */
+  let driverIn = false;
   const BOARD_SECONDS = 0.7;
   const parkedNear = (): boolean => { const b = garageScene.bayPose(); return Math.hypot(car.pos.x - b.x, car.pos.z - b.z) < 2.2 && car.speed < 0.6; };
   /** Vrai juste après avoir été posé dans l'atelier (début de partie, touche G) : la caméra de surveillance vient tout de suite. */
@@ -990,7 +992,7 @@ async function boot(): Promise<void> {
           showGarageOf(player.cars.map((c) => ({ model: c.model, paint: c.paint, neon: c.neon })), player.active, 'ATELIER', false);
         }
         const bay = garageScene.bayPose();
-        garageScene.showMechanic(menu || garageScene.walker !== null || Math.hypot(car.pos.x - bay.x, car.pos.z - bay.z) < 2.5);
+        garageScene.showMechanic(menu || garageScene.walker !== null || boardT >= 0 || (!driverIn && Math.hypot(car.pos.x - bay.x, car.pos.z - bay.z) < 2.5));
         syncBayColliders();
         garageScene.update(frameDt, camera, garageFollow ? car.pos : null, garageOutside);
         // Menu ouvert : l'image de la caméra est décalée pour tenir dans la partie droite de l'écran.
@@ -1115,11 +1117,12 @@ async function boot(): Promise<void> {
       const walking = garageScene.walker !== null;
       if (walking && !garageScene.contains(car.pos.x, car.pos.y, car.pos.z)) garageScene.stopWalk();
       if (walking && boardT < 0) garageScene.walk(frameDt, input.drive.throttle - input.drive.brake, input.drive.steer);
-      if (garageView && !menus && !walking && boardT < 0 && garageScene.boarding === 0 && input.drive.throttle > 0.05 && parkedNear()) boardT = 0;
+      if (driverIn && parkedFor > 1.5) driverIn = false;
+      if (garageView && !menus && !walking && !driverIn && boardT < 0 && garageScene.boarding === 0 && input.drive.throttle > 0.05 && parkedNear()) boardT = 0;
       if (boardT >= 0) {
         boardT += frameDt / BOARD_SECONDS;
         garageScene.boarding = Math.min(1, boardT);
-        if (boardT >= 1) { boardT = -1; garageScene.boarding = 0; justParked = walking; garageScene.stopWalk(); }
+        if (boardT >= 1) { boardT = -1; garageScene.boarding = 0; justParked = walking; driverIn = !walking; garageScene.stopWalk(); }
       }
       // Caméras de surveillance fixes tant que la voiture est dans l'atelier (caméra 1, qui la suit) ou sur la rampe (caméra 2, dehors).
       const inRoom = titlePhase === 'fini' && garageScene.contains(car.pos.x, car.pos.y, car.pos.z);
