@@ -44,7 +44,7 @@ export class AbPanel {
     this.root = root;
     root.innerHTML = `
       <header>
-        <h2>Réglage de la conduite — A / B</h2>
+        <h2>Réglage de la conduite</h2>
         <div class="row">
           <button class="ab" data-p="A" title="Conduite A">A</button>
           <button class="ab" data-p="B" title="Conduite B">B</button>

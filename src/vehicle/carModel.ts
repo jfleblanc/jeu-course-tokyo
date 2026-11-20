@@ -364,10 +364,15 @@ export function createCarVisual(spec: CarSpec, options: CarVisualOptions = {}): 
     glowMat.transparent = true;
     glowMat.blending = THREE.AdditiveBlending;
     glowMat.depthWrite = false;
+    // La lueur est fixée à la caisse : quand la voiture plonge ou penche, elle passerait sous la route.
+    // On la tire vers la caméra dans le tampon de profondeur : elle reste visible sur l'asphalte.
+    glowMat.polygonOffset = true;
+    glowMat.polygonOffsetFactor = -2;
+    glowMat.polygonOffsetUnits = -2000;
   }
   const underglow = new THREE.Mesh(new THREE.PlaneGeometry(3.6, 6.4), glowMat);
   underglow.rotation.x = -Math.PI / 2;
-  underglow.position.y = ground + 0.07;
+  underglow.position.y = ground + 0.1;
   underglow.visible = false;
   root.add(underglow);
 

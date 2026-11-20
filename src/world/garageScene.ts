@@ -55,6 +55,11 @@ export class GarageScene {
   /** Personnage du joueur (modèle 3D articulé) : os utiles et leur orientation de repos. */
   private readonly bones = new Map<string, { bone: THREE.Object3D; rest: THREE.Quaternion; side: number }>();
   private hasCharacter = false;
+  private readonly axisZ = new THREE.Vector3(0, 0, 1);
+  /** Animations du personnage (reportées d'une bibliothèque libre) : travail à genoux, repos, marche. */
+  private mixer: THREE.AnimationMixer | null = null;
+  private readonly actions = new Map<string, THREE.AnimationAction>();
+  private playing = '';
   private readonly qa = new THREE.Quaternion();
   private readonly qb = new THREE.Quaternion();
   private readonly qc = new THREE.Quaternion();
@@ -275,18 +280,83 @@ export class GarageScene {
         const inv = new THREE.Matrix4().copy(this.mech.matrixWorld).invert();
         const v = new THREE.Vector3();
         for (const e of this.bones.values()) e.side = Math.sign(v.setFromMatrixPosition(e.bone.matrixWorld).applyMatrix4(inv).x) || 1;
-        // Une clé plate dans la main droite (taille compensée : les os ne sont pas à l'échelle 1).
+        // Une clé à cliquet dans la main droite, tenue dans le poing (taille compensée : les os ne sont pas à l'échelle 1).
         const hand = this.bones.get('RightHand')?.bone;
         if (hand) {
-          const tool = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.26, 0.02), steel);
           const ws = hand.getWorldScale(new THREE.Vector3()).x || 1;
+          const tool = new THREE.Group();
+          const chrome = new THREE.MeshStandardMaterial({ color: 0xb9c0c8, roughness: 0.3, metalness: 0.9 });
+          const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.016, 0.13, 8), new THREE.MeshStandardMaterial({ color: 0x1b1d22, roughness: 0.8 }));
+          grip.position.y = -0.03;
+          const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.01, 0.12, 6), chrome);
+          shaft.position.y = 0.09;
+          const head = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.022, 10), chrome);
+          head.rotation.x = Math.PI / 2;
+          head.position.y = 0.16;
+          const socket = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.014, 0.04, 8), chrome);
+          socket.rotation.x = Math.PI / 2;
+          socket.position.set(0, 0.16, -0.03);
+          tool.add(grip, shaft, head, socket);
+          // dans le poing : le manche traverse la paume d'avant en arrière, la tête dépasse devant
+          tool.rotation.x = Math.PI / 2;
           tool.scale.setScalar(1 / ws);
-          tool.position.set(0, 0.09 / ws, 0.02 / ws);
+          tool.position.set(-0.085 / ws, -0.025 / ws, 0.0);
           hand.add(tool);
         }
+        // Doigts : poing fermé à droite (il tient l'outil), main détendue à gauche.
+        for (const [name, e] of this.bones) {
+          const m = /^(Left|Right)Hand(Index|Middle|Ring)(\d)$/.exec(name);
+          if (!m) continue;
+          const right = m[1] === 'Right';
+          const curl = (right ? 1.05 : 0.35) * (m[3] === '1' ? 0.9 : 1);
+          e.bone.quaternion.multiply(this.qa.setFromAxisAngle(this.axisZ, right ? curl : -curl));
+          e.rest.copy(e.bone.quaternion);
+        }
+        void this.loadAnimations(model);
         this.hasCharacter = true;
       })
       .catch((err: unknown) => console.info('Personnage indisponible, silhouette conservée.', err));
+  }
+
+  /** Charge les animations du personnage (fichier produit par tools/retarget-anim.mjs). */
+  private async loadAnimations(model: THREE.Object3D): Promise<void> {
+    try {
+      const res = await fetch(new URL('models/kaku-anims.json', document.baseURI).href);
+      if (!res.ok) return;
+      const data = (await res.json()) as { fps: number; clips: Record<string, { duration: number; frames: number; tracks: Record<string, { q: number[]; p?: number[] }> }> };
+      const mixer = new THREE.AnimationMixer(model);
+      for (const [name, clip] of Object.entries(data.clips)) {
+        const times = Array.from({ length: clip.frames }, (_, k) => k / data.fps);
+        const tracks: THREE.KeyframeTrack[] = [];
+        for (const [bone, tr] of Object.entries(clip.tracks)) {
+          const node = THREE.PropertyBinding.sanitizeNodeName(bone);
+          tracks.push(new THREE.QuaternionKeyframeTrack(`${node}.quaternion`, times, tr.q));
+          if (tr.p) tracks.push(new THREE.VectorKeyframeTrack(`${node}.position`, times, tr.p));
+        }
+        const action = mixer.clipAction(new THREE.AnimationClip(name, clip.duration, tracks));
+        action.play();
+        action.setEffectiveWeight(0);
+        this.actions.set(name, action);
+      }
+      this.mixer = mixer;
+    } catch (err) {
+      console.info('Animations du personnage indisponibles, pose calculée conservée.', err);
+    }
+  }
+
+  /** Joue une animation (fondu d'un quart de seconde avec la précédente). Faux si les animations ne sont pas chargées. */
+  private animate(name: 'travail' | 'repos' | 'marche', dt: number, speed = 1): boolean {
+    const mixer = this.mixer;
+    if (!mixer) return false;
+    if (name !== this.playing) this.playing = name;
+    for (const [k, a] of this.actions) {
+      const target = k === name ? 1 : 0;
+      const w = a.getEffectiveWeight();
+      a.setEffectiveWeight(w + Math.sign(target - w) * Math.min(Math.abs(target - w), dt * 4));
+      if (k === name) a.setEffectiveTimeScale(speed);
+    }
+    mixer.update(dt);
+    return true;
   }
 
   /**
@@ -501,14 +571,17 @@ export class GarageScene {
     this.time += dt;
     const t = this.time;
     // Le mécano tourne autour de la voiture principale : il s'arrête, bricole, repart.
-    const spots = [[1.5, 1.2, -2.0], [1.3, -1.4, -1.1], [-1.4, -1.5, 1.0], [-1.5, 1.3, 2.2], [-3.4, 2.4, -1.6]] as const;
+    // Postes de travail : à genoux devant chaque roue, puis devant le pare-chocs. [côté, le long de la voiture]
+    const spots = [[1.5, 1.3], [1.5, -1.3], [-1.5, -1.3], [-1.5, 1.3], [0, 3.0]] as const;
     const cs = Math.cos(G.mainBay.yaw), sn = Math.sin(G.mainBay.yaw);
     const place = (k: number, out: THREE.Vector3): number => {
       const s = spots[k % spots.length] as (typeof spots)[number];
       out.set(G.mainBay.x + s[0] * cs + s[1] * sn, 0, G.mainBay.z - s[0] * sn + s[1] * cs);
-      return s[2] + G.mainBay.yaw;
+      // il regarde la voiture : la roue en face de lui, ou le centre s'il est devant
+      const along = s[0] === 0 ? 0 : s[1];
+      return Math.atan2(G.mainBay.x + along * sn - out.x, G.mainBay.z + along * cs - out.z);
     };
-    const stay = 6.5, move = 1.6;
+    const stay = 12.9, move = 2.2; // (deux tours de l'animation de travail, puis il change de roue)
     const phase = t % (stay + move);
     const k = Math.floor(t / (stay + move));
     const yawNow = place(k, this.to);
@@ -523,7 +596,8 @@ export class GarageScene {
       this.mech.scale.setScalar(1);
       this.mech.position.set(w.x, w.moving ? Math.abs(Math.sin(w.stride * 9)) * 0.02 : 0, w.z);
       this.mech.rotation.set(0, w.yaw, 0);
-      if (this.hasCharacter) { this.mech.updateMatrixWorld(true); this.poseCharacter(false, w.stride, !w.moving); }
+      if (this.hasCharacter && !this.animate(w.moving ? 'marche' : 'repos', dt, 1.25)) { this.mech.updateMatrixWorld(true); this.poseCharacter(false, w.stride, !w.moving); }
+      if (this.mixer) this.mech.position.y = 0;
       this.walkCamera(camera, dt);
       return;
     }
@@ -537,16 +611,18 @@ export class GarageScene {
       this.mech.scale.setScalar(1 - duck * 0.85);
       this.mech.position.x += (G.mainBay.x - this.mech.position.x) * duck * 0.5;
       this.mech.position.z += (G.mainBay.z - this.mech.position.z) * duck * 0.5;
-      if (this.hasCharacter) { this.mech.updateMatrixWorld(true); this.poseCharacter(false, t * 1.4); }
+      if (this.hasCharacter && !this.animate('marche', dt, 1.3)) { this.mech.updateMatrixWorld(true); this.poseCharacter(false, t * 1.4); }
       this.placeCamera(camera, follow);
       return;
     }
     this.mech.scale.setScalar(1);
     this.mech.rotation.y = working ? yawNow : Math.atan2(this.to.x - this.from.x, this.to.z - this.from.z);
     if (this.hasCharacter) {
-      this.mech.position.y = working ? 0 : Math.abs(Math.sin(t * 9)) * 0.02;
-      this.mech.updateMatrixWorld(true);
-      this.poseCharacter(working, t);
+      if (!this.animate(working ? 'travail' : 'marche', dt)) {
+        this.mech.position.y = working ? 0 : Math.abs(Math.sin(t * 9)) * 0.02;
+        this.mech.updateMatrixWorld(true);
+        this.poseCharacter(working, t);
+      }
     } else {
       this.mech.rotation.x = working ? 0.32 + Math.sin(t * 1.3) * 0.04 : 0;
       this.mech.position.y = working ? -0.05 : Math.abs(Math.sin(t * 9)) * 0.03;

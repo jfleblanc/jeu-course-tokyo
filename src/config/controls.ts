@@ -21,7 +21,6 @@ export const KEY_EVENTS: Record<string, ActionEvent> = {
   KeyC: 'camera',
   KeyM: 'toggleGearbox',
   F1: 'togglePanel',
-  KeyB: 'toggleAB',
   KeyR: 'reset',
   KeyH: 'toggleHelp',
   KeyN: 'musicNext',
@@ -53,7 +52,6 @@ export const GAMEPAD = {
     3: 'camera', // X
     2: 'toggleGearbox', // Y
     8: 'togglePanel', // −
-    9: 'toggleAB', // +
     10: 'reset', // clic du stick gauche
     15: 'musicNext', // croix : droite
     13: 'musicToggle', // croix : bas

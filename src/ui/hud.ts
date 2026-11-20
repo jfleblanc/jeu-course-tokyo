@@ -46,6 +46,7 @@ export class Hud {
     this.version.innerHTML = `version <b>${__APP_VERSION__}</b><br>${__BUILD_DATE__} · ${backend}<br><span id="hud-fps"></span>`;
 
     this.preset = el('div', { id: 'hud-preset', class: 'hud' });
+    this.preset.style.display = 'none'; // un seul réglage de conduite désormais : plus d'étiquette A / B à l'écran
     this.toastEl = el('div', { id: 'hud-toast', class: 'hud' });
 
     this.help = el('div', { id: 'hud-help', class: 'hud' });
@@ -54,7 +55,7 @@ export class Hud {
       <kbd>W</kbd> accélérer · <kbd>S</kbd> freiner / reculer · <kbd>A</kbd> <kbd>D</kbd> tourner<br>
       <kbd>Espace</kbd> drift · <kbd>C</kbd> caméra · <kbd>R</kbd> replacer la voiture<br>
       <kbd>M</kbd> boîte auto / manuelle · <kbd>↑</kbd> <kbd>↓</kbd> rapports (manuelle)<br>
-      <kbd>F1</kbd> panneau de réglage · <kbd>B</kbd> basculer conduite A / B<br>
+      <kbd>F1</kbd> panneau de réglage de la conduite<br>
       <kbd>Entrée</kbd> course · <kbd>T</kbd> circuit à 3 tours · <kbd>Y</kbd> épreuve · <kbd>F</kbd> descendre de voiture (garage) · <kbd>Échap</kbd> abandonner<br>
       <kbd>G</kbd> garage · <kbd>E</kbd> NOS (si installé) · <kbd>Maj</kbd> vue arrière<br>
       <kbd>N</kbd> musique suivante · <kbd>P</kbd> musique oui / non<br>

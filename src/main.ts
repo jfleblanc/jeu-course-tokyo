@@ -24,7 +24,7 @@ import { LampVisuals } from './render/lampVisuals';
 import { GarageScene, type GarageCar } from './world/garageScene';
 import { GARAGE, garageToWorld } from './world/garageSite';
 import { ProfileSelect } from './ui/profileSelect';
-import { profileSummary, setActiveProfile, type Profile } from './progression/profiles';
+import { activeProfileId, listProfiles, profileSummary, setActiveProfile, type Profile } from './progression/profiles';
 import { CAR_MODELS } from './config/cars';
 import { testSpots } from './debug/spots';
 import { LampField, type LampStriker } from './world/lampField';
@@ -32,6 +32,7 @@ import { TreeField } from './world/treeField';
 import { TreeVisuals } from './render/treeVisuals';
 import { Effects } from './render/effects';
 import { CarPhotos } from './render/carPhoto';
+import { recordsHtml, submitRecord } from './progression/records';
 import { PropField, generateStreetProps, type StreetProp } from './world/streetProps';
 import { PROP_COLOR, PropVisuals } from './render/propVisuals';
 import { DistrictGates } from './world/districtGates';
@@ -544,6 +545,12 @@ async function boot(): Promise<void> {
   let eventTurn = Math.floor(Math.random() * 3);
 
   /** Affiche la fiche d'un tracé : type, gains, pilotes adverses. */
+  /** Qui joue, et avec quoi : pour les classements. */
+  const whoAmI = (): { player: string; symbol: string; car: string } => {
+    const prof = listProfiles().find((p) => p.id === activeProfileId());
+    return { player: prof?.name ?? 'Joueur', symbol: prof?.symbol ?? '?', car: player.modelOf(player.car).name };
+  };
+  const recordKey = (track: Track, mode: RaceMode): string => `${mode}|${track.name}`;
   const offer = (track: Track, manual: boolean, mode: RaceMode = 'course'): void => {
     // Les adversaires se mettent à la hauteur de la voiture du joueur (modèle et améliorations) :
     // sinon une grosse voiture achetée tôt rend toutes les courses trop faciles.
@@ -563,11 +570,11 @@ async function boot(): Promise<void> {
       const medals = medalsFor(mode, track.route, difficulty);
       const fmtT = (t: number): string => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, '0')}`;
       const rule = mode === 'chrono' ? 'Seul contre la montre. Battez le temps de référence.' : mode === 'drift' ? 'Seul sur le tracé. Glissez longtemps et vite : l’angle, la vitesse et le combo font les points. Un choc fait retomber le combo.' : `Rattrapez ${drivers[0]?.name ?? 'le fuyard'}, parti ${EVENTS.pursuit.headStart} m devant : restez collé ${EVENTS.pursuit.hold} s à moins de ${EVENTS.pursuit.distance} m, ou doublez-le, avant l’arrivée.`;
-      card.show(track, [], reward, difficulty, mode === 'chrono' ? 'Épreuve — contre-la-montre' : mode === 'drift' ? 'Épreuve — drift noté' : 'Épreuve — poursuite', manual, { rule, medals: medals ? medals.map((v) => (mode === 'chrono' ? fmtT(v) : `${v.toLocaleString('fr-CA')} pts`)) : [] });
+      card.show(track, [], reward, difficulty, mode === 'chrono' ? 'Épreuve — contre-la-montre' : mode === 'drift' ? 'Épreuve — drift noté' : 'Épreuve — poursuite', manual, { rule, medals: medals ? medals.map((v) => (mode === 'chrono' ? fmtT(v) : `${v.toLocaleString('fr-CA')} pts`)) : [] }, recordsHtml(recordKey(track, mode), mode === 'drift', whoAmI()));
       return;
     }
     const title = kind === 'palier' ? 'Épreuve de palier — finir dans les deux premiers' : kind === 'circuit' ? 'Circuit' : 'Course';
-    card.show(track, drivers, kind === 'palier' ? { xp: 0, money: reward.money } : reward, difficulty, title, manual);
+    card.show(track, drivers, kind === 'palier' ? { xp: 0, money: reward.money } : reward, difficulty, title, manual, undefined, recordsHtml(recordKey(track, 'course'), false, whoAmI()));
   };
 
   /** Secteur où se trouve le joueur : −1 = ville principale, sinon le quartier. */
@@ -954,6 +961,17 @@ async function boot(): Promise<void> {
         if (race.phase === 'finished') {
           const place = race.place();
           raceHud.summary = player.finishRace(place, raceKind !== 'course', raceKind === 'palier', race.bonusMoney);
+          // Classement : le temps du joueur (ou ses points de drift) avec sa voiture.
+          raceHud.records = ''; raceHud.recordNote = '';
+          const done = race.player;
+          if (offered && done && (race.mode !== 'poursuite' || race.caught)) {
+            const me = whoAmI();
+            const key = recordKey(offered.track, race.mode);
+            const drift = race.mode === 'drift';
+            const r = submitRecord(key, { ...me, value: drift ? Math.round(race.score) : done.finishTime, date: new Date().toISOString().slice(0, 10) }, drift);
+            raceHud.recordNote = r.rank === 1 && r.improved ? 'Nouveau record !' : r.improved && r.rank > 0 ? `${r.rank}e au classement` : '';
+            raceHud.records = recordsHtml(key, drift, me);
+          }
           refreshProgress();
           sound.finish(place === 1);
         }

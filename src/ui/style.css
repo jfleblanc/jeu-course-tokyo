@@ -301,3 +301,16 @@ body.garage-ouvert #tuto { visibility: hidden; }
 #walk-hint kbd { font: 12px ui-monospace, Menlo, monospace; background: rgba(255, 255, 255, 0.16); border-radius: 4px; padding: 1px 6px; margin: 0 2px; }
 body.a-pied #cctv { display: none; }
 body.a-pied #hud-speed, body.a-pied #minimap, body.a-pied #tuto, body.a-pied .race-hint { visibility: hidden; }
+
+/* ——— Classements ——— */
+.rec { display: grid; grid-template-columns: 22px 1fr 1fr auto; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 12.5px; color: var(--dim); }
+.rec i { font-style: normal; color: var(--dim); }
+.rec .who { color: var(--txt); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rec .who b { color: var(--cyan); margin-right: 3px; }
+.rec .car { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rec em { font-style: normal; color: var(--txt); font-variant-numeric: tabular-nums; }
+.rec.me .who, .rec.me em { color: var(--amber); }
+.rec-empty { font-size: 12.5px; color: var(--dim); }
+.rc-records, .rec-box { margin: 8px 0 10px; text-align: left; }
+.rc-records h4, .rec-box h4 { margin: 0 0 4px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); font-weight: 600; }
+.rec-note { color: var(--amber); font-weight: 700; margin-bottom: 6px; text-align: center; }

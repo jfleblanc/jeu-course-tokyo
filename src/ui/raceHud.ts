@@ -29,6 +29,10 @@ export class RaceHud {
   summary: RaceSummary | null = null;
   /** Titre affiché au départ et à l'arrivée (ex. « Épreuve de palier »). */
   title = '';
+  /** Classement de l'épreuve (HTML) et annonce (« Nouveau record ! »), fournis par le jeu à l'arrivée. */
+  records = '';
+  recordNote = '';
+  private recordsDrawn = '';
 
   constructor() {
     const root = document.createElement('div');
@@ -142,6 +146,7 @@ export class RaceHud {
 
     if (race.phase === 'finished' && !this.resultsShown) {
       this.resultsShown = true;
+      this.recordsDrawn = '';
       const medal = race.mode === 'poursuite' ? (race.caught ? 'Fuyard rattrapé !' : place === 3 ? 'Échappé de peu…' : 'Il s’est échappé')
         : event ? (['Médaille d’or !', 'Médaille d’argent', 'Médaille de bronze', 'Pas de médaille'][place - 1] as string)
         : (['1re place !', '2e place', '3e place', '4e place'][place - 1] ?? `${place}e place`);
@@ -154,10 +159,13 @@ export class RaceHud {
         else if (sm.trial) reward += `<div class="levelup">Épreuve manquée : il faut finir dans les deux premiers.</div>`;
         else if (sm.leveledUp) reward += `<div class="levelup">Niveau ${sm.level} !</div>`;
       }
-      this.results.innerHTML = `<h2>${this.title ? this.title + ' — ' : ''}${medal}</h2><div class="time">${figure}</div>${reward}<div class="list" data-r="list"></div><p><kbd>Entrée</kbd> course &nbsp; <kbd>T</kbd> circuit &nbsp; <kbd>Échap</kbd> balade libre</p>`;
+      this.results.innerHTML = `<h2>${this.title ? this.title + ' — ' : ''}${medal}</h2><div class="time">${figure}</div>${reward}<div class="list" data-r="list"></div><div class="rec-box" data-r="records"></div><p><kbd>Entrée</kbd> course &nbsp; <kbd>T</kbd> circuit &nbsp; <kbd>Échap</kbd> balade libre</p>`;
       this.results.classList.add('on');
     }
     if (this.resultsShown) {
+      const rec = this.results.querySelector('[data-r="records"]');
+      const html = this.records ? `${this.recordNote ? `<div class="rec-note">${this.recordNote}</div>` : ''}<h4>Meilleurs temps</h4>${this.records}` : '';
+      if (rec && html !== this.recordsDrawn) { rec.innerHTML = html; this.recordsDrawn = html; }
       const list = this.results.querySelector('[data-r="list"]');
       if (list) {
         list.innerHTML = event ? '' : ranking.map((r, k) => `<div class="${r.isPlayer ? 'me' : ''}"><i>${k + 1}</i><span>${r.name}</span><em>${r.finished ? fmtTime(r.finishTime) : 'en course…'}</em></div>`).join('');

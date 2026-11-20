@@ -33,7 +33,6 @@ export const BIND_LABELS: { action: BindAction; label: string }[] = [
   { action: 'musicNext', label: 'Musique suivante' },
   { action: 'musicToggle', label: 'Musique oui / non' },
   { action: 'toggleHelp', label: 'Aide' },
-  { action: 'toggleAB', label: 'Conduite A / B' },
 ];
 
 /** Touches réservées, non modifiables. */

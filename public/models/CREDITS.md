@@ -42,3 +42,7 @@ Fichier `garage.glb` : textures réduites ; la coque du bâtiment n'est pas affi
 « Kaku » (https://sketchfab.com/3d-models/kaku-f75d4da8eff545519e8e550b786f0d4c) par Cyrone
 (https://sketchfab.com/Cyrone), sous licence CC BY 4.0 (http://creativecommons.org/licenses/by/4.0/).
 Fichier `kaku.glb` : modèle d'origine, textures intégrées ; les poses sont calculées par le jeu.
+
+## Animations du personnage
+
+- `kaku-anims.json` : animations « Fixing Kneeling », « Idle Subtle » et « Walk » de la *Universal Animation Library* de Quaternius (CC0 1.0, domaine public), fichiers GLB du projet Mesh2Motion (https://github.com/scottpetrovic/mesh2motion-app), reportées sur le squelette de Kaku par `tools/retarget-anim.mjs`.

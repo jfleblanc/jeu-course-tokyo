@@ -102,3 +102,7 @@ Mesures : virage à 100 km/h, 41 m de rayon (A) et 35 m (B) ; freinage 257 → 0
 
 **Choix retenu (2026-11-18, version ae806a1) : B.** Ses trois valeurs deviennent la base A
 (adhérence avant 2.12, arrière 2.00, appui aéro 4.6). B redevient une copie de A en attendant le prochain essai.
+
+
+## 2026-11-20 — Un seul réglage
+Les joueurs gardent B (« le drift me semble bien sur la B ») et veulent continuer à l'affiner. La bascule A / B disparaît de l'écran et du clavier ; le panneau F1 reste pour régler. A et B ont les mêmes valeurs dans le code.
