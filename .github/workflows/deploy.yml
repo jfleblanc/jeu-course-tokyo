@@ -36,7 +36,9 @@ jobs:
         run: npx --yes wrangler@4 deploy --config server/wrangler.toml
       - name: Vérifier le serveur de jeu (course.jfleblanc.com) — n'empêche pas la publication
         continue-on-error: true
-        run: node scripts/check-server.mjs
+        run: |
+          sleep 30 # la nouvelle version met quelques secondes à se répandre
+          node scripts/check-server.mjs || (sleep 45 && node scripts/check-server.mjs)
       - name: Garder la capture d'écran du test
         if: always()
         uses: actions/upload-artifact@v4
