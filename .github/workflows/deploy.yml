@@ -7,11 +7,9 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
-  group: pages
+  group: mise-en-ligne
   cancel-in-progress: true
 
 jobs:
@@ -34,13 +32,8 @@ jobs:
         run: |
           npx playwright install --with-deps chromium
           npm run smoke
-      - name: Mettre en ligne sur Cloudflare (course.jfleblanc.com) — seulement si le secret CLOUDFLARE_API_TOKEN existe
-        if: ${{ env.CLOUDFLARE_API_TOKEN != '' }}
-        continue-on-error: true
-        run: |
-          BASE=/ npx vite build --outDir dist-cf
-          npx --yes wrangler@4 deploy --config server/wrangler.toml
-          echo "Jeu publié sur Cloudflare." >> "$GITHUB_STEP_SUMMARY"
+      - name: Mettre en ligne sur Cloudflare (course.jfleblanc.com)
+        run: npx --yes wrangler@4 deploy --config server/wrangler.toml
       - name: Vérifier le serveur de jeu (course.jfleblanc.com) — n'empêche pas la publication
         continue-on-error: true
         run: node scripts/check-server.mjs
@@ -51,17 +44,3 @@ jobs:
           name: capture-test
           path: smoke-test.png
           if-no-files-found: ignore
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: dist
-
-  deploy:
-    needs: build
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - id: deployment
-        uses: actions/deploy-pages@v4

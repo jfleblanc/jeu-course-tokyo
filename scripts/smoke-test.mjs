@@ -10,7 +10,7 @@ import path from 'node:path';
 import { chromium } from 'playwright';
 
 const dist = path.resolve(process.env.DIST ?? 'dist');
-const base = process.env.BASE ?? '/jeu-course-tokyo/';
+const base = process.env.BASE ?? '/';
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.wasm': 'application/wasm', '.json': 'application/json' };
 
 const server = http

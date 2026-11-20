@@ -3,7 +3,7 @@
 Jeu de course 3D de nuit dans une ville inspirée de Tokyo. Projet père-fils, usage privé.
 Three.js (WebGPU, repli WebGL2 automatique) + TSL, physique Rapier, TypeScript, Vite.
 
-**Jouer :** https://jfleblanc.github.io/jeu-course-tokyo/ (mis à jour à chaque push sur `main`).
+**Jouer :** https://course.jfleblanc.com (mis à jour à chaque push sur `main`).
 Le numéro de version (hash du commit) est affiché en haut à droite.
 
 ## Commandes

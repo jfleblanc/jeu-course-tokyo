@@ -15,8 +15,8 @@ function commitHash(): string {
 }
 
 export default defineConfig(({ command }) => ({
-  // GitHub Pages sert le jeu sous /<nom-du-dépôt>/ ; Cloudflare (course.jfleblanc.com) à la racine : BASE=/
-  base: process.env.BASE ?? (command === 'build' ? '/jeu-course-tokyo/' : '/'),
+  // Le jeu est servi à la racine de course.jfleblanc.com (Cloudflare).
+  base: process.env.BASE ?? '/',
   define: {
     __APP_VERSION__: JSON.stringify(commitHash()),
     __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 16).replace('T', ' ')),

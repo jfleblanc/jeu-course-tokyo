@@ -18,9 +18,8 @@ Avec Wrangler, depuis ce dossier : `npx wrangler deploy` (voir `wrangler.toml`).
 
 ## Publication automatique (CI)
 
-À chaque push sur `main`, si le dépôt GitHub possède le secret `CLOUDFLARE_API_TOKEN`, la CI construit le jeu pour la racine
-(`BASE=/ npx vite build --outDir dist-cf`) puis lance `npx wrangler deploy --config server/wrangler.toml` : le programme
-et les fichiers du jeu sont alors tous chez Cloudflare, et GitHub Pages ne sert plus à rien.
+À chaque push sur `main`, la CI construit le jeu, le teste, puis lance `npx wrangler deploy --config server/wrangler.toml` :
+le programme et les fichiers du jeu (`dist`) sont chez Cloudflare. GitHub Pages n'est plus utilisé.
 
-Le jeton se crée dans Cloudflare (Mon profil → Jetons d'API → modèle « Modifier Cloudflare Workers », limité au compte et
-à la zone jfleblanc.com). Il ne doit jamais être écrit dans le dépôt : seulement dans les secrets GitHub.
+Il faut le secret `CLOUDFLARE_API_TOKEN` dans le dépôt GitHub (jeton Cloudflare du modèle « Modifier Cloudflare Workers »).
+Il ne doit jamais être écrit dans le dépôt.
