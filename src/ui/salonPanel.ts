@@ -63,7 +63,7 @@ export class SalonPanel {
     const s = this.salon;
     const me = this.host.me();
     const list = s.connected
-      ? [`<div class="sj me"><b>${me.symbol}</b> ${me.name} <small>vous</small></div>`, ...[...s.peers.values()].map((p) => `<div class="sj"><b>${p.symbol}</b> ${p.name}${p.hidden ? ' <small>au garage</small>' : ''}</div>`)].join('')
+      ? [`<div class="sj me"><b>${me.symbol}</b> ${me.name} <small>vous</small></div>`, ...[...s.peers.values()].map((p) => `<div class="sj"><b>${p.symbol}</b> ${s.label(p, me.name)}${p.hidden ? ' <small>au garage</small>' : ''}</div>`)].join('')
       : '';
     const chip = s.connected ? `Salon <b>${s.code}</b> · ${s.peers.size + 1} joueur${s.peers.size ? 's' : ''} · <kbd>J</kbd>` : '';
     if (this.chip.innerHTML !== chip) { this.chip.innerHTML = chip; this.chip.classList.toggle('on', s.connected); }
@@ -76,7 +76,7 @@ export class SalonPanel {
       ? `<h2>Jouer à plusieurs</h2>
          <p>Code du salon, à donner aux autres joueurs :</p><div class="s-code">${s.code}</div>
          <div class="s-list">${list}</div>
-         <p class="s-help">Tout le monde roule dans la même ville. Pour courir ensemble : garez-vous sur la même borne de départ, puis l’un de vous appuie sur <kbd>Entrée</kbd> deux fois. Les voitures des autres sont des fantômes : on se traverse.</p>
+         <p class="s-help">Tout le monde roule dans la même ville. Pour courir ensemble : garez-vous sur la même borne de départ, puis l’un de vous appuie sur <kbd>Entrée</kbd> deux fois. Les voitures se touchent comme les autres ; une voiture qui vient d’apparaître reste traversable un instant.</p>
          ${this.message ? `<p class="s-msg">${this.message}</p>` : ''}
          <div class="s-btns"><button data-act="quitter" class="danger">Quitter le salon</button><button data-act="fermer">Fermer <kbd>J</kbd></button></div>`
       : `<h2>Jouer à plusieurs</h2>

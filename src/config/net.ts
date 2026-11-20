@@ -7,10 +7,13 @@ export const NET = {
   server: params.get('serveur') ?? (here ? location.origin : 'https://course.jfleblanc.com'),
   /** Envois de la position par seconde. */
   sendHz: 12,
-  /** Les autres voitures sont affichées avec ce retard (s), pour lisser entre deux messages. */
-  delay: 0.13,
-  /** Au-delà de ce silence (s), on prolonge le mouvement d'après la dernière vitesse connue, puis on fige. */
+  /** Les autres voitures sont placées là où elles doivent être maintenant (dernier état reçu, prolongé par sa vitesse, au plus ce temps en s)… */
   extrapolate: 0.3,
+  /** … et l'affichage rejoint cette position en douceur (1/s : plus c'est grand, plus c'est vif, mais saccadé). */
+  smooth: 16,
+  /** Une voiture qui saute de plus de cette distance (m) d'un coup (replacement, départ de course) reste traversable ce temps (s). */
+  jump: 8,
+  ghostSeconds: 1.2,
   /** Rayon autour d'une borne de départ (m) dans lequel les joueurs sont embarqués dans la course. */
   joinRadius: 12,
   /** Compte à rebours d'une course à plusieurs (s). */

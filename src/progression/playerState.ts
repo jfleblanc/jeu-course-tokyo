@@ -190,8 +190,9 @@ export class PlayerState {
   // ——— Courses ———
 
   /** Enregistre le résultat d'une course et renvoie ce qui a été gagné. */
-  finishRace(place: number, circuit: boolean, trial: boolean, bonusMoney = 0): RaceSummary {
-    const reward = raceReward(this.level, place, circuit);
+  /** `custom` : récompense calculée ailleurs (livraisons), à la place du barème des courses. */
+  finishRace(place: number, circuit: boolean, trial: boolean, bonusMoney = 0, custom?: { xp: number; money: number }): RaceSummary {
+    const reward = custom ? { ...custom } : raceReward(this.level, place, circuit);
     reward.money += bonusMoney;
     this.races++;
     if (place === 1) this.wins++;

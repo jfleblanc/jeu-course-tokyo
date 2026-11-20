@@ -16,6 +16,17 @@ export interface Delivery {
   medals: [number, number, number];
 }
 
+/** Paie d'une livraison selon la médaille (1 = or … 4 = sans médaille), la distance et le niveau du joueur. */
+export function deliveryReward(m: Delivery, place: number, level: number): { xp: number; money: number } {
+  const D = DELIVERIES;
+  const km = m.length / 1000;
+  const share = D.share[Math.max(0, Math.min(3, place - 1))] as number;
+  return {
+    xp: Math.round((D.xpPerKm + D.xpPerKmLevel * level) * km * share),
+    money: Math.round(((D.payPerKm + D.payPerKmLevel * level) * km * share) / 10) * 10,
+  };
+}
+
 /** Longueur d'un chemin dans le réseau (m), ou −1 s'il n'y en a pas. */
 function pathLength(graph: StreetGraph, a: number, b: number): number {
   const p = graphPath(graph, a, b);

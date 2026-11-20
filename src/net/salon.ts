@@ -38,6 +38,13 @@ export class Salon {
   /** Meilleur aller-retour mesuré (ms) : l'horloge est calée sur l'échange le plus rapide. */
   private bestRtt = Infinity;
 
+  /** Nom à afficher pour un joueur : avec son numéro si un autre joueur du salon porte le même nom. */
+  label(peer: Peer, myName: string): string {
+    let twin = peer.name === myName;
+    for (const p of this.peers.values()) if (p !== peer && p.name === peer.name) twin = true;
+    return twin ? `${peer.name} (${peer.id})` : peer.name;
+  }
+
   /** Heure du serveur, estimée (ms). */
   serverNow(): number {
     return Date.now() + this.offset;

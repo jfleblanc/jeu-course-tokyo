@@ -38,7 +38,7 @@ import { Salon } from './net/salon';
 import { RemoteCars } from './net/remoteCars';
 import { SalonPanel } from './ui/salonPanel';
 import { NET } from './config/net';
-import { Deliveries, buildDeliveries, guidePath, nearestNode, type Delivery } from './world/deliveries';
+import { Deliveries, buildDeliveries, deliveryReward, guidePath, nearestNode, type Delivery } from './world/deliveries';
 import { DeliveryVisuals } from './render/deliveryVisuals';
 import { DELIVERIES } from './config/missions';
 import { PropField, generateStreetProps, type StreetProp } from './world/streetProps';
@@ -344,6 +344,7 @@ async function boot(): Promise<void> {
     },
     choose: (p: Profile) => {
       setActiveProfile(p.id);
+      sessionProfile = p.id;
       player.loadProfile(p.id);
       profiles.close();
       rebuildPlayerCar();
@@ -588,13 +589,14 @@ async function boot(): Promise<void> {
   /** Affiche la fiche d'un tracé : type, gains, pilotes adverses. */
   /** Qui joue, et avec quoi : pour les classements. */
   const whoAmI = (): { player: string; symbol: string; car: string } => {
-    const prof = listProfiles().find((p) => p.id === activeProfileId());
+    // (le joueur choisi dans CET onglet : deux onglets du même navigateur peuvent jouer deux joueurs différents)
+    const prof = listProfiles().find((p) => p.id === (sessionProfile ?? activeProfileId()));
     return { player: prof?.name ?? 'Joueur', symbol: prof?.symbol ?? '?', car: player.modelOf(player.car).name };
   };
   const recordKey = (track: Track, mode: RaceMode): string => `${mode}|${track.name}`;
   // ——— Multijoueur : un salon (code de 4 lettres), les voitures des autres en fantômes ———
   const salon = new Salon();
-  const remoteCars = new RemoteCars(scene, salon);
+  const remoteCars = new RemoteCars(scene, salon, phys);
   const salonPanel = new SalonPanel(salon, {
     me: () => ({ name: whoAmI().player, symbol: whoAmI().symbol }),
     create: () => joinSalon(Salon.randomCode()),
@@ -611,6 +613,10 @@ async function boot(): Promise<void> {
       .finally(() => { salonPanel.busy = false; });
   };
   let carSent = '';
+  /** Je suis dans mon garage (ou pas encore en jeu) : pas de contact avec les autres voitures. */
+  let netHidden = true;
+  /** Joueur choisi dans cet onglet (le « dernier joueur » du navigateur peut avoir changé dans un autre onglet). */
+  let sessionProfile: string | null = null;
   let netTimer = 0, progressTimer = 0;
   const netState: number[] = new Array<number>(12).fill(0);
   /** Course en cours : son tracé et son genre (pour le classement à l'arrivée). */
@@ -642,7 +648,7 @@ async function boot(): Promise<void> {
     nosCharge = NOS.seconds;
     running = { track, mode: 'course' };
     const ok = race.start(track.route, { mode: 'course', gridSlot: slot, countdown: Math.max(1.5, (startAt - salon.serverNow()) / 1000), cashValue: PICKUPS.cashBase + PICKUPS.cashPerLevel * player.level });
-    race.ghosts = players.filter((id) => id !== salon.id).map((id) => ({ id, name: salon.peers.get(id)?.name ?? `Joueur ${id}`, progress: 0, finished: false, finishTime: 0 }));
+    race.ghosts = players.filter((id) => id !== salon.id).map((id) => { const peer = salon.peers.get(id); return { id, name: peer ? salon.label(peer, whoAmI().player) : `Joueur ${id}`, progress: 0, finished: false, finishTime: 0 }; });
     card.hide();
     offered = null;
     hud.toast(ok ? `${track.name} — à ${players.length} joueurs` : 'Impossible de lancer la course');
@@ -659,13 +665,15 @@ async function boot(): Promise<void> {
   /** Colis sous les roues (fiche affichée), et délai d'affichage d'un résultat. */
   let missionOffer: Delivery | null = null;
   let missionResult = 0;
-  const fmtMedals = (m: Delivery): string => m.medals.map((t, k) => `<span class="m${k}">${['Or', 'Argent', 'Bronze'][k]} <b>${fmtRecordTime(t).slice(0, -1)}</b></span>`).join('');
+  const yens = (v: number): string => `¥ ${v.toLocaleString('fr-CA')}`;
+  // Chaque médaille : le temps à battre et ce qu'elle rapporte.
+  const fmtMedals = (m: Delivery): string => m.medals.map((t, k) => `<span class="m${k}">${['Or', 'Argent', 'Bronze'][k]} <b>${fmtRecordTime(t).slice(0, -1)}</b><i>${yens(deliveryReward(m, k + 1, player.level).money)}</i></span>`).join('');
   const showMissionOffer = (m: Delivery | null): void => {
     if (m === missionOffer) return;
     missionOffer = m;
     if (missionResult > 0) return;
     missionCard.classList.toggle('on', m !== null);
-    if (m) missionCard.innerHTML = `<div class="rc-kind">Livraison</div><h2>📦 ${m.name}</h2><div class="rc-meta"><span>${(m.length / 1000).toFixed(1)} km</span><span>trajet libre</span><span>circulation normale</span></div><div class="rc-rule">Prenez le colis et déposez-le au point vert, par le chemin que vous voulez. Le chrono part dès que vous l’avez.</div><div class="rc-medals">${fmtMedals(m)}</div><div class="rc-records"><h4>Meilleurs temps</h4>${recordsHtml(`livraison|${m.name}`, false, whoAmI())}</div><div class="rc-keys"><kbd>Entrée</kbd> prendre le colis</div>`;
+    if (m) missionCard.innerHTML = `<div class="rc-kind">Livraison</div><h2>📦 ${m.name}</h2><div class="rc-meta"><span>${(m.length / 1000).toFixed(1)} km</span><span>trajet libre</span><span>circulation normale</span></div><div class="rc-rule">Prenez le colis et déposez-le au point vert, par le chemin que vous voulez. Le chrono part dès que vous l’avez.</div><div class="rc-medals">${fmtMedals(m)}</div><div class="rc-pay">Plus vous livrez vite, mieux c’est payé. Hors délai : ${yens(deliveryReward(m, 4, player.level).money)} quand même.</div><div class="rc-records"><h4>Meilleurs temps</h4>${recordsHtml(`livraison|${m.name}`, false, whoAmI())}</div><div class="rc-keys"><kbd>Entrée</kbd> prendre le colis</div>`;
   };
   const acceptMission = (): boolean => {
     if (!missionOffer || deliveries.current || race.active) return false;
@@ -944,6 +952,7 @@ async function boot(): Promise<void> {
       if (boosting) nosCharge = Math.max(0, nosCharge - dt);
       else if (hasNos && !race.active) nosCharge = Math.min(NOS.seconds, nosCharge + NOS.refill * dt);
       player.applyTo(store.current, tuned);
+      remoteCars.syncBodies(car.pos, netHidden);
       car.update(dt, garageScene.walker ? walkInput : race.playerInput(input.drive), tuned);
       race.beforeStep(dt, store.current);
       // Circulation : partout en balade ; sur le tracé pendant une course (obstacles).
@@ -1258,7 +1267,9 @@ async function boot(): Promise<void> {
           }
         }
         // (chacun a son garage : dans le sien, on ne voit pas les autres)
-        remoteCars.update(camera, titlePhase === 'fini' && !hiddenNow && !garageView);
+        remoteCars.myName = whoAmI().player;
+        netHidden = hiddenNow || titlePhase !== 'fini';
+        remoteCars.update(camera, titlePhase === 'fini' && !hiddenNow && !garageView, frameDt);
         minimap.players = remoteCars.dots;
         salonPanel.render();
       }
@@ -1278,11 +1289,11 @@ async function boot(): Promise<void> {
             const me = whoAmI();
             const key = `livraison|${ev.mission.name}`;
             const r = submitRecord(key, { ...me, value: ev.time, date: new Date().toISOString().slice(0, 10) }, false);
-            const sum = player.finishRace(ev.place, false, false, 0);
+            const sum = player.finishRace(ev.place, false, false, 0, deliveryReward(ev.mission, ev.place, player.level));
             refreshProgress();
             sound.finish(ev.place === 1);
             const medal = ['Médaille d’or !', 'Médaille d’argent', 'Médaille de bronze', 'Livré, mais trop tard pour une médaille'][ev.place - 1] as string;
-            missionCard.innerHTML = `<div class="rc-kind">Livraison — ${ev.mission.name}</div><h2>${medal}</h2><div class="mc-time">${fmtRecordTime(ev.time)}</div><div class="rc-reward"><b>+${sum.xp} XP</b> · +¥ ${sum.money.toLocaleString('fr-CA')}${sum.leveledUp ? ` · Niveau ${sum.level} !` : ''}</div>${r.rank === 1 && r.improved ? '<div class="rec-note">Nouveau record !</div>' : ''}<div class="rc-records"><h4>Meilleurs temps</h4>${recordsHtml(key, false, me)}</div><div class="rc-keys"><kbd>Entrée</kbd> fermer</div>`;
+            missionCard.innerHTML = `<div class="rc-kind">Livraison — ${ev.mission.name}</div><h2>${medal}</h2><div class="mc-time">${fmtRecordTime(ev.time)}</div><div class="rc-reward">Paie : <b>+${yens(sum.money)}</b> · +${sum.xp} XP${sum.leveledUp ? ` · Niveau ${sum.level} !` : ''}</div>${r.rank === 1 && r.improved ? '<div class="rec-note">Nouveau record !</div>' : ''}<div class="rc-records"><h4>Meilleurs temps</h4>${recordsHtml(key, false, me)}</div><div class="rc-keys"><kbd>Entrée</kbd> fermer</div>`;
             missionCard.classList.add('on');
             missionResult = 9;
           }

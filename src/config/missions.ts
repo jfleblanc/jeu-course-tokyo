@@ -14,6 +14,16 @@ export const DELIVERIES = {
   goldSpeed: 20,
   silverSpeed: 16,
   bronzeSpeed: 12,
+  /**
+   * Paie d'une livraison : elle dépend de la distance, du niveau du joueur et de la médaille.
+   * Par kilomètre : `payPerKm` + `payPerKmLevel` × niveau (¥), et `xpPerKm` + `xpPerKmLevel` × niveau (XP) ;
+   * puis la part de la médaille : or, argent, bronze, sans médaille.
+   */
+  payPerKm: 1400,
+  payPerKmLevel: 220,
+  xpPerKm: 60,
+  xpPerKmLevel: 8,
+  share: [1, 0.65, 0.4, 0.15],
   /** Les missions, toujours les mêmes (pour que les meilleurs temps veuillent dire quelque chose). */
   names: [
     'Ramen express', 'Pièces de moteur', 'Bouquet de minuit', 'Sushis pour le yacht', 'Jeu vidéo en avant-première', 'Pneus de course',
