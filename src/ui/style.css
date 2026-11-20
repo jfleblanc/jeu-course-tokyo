@@ -314,3 +314,26 @@ body.a-pied #hud-speed, body.a-pied #minimap, body.a-pied #tuto, body.a-pied .ra
 .rc-records, .rec-box { margin: 8px 0 10px; text-align: left; }
 .rc-records h4, .rec-box h4 { margin: 0 0 4px; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); font-weight: 600; }
 .rec-note { color: var(--amber); font-weight: 700; margin-bottom: 6px; text-align: center; }
+
+/* ——— Livraisons ——— */
+#mission-card { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -42%); z-index: 16; width: min(470px, 92vw); padding: 18px 22px; background: rgba(12, 10, 26, 0.9); border: 1px solid rgba(255, 163, 26, 0.55); border-radius: 14px; color: var(--txt); display: none; backdrop-filter: blur(8px); }
+#mission-card.on { display: block; }
+#mission-card h2 { margin: 2px 0 8px; font-size: 24px; }
+#mission-card .rc-kind { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: #ffa31a; }
+#mission-card .rc-meta { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+#mission-card .rc-meta span { font-size: 12px; padding: 3px 9px; border-radius: 999px; background: rgba(255, 255, 255, 0.08); }
+#mission-card .rc-rule { font-size: 13.5px; line-height: 1.4; margin-bottom: 10px; }
+#mission-card .rc-medals { display: flex; gap: 8px; margin-bottom: 10px; }
+#mission-card .rc-medals span { flex: 1; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; font-size: 12px; color: var(--dim); }
+#mission-card .rc-medals b { display: block; font-size: 15px; }
+#mission-card .rc-medals .m0 b, #mission-hud .m0 { color: #ffd257; }
+#mission-card .rc-medals .m1 b { color: #cfd8e6; }
+#mission-card .rc-medals .m2 b { color: #d9905a; }
+#mission-card .mc-time { font-size: 40px; font-weight: 800; font-variant-numeric: tabular-nums; margin-bottom: 6px; }
+#mission-card .rc-reward { color: var(--amber); margin-bottom: 8px; }
+#mission-card .rc-keys { text-align: center; font-size: 13px; color: var(--dim); margin-top: 6px; }
+#mission-card kbd { font: 12px ui-monospace, Menlo, monospace; background: rgba(255, 255, 255, 0.16); border-radius: 4px; padding: 1px 6px; }
+#mission-hud { position: fixed; left: 50%; top: 58px; transform: translateX(-50%); z-index: 13; display: none; gap: 14px; align-items: baseline; padding: 8px 16px; background: rgba(10, 8, 22, 0.8); border: 1px solid rgba(255, 163, 26, 0.5); border-radius: 999px; font-size: 14px; color: var(--txt); white-space: nowrap; font-variant-numeric: tabular-nums; }
+#mission-hud.on { display: flex; }
+#mission-hud span { font-size: 16px; font-weight: 700; }
+#mission-hud em { font-style: normal; font-size: 11.5px; color: var(--dim); }

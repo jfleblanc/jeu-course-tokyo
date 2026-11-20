@@ -18,6 +18,9 @@ export interface FullMapState {
   level: number;
   racing: boolean;
   allOpen: boolean;
+  /** Livraisons : colis proposés (avec leur nom) et arrivée en cours. */
+  parcels?: { x: number; z: number; name: string }[];
+  goal?: { x: number; z: number; name: string } | null;
 }
 
 /**
@@ -123,6 +126,21 @@ export class FullMap {
         c.stroke();
         c.fillStyle = 'rgba(255,255,255,0.8)';
         c.fillText(m.name, mx(m.x), mz(m.z) - 10);
+      }
+      for (const p of s.parcels ?? []) {
+        c.fillStyle = '#ffa31a';
+        c.strokeStyle = '#0b0b16';
+        c.fillRect(mx(p.x) - 6, mz(p.z) - 6, 12, 12);
+        c.strokeRect(mx(p.x) - 6, mz(p.z) - 6, 12, 12);
+        c.fillStyle = '#ffc266';
+        c.fillText(`📦 ${p.name}`, mx(p.x), mz(p.z) - 11);
+      }
+      if (s.goal) {
+        c.fillStyle = '#40ff73';
+        c.beginPath();
+        c.arc(mx(s.goal.x), mz(s.goal.z), 8, 0, Math.PI * 2);
+        c.fill();
+        c.fillText(`Arrivée : ${s.goal.name}`, mx(s.goal.x), mz(s.goal.z) - 13);
       }
     }
 

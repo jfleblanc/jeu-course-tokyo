@@ -32,7 +32,10 @@ import { TreeField } from './world/treeField';
 import { TreeVisuals } from './render/treeVisuals';
 import { Effects } from './render/effects';
 import { CarPhotos } from './render/carPhoto';
-import { recordsHtml, submitRecord } from './progression/records';
+import { fmtRecordTime, recordsHtml, submitRecord } from './progression/records';
+import { Deliveries, buildDeliveries, type Delivery } from './world/deliveries';
+import { DeliveryVisuals } from './render/deliveryVisuals';
+import { DELIVERIES } from './config/missions';
 import { PropField, generateStreetProps, type StreetProp } from './world/streetProps';
 import { PROP_COLOR, PropVisuals } from './render/propVisuals';
 import { DistrictGates } from './world/districtGates';
@@ -551,6 +554,31 @@ async function boot(): Promise<void> {
     return { player: prof?.name ?? 'Joueur', symbol: prof?.symbol ?? '?', car: player.modelOf(player.car).name };
   };
   const recordKey = (track: Track, mode: RaceMode): string => `${mode}|${track.name}`;
+  // ——— Livraisons : des colis à prendre sur la carte et à déposer ailleurs, contre la montre ———
+  const deliveries = new Deliveries(buildDeliveries(city.graph, city.seed), city.graph, (d) => sectorOpen(d));
+  const deliveryVisuals = new DeliveryVisuals(scene, deliveries, DELIVERIES.active, mats.glow);
+  const missionCard = document.createElement('div');
+  missionCard.id = 'mission-card';
+  const missionHud = document.createElement('div');
+  missionHud.id = 'mission-hud';
+  document.body.append(missionCard, missionHud);
+  /** Colis sous les roues (fiche affichée), et délai d'affichage d'un résultat. */
+  let missionOffer: Delivery | null = null;
+  let missionResult = 0;
+  const fmtMedals = (m: Delivery): string => m.medals.map((t, k) => `<span class="m${k}">${['Or', 'Argent', 'Bronze'][k]} <b>${fmtRecordTime(t).slice(0, -1)}</b></span>`).join('');
+  const showMissionOffer = (m: Delivery | null): void => {
+    if (m === missionOffer) return;
+    missionOffer = m;
+    if (missionResult > 0) return;
+    missionCard.classList.toggle('on', m !== null);
+    if (m) missionCard.innerHTML = `<div class="rc-kind">Livraison</div><h2>📦 ${m.name}</h2><div class="rc-meta"><span>${(m.length / 1000).toFixed(1)} km</span><span>trajet libre</span><span>circulation normale</span></div><div class="rc-rule">Prenez le colis et déposez-le au point vert, par le chemin que vous voulez. Le chrono part dès que vous l’avez.</div><div class="rc-medals">${fmtMedals(m)}</div><div class="rc-records"><h4>Meilleurs temps</h4>${recordsHtml(`livraison|${m.name}`, false, whoAmI())}</div><div class="rc-keys"><kbd>Entrée</kbd> prendre le colis</div>`;
+  };
+  const acceptMission = (): boolean => {
+    if (!missionOffer || deliveries.current || race.active) return false;
+    deliveries.accept(missionOffer);
+    showMissionOffer(null);
+    return true;
+  };
   const offer = (track: Track, manual: boolean, mode: RaceMode = 'course'): void => {
     // Les adversaires se mettent à la hauteur de la voiture du joueur (modèle et améliorations) :
     // sinon une grosse voiture achetée tôt rend toutes les courses trop faciles.
@@ -615,6 +643,7 @@ async function boot(): Promise<void> {
   const startRace = (kind: 'course' | 'circuit' | 'epreuve'): void => {
     if (garage.open || !(race.phase === 'idle' || race.phase === 'finished')) return;
     garageScene.stopWalk();
+    deliveries.cancel();
     if (kind === 'epreuve') {
       // Y : propose une épreuve ; Y encore : l'épreuve suivante sur le même tracé.
       const same = card.shown && offered && offered.mode !== 'course' ? offered.track : null;
@@ -697,7 +726,8 @@ async function boot(): Promise<void> {
         hud.toggleHelp();
         break;
       case 'raceStart':
-        startRace('course');
+        if (missionResult > 0) { missionResult = 0.01; break; }
+        if (!acceptMission()) startRace('course');
         break;
       case 'circuitStart':
         startRace('circuit');
@@ -731,6 +761,8 @@ async function boot(): Promise<void> {
         } else if (card.shown) {
           card.hide();
           offered = null;
+        } else if (deliveries.current) {
+          deliveries.cancel();
         } else if (race.active) {
           const wasFinished = race.phase === 'finished';
           race.stop();
@@ -1025,7 +1057,7 @@ async function boot(): Promise<void> {
       // Dans les menus, inutile de dessiner la ville.
       meshes.group.visible = !menus;
       if (!menus) updateCityZones(meshes, camera.position.x, camera.position.z);
-      fullMap.update({ x: car.pos.x, z: car.pos.z, yaw: car.yaw, level: player.level, racing: race.active, allOpen: allDistrictsOpen });
+      fullMap.update({ x: car.pos.x, z: car.pos.z, yaw: car.yaw, level: player.level, racing: race.active, allOpen: allDistrictsOpen, parcels: deliveries.current ? [] : deliveries.offered.map((id) => { const m = deliveries.bank[id] as Delivery; return { x: m.from.x, z: m.from.z, name: m.name }; }), goal: deliveries.current ? { x: deliveries.current.to.x, z: deliveries.current.to.z, name: deliveries.current.name } : null });
       const blocked = gates.blockedNear(frameDt, car.pos.x, car.pos.z);
       if (blocked) hud.toast(`${blocked.name} : ouverture au niveau ${blocked.unlockLevel}`);
       // Mallettes et téléporteur ramassés
@@ -1051,6 +1083,42 @@ async function boot(): Promise<void> {
           offered = null;
         }
       }
+      // Livraisons : colis sur la carte, fiche quand on s'arrête dessus, chrono et arrivée.
+      {
+        const free = !race.active && titlePhase === 'fini';
+        const paused = garage.open || settings.open || fullMap.open;
+        if (free) deliveries.update(frameDt, car.pos.x, car.pos.z, !paused);
+        deliveryVisuals.update(frameDt, free);
+        showMissionOffer(free && !card.shown && car.speed < 9 ? deliveries.pickupAt(car.pos.x, car.pos.z) : null);
+        while (deliveries.events.length) {
+          const ev = deliveries.events.shift();
+          if (!ev) break;
+          if (ev.type === 'pris') { sound.coin(); hud.toast(`Colis pris : ${ev.mission.name}. Suivez la ligne verte.`); }
+          else if (ev.type === 'abandon') hud.toast('Livraison abandonnée');
+          else {
+            const me = whoAmI();
+            const key = `livraison|${ev.mission.name}`;
+            const r = submitRecord(key, { ...me, value: ev.time, date: new Date().toISOString().slice(0, 10) }, false);
+            const sum = player.finishRace(ev.place, false, false, 0);
+            refreshProgress();
+            sound.finish(ev.place === 1);
+            const medal = ['Médaille d’or !', 'Médaille d’argent', 'Médaille de bronze', 'Livré, mais trop tard pour une médaille'][ev.place - 1] as string;
+            missionCard.innerHTML = `<div class="rc-kind">Livraison — ${ev.mission.name}</div><h2>${medal}</h2><div class="mc-time">${fmtRecordTime(ev.time)}</div><div class="rc-reward"><b>+${sum.xp} XP</b> · +¥ ${sum.money.toLocaleString('fr-CA')}${sum.leveledUp ? ` · Niveau ${sum.level} !` : ''}</div>${r.rank === 1 && r.improved ? '<div class="rec-note">Nouveau record !</div>' : ''}<div class="rc-records"><h4>Meilleurs temps</h4>${recordsHtml(key, false, me)}</div><div class="rc-keys"><kbd>Entrée</kbd> fermer</div>`;
+            missionCard.classList.add('on');
+            missionResult = 9;
+          }
+        }
+        if (missionResult > 0) {
+          missionResult -= frameDt;
+          if (missionResult <= 0) { missionCard.classList.remove('on'); const again = missionOffer; missionOffer = null; showMissionOffer(again); }
+        }
+        const cur = deliveries.current;
+        const hudText = cur ? `<b>📦 ${cur.name}</b><span>${fmtRecordTime(deliveries.time).slice(0, -1)}</span><span>${Math.round(Math.hypot(cur.to.x - car.pos.x, cur.to.z - car.pos.z))} m</span><span class="m0">or ${fmtRecordTime(cur.medals[0]).slice(0, -1)}</span><em>Échap : abandonner</em>` : '';
+        if (missionHud.innerHTML !== hudText) { missionHud.innerHTML = hudText; missionHud.classList.toggle('on', cur !== null); }
+        minimap.parcels = free && !cur ? deliveries.offered.map((id) => (deliveries.bank[id] as Delivery).from) : [];
+        minimap.goal = free && cur ? cur.to : null;
+        minimap.guide = free && cur ? deliveries.guide : [];
+      }
       raceHud.update(frameDt, race);
       minimap.update(frameDt, car, race);
       hud.update(frameDt, car, CAR_SPEC.redlineRpm);
@@ -1069,9 +1137,9 @@ async function boot(): Promise<void> {
       perfTimer = (nowMs - perfStart) / 1000;
       if (perfTimer >= 0.5) {
         const info = renderer.info.render;
-        // Temps moyens par image : physique (tous les pas), logique du jeu, envoi du dessin ; puis la pire image de la demi-seconde.
+        // Avec « ?mesures » dans l'adresse — temps moyens par image : physique (tous les pas), logique du jeu, envoi du dessin ; puis la pire image de la demi-seconde.
         const per = (v: number): string => (v / frames).toFixed(1);
-        perfText = `${Math.round(frames / perfTimer)} i/s · ${info.drawCalls} appels · ${Math.round(info.triangles / 1000)}k tri<br>physique ${per(loop.stepMs)} · jeu ${per(loop.renderMs - drawMs)} · dessin ${per(drawMs)} ms · pire image ${Math.round(worstMs)} ms<br>${effects.count} particules${effects.density < 0.99 ? ` (réduites à ${Math.round(effects.density * 100)} %)` : ''}`;
+        perfText = `${Math.round(frames / perfTimer)} i/s · ${info.drawCalls} appels · ${Math.round(info.triangles / 1000)}k tri` + (!params.has('mesures') ? '' : `<br>physique ${per(loop.stepMs)} · jeu ${per(loop.renderMs - drawMs)} · dessin ${per(drawMs)} ms · pire image ${Math.round(worstMs)} ms<br>${effects.count} particules${effects.density < 0.99 ? ` (réduites à ${Math.round(effects.density * 100)} %)` : ''}`);
         loop.stepMs = 0; loop.renderMs = 0; loop.steps = 0; drawMs = 0; worstMs = 0;
         hud.setPerf(perfText);
         hud.setPad(input.gamepad.connected ? `🎮 Manette : ZR gaz · ZL frein · B/A drift · R/L rapports · X caméra · Y boîte · + A/B · − panneau · croix → musique` : '');
@@ -1082,7 +1150,7 @@ async function boot(): Promise<void> {
   });
 
   // Accès console pour le débogage : window.__jeu
-  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks, traffic, lampField, treeField, garageScene, effects, propField,
+  (window as unknown as Record<string, unknown>).__jeu = { car, city, store, phys, scene, camera, renderer, rig, input, meshes, colliderCount, race, player, garage, tracks, traffic, lampField, treeField, garageScene, effects, propField, deliveries,
     /** Éclairage de studio pour les planches de contrôle. */
     studio: (): void => {
       scene.add(new THREE.HemisphereLight(0xffffff, 0x8888aa, 3.2));

@@ -175,6 +175,11 @@ export class Minimap {
     }
   }
 
+  /** Livraisons : colis proposés, arrivée en cours et chemin conseillé (x, z, x, z…). */
+  parcels: { x: number; z: number }[] = [];
+  goal: { x: number; z: number } | null = null;
+  guide: number[] = [];
+
   update(dt: number, car: Vehicle, race: Race): void {
     this.timer -= dt;
     if (this.timer > 0) return;
@@ -217,6 +222,35 @@ export class Minimap {
         c.lineWidth = 1.5 / zoom;
         c.beginPath();
         c.arc(this.mx(m.x), this.mz(m.z), 6 / zoom, 0, Math.PI * 2);
+        c.fill();
+        c.stroke();
+      }
+    }
+    if (!race.active) {
+      // Livraison : chemin conseillé, colis à prendre (carrés ambre), arrivée (rond vert).
+      if (this.guide.length >= 4) {
+        c.strokeStyle = 'rgba(80, 255, 130, 0.85)';
+        c.lineWidth = 4 / zoom;
+        c.lineJoin = 'round';
+        c.beginPath();
+        for (let k = 0; k < this.guide.length; k += 2) {
+          const gx = this.mx(this.guide[k] as number), gz = this.mz(this.guide[k + 1] as number);
+          if (k === 0) c.moveTo(gx, gz); else c.lineTo(gx, gz);
+        }
+        c.stroke();
+      }
+      c.strokeStyle = '#0b0b16';
+      c.lineWidth = 1.5 / zoom;
+      for (const p of this.parcels) {
+        const s = 6 / zoom;
+        c.fillStyle = '#ffa31a';
+        c.fillRect(this.mx(p.x) - s, this.mz(p.z) - s, s * 2, s * 2);
+        c.strokeRect(this.mx(p.x) - s, this.mz(p.z) - s, s * 2, s * 2);
+      }
+      if (this.goal) {
+        c.fillStyle = '#40ff73';
+        c.beginPath();
+        c.arc(this.mx(this.goal.x), this.mz(this.goal.z), 8 / zoom, 0, Math.PI * 2);
         c.fill();
         c.stroke();
       }
